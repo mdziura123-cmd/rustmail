@@ -1,0 +1,46 @@
+/* Etap 3: redagowanie wiadomości, pasek akcji, powiadomienia */
+.reader-head { flex-wrap: wrap; }
+.tools.actions { flex-wrap: wrap; justify-content: flex-end; }
+.tools.actions .primary { padding: 5px 12px; font-size: 12px; box-shadow: none; }
+.tools .sep { width: 1px; background: var(--line); margin: 2px 2px; }
+.tools button[aria-pressed="true"] { background: var(--sel); }
+
+.compose { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.compose-head { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.compose-head h2 { font-size: 16px; font-weight: 650; }
+.status-text { font-size: 12px; color: var(--muted); }
+.confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 18px; background: var(--sel); border-bottom: 1px solid var(--line); }
+.fields { padding: 8px 18px 0; display: grid; gap: 6px; }
+.fields label { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.fields input { font: inherit; font-size: 14px; color: var(--ink); padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.fields > button { justify-self: start; font-size: 12px; }
+.compose > .note { padding: 6px 18px 0; }
+
+.editor { display: flex; flex-direction: column; flex: 1; min-height: 220px; margin: 10px 18px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 6px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.tb { padding: 3px 9px; border-radius: 6px; font-size: 12px; border: 1px solid transparent; }
+.tb:hover { background: var(--sel); border-color: var(--line); }
+.tb.b { font-weight: 700; } .tb.i { font-style: italic; } .tb.u { text-decoration: underline; }
+.linkbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px; border-bottom: 1px solid var(--line); }
+.linkbar input { flex: 1; min-width: 200px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--ink); }
+.editable { flex: 1; padding: 12px 14px; overflow-y: auto; outline: none; background: var(--panel); overflow-wrap: anywhere; }
+.editable blockquote { margin: 0 0 0 .8ex; border-left: 2px solid var(--line); padding-left: 1ex; color: var(--muted); }
+.editable a { color: var(--accent); }
+
+.att-list { list-style: none; margin: 0 18px 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.att-list li { display: flex; gap: 10px; align-items: center; padding: 4px 10px; border: 1px dashed var(--line); border-radius: 8px; font-size: 12px; }
+.compose-foot { display: flex; align-items: center; gap: 10px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }
+.compose-foot button:not(.primary) { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.compose-foot .small { padding: 4px 10px; }
+
+.toast { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--ink); color: var(--bg); border-radius: 10px; box-shadow: var(--shadow); z-index: 20; max-width: min(560px, 92vw); }
+.toast .small { border-color: color-mix(in srgb, var(--bg) 40%, transparent); color: var(--bg); }
+.toast .small:hover { background: color-mix(in srgb, var(--bg) 20%, transparent); }
+
+.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 30; padding: 16px; }
+.modal { background: var(--panel); border-radius: 12px; padding: 20px; width: min(520px, 100%); display: grid; gap: 12px; box-shadow: var(--shadow); }
+.modal h3 { font-size: 16px; }
+.modal .hint { font-size: 12px; color: var(--muted); }
+.modal textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); resize: vertical; }
+.modal-actions { display: flex; gap: 10px; }
+.modal-actions button:not(.primary) { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; }

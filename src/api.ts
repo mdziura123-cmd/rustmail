@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AppInfo, AuthStatus, ThreadDetail, ThreadPage, UpdateInfo, UpdateState,
+  AppInfo, AuthStatus, DraftContent, OutgoingMessage, SentInfo, ThreadAction, ThreadDetail,
+  ThreadPage, UpdateInfo, UpdateState,
 } from "./types";
 
 export const api = {
@@ -14,6 +15,13 @@ export const api = {
   listThreads: (folder: string, pageToken: string | null) =>
     invoke<ThreadPage>("list_threads", { folder, pageToken }),
   getThread: (id: string) => invoke<ThreadDetail>("get_thread", { id }),
+  sendMessage: (msg: OutgoingMessage) => invoke<SentInfo>("send_message", { msg }),
+  saveDraft: (msg: OutgoingMessage) => invoke<string>("save_draft", { msg }),
+  deleteDraft: (draftId: string) => invoke<void>("delete_draft", { draftId }),
+  openDraft: (threadId: string) => invoke<DraftContent>("open_draft", { threadId }),
+  threadAction: (id: string, action: ThreadAction) => invoke<void>("thread_action", { id, action }),
+  getSignature: () => invoke<string>("get_signature"),
+  setSignature: (text: string) => invoke<void>("set_signature", { text }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   installUpdate: () => invoke<string>("install_update"),
   rollbackUpdate: () => invoke<void>("rollback_update"),

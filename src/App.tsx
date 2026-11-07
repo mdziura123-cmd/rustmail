@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
 import { AuthPanel } from "./AuthPanel";
+import { BACKUP_KEY, Compose } from "./Compose";
+import { SignatureDialog } from "./SignatureDialog";
+import { buildForward, buildNew, buildReply, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull, fmtSize } from "./util";
-import type { AppInfo, AuthStatus, ThreadDetail, ThreadSummary } from "./types";
+import type { AppInfo, AuthStatus, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import "./styles.css";
+import "./compose.css";
 
 type Theme = "auto" | "light" | "dark";
 const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate" };
@@ -18,6 +22,16 @@ function load(key: string, fallback: string): string {
 function save(key: string, value: string) {
   try { localStorage.setItem(key, value); } catch { /* pamięć niedostępna – ignorujemy */ }
 }
+const INVERSE: Partial<Record<ThreadAction, ThreadAction>> = {
+  archive: "unarchive", unarchive: "archive", spam: "notspam", notspam: "spam", trash: "untrash", untrash: "trash",
+};
+const ACTION_DONE: Partial<Record<ThreadAction, string>> = {
+  archive: "Zarchiwizowano konwersację.", unarchive: "Przeniesiono do skrzynki odbiorczej.",
+  spam: "Oznaczono jako spam.", notspam: "Oznaczono jako niebędące spamem.",
+  trash: "Przeniesiono do kosza.", untrash: "Przywrócono z kosza.",
+};
+interface ComposeState { key: number; init: ComposeInit }
+interface Toast { key: number; text: string; undo?: () => void }
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 function Icon({ d }: { d: string }) {
@@ -67,6 +81,13 @@ export default function App() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [autoUpdate, setAutoUpdate] = useState(() => load(LS.auto, "1") === "1");
   const [confirmRollback, setConfirmRollback] = useState(false);
+  const [compose, setCompose] = useState<ComposeState | null>(null);
+  const [signature, setSignature] = useState("");
+  const [sigOpen, setSigOpen] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [restore, setRestore] = useState<string | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
+  const composeKey = useRef(0);
   const updater = useUpdater(autoUpdate);
   const left = useResizer(LS.left, 240, 180, 360);
   const mid = useResizer(LS.mid, 360, 260, 560);
@@ -91,7 +112,7 @@ export default function App() {
       setAuth(await api.authStatus());
     } catch (e) {
       setAuthError(errText(e));
-      setAuth({ configured: false, email: null });
+      setAuth({ configured: false, builtin: false, email: null });
     }
   }, []);
   useEffect(() => { void refreshAuth(); }, [refreshAuth]);
@@ -122,21 +143,143 @@ export default function App() {
     void loadList(folder, null, false);
   }, [email, folder, loadList]);
 
-  const openThread = async (t: ThreadSummary) => {
+  const needsReauth = Boolean(auth?.needsReauth);
+
+  const showToast = useCallback((text: string, undo?: () => void) => {
+    window.clearTimeout(toastTimer.current);
+    setToast({ key: Date.now(), text, undo });
+    toastTimer.current = window.setTimeout(() => setToast(null), 9000);
+  }, []);
+
+  const loadDetail = useCallback(async (id: string) => {
     const my = ++threadReq.current;
-    setOpenId(t.id);
+    setOpenId(id);
     setDetail(null);
     setDetailError(null);
     setDetailLoading(true);
     setCollapsed(new Set());
     try {
-      const d = await api.getThread(t.id);
-      if (my === threadReq.current) setDetail(d);
+      const d = await api.getThread(id);
+      if (my !== threadReq.current) return;
+      setDetail(d);
+      if (d.unread && !needsReauth) {
+        // jak w Outlooku: otwarcie konwersacji oznacza ją jako przeczytaną
+        api.threadAction(id, "read").then(() => {
+          setDetail((cur) => (cur && cur.id === id ? { ...cur, unread: false } : cur));
+          setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, unread: false } : t)));
+        }).catch(() => { /* brak uprawnień lub sieci – konwersacja zostaje nieprzeczytana */ });
+      }
     } catch (e) {
       if (my === threadReq.current) setDetailError(errText(e));
     } finally {
       if (my === threadReq.current) setDetailLoading(false);
     }
+  }, [needsReauth]);
+
+  const startCompose = (init: ComposeInit) => {
+    if (compose) {
+      showToast("Najpierw zapisz lub zamknij redagowaną wiadomość.");
+      return;
+    }
+    composeKey.current += 1;
+    setCompose({ key: composeKey.current, init });
+  };
+
+  const openThread = async (t: ThreadSummary) => {
+    if (compose) {
+      showToast("Najpierw zapisz lub zamknij redagowaną wiadomość.");
+      return;
+    }
+    if (folder === "drafts") {
+      setOpenId(t.id);
+      setDetail(null);
+      try {
+        const d = await api.openDraft(t.id);
+        startCompose({
+          mode: "draft", to: d.to, cc: d.cc, bcc: d.bcc, subject: d.subject, html: d.html,
+          threadId: t.id, inReplyTo: d.inReplyTo || null, references: d.references || null, draftId: d.draftId,
+        });
+      } catch (e) {
+        showToast(errText(e));
+      }
+      return;
+    }
+    await loadDetail(t.id);
+  };
+
+  useEffect(() => {
+    if (!email) return;
+    api.getSignature().then(setSignature).catch(() => setSignature(""));
+    try { if (localStorage.getItem(BACKUP_KEY)) setRestore(localStorage.getItem(BACKUP_KEY)); } catch { /* ignorujemy */ }
+  }, [email]);
+
+  const restoreBackup = () => {
+    try {
+      const b = JSON.parse(restore ?? "") as { init: ComposeInit; to: string; cc: string; bcc: string; subject: string; html: string };
+      startCompose({ ...b.init, to: b.to, cc: b.cc, bcc: b.bcc, subject: b.subject, html: b.html });
+    } catch { showToast("Nie udało się odczytać kopii wiadomości."); }
+    try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignorujemy */ }
+    setRestore(null);
+  };
+  const dropBackup = () => {
+    try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignorujemy */ }
+    setRestore(null);
+  };
+
+  const reply = (all: boolean) => {
+    if (!detail || !email) return;
+    const init = buildReply(detail.messages, detail.subject, email, all, signature, detail.id, fmtFull);
+    if (init) startCompose(init);
+  };
+  const forward = () => {
+    if (!detail || !email) return;
+    const init = buildForward(detail.messages, detail.subject, email, signature, fmtFull);
+    if (init) startCompose(init);
+  };
+
+  const runAction = async (action: ThreadAction) => {
+    if (!detail) return;
+    const id = detail.id;
+    try {
+      await api.threadAction(id, action);
+    } catch (e) {
+      showToast(errText(e));
+      return;
+    }
+    const inverse = INVERSE[action];
+    if (inverse) {
+      setThreads((prev) => prev.filter((t) => t.id !== id));
+      setOpenId(null);
+      setDetail(null);
+      showToast(ACTION_DONE[action] ?? "Gotowe.", () => {
+        api.threadAction(id, inverse)
+          .then(() => { setToast(null); void loadList(folder, null, false); })
+          .catch((e) => showToast("Nie udało się cofnąć: " + errText(e)));
+      });
+      return;
+    }
+    const patch = {
+      unread: action === "unread" ? true : action === "read" ? false : undefined,
+      starred: action === "star" ? true : action === "unstar" ? false : undefined,
+    };
+    setDetail((d) => (d ? {
+      ...d, unread: patch.unread ?? d.unread, starred: patch.starred ?? d.starred,
+    } : d));
+    setThreads((prev) => prev.map((t) => (t.id === id ? {
+      ...t, unread: patch.unread ?? t.unread, starred: patch.starred ?? t.starred,
+    } : t)));
+  };
+
+  const onSent = (info: { threadId: string }) => {
+    setCompose(null);
+    showToast("Wiadomość wysłana.");
+    void loadList(folder, null, false);
+    if (info.threadId && info.threadId === openId) void loadDetail(info.threadId);
+  };
+  const onComposeClosed = (draftSaved: boolean) => {
+    setCompose(null);
+    if (draftSaved) showToast("Wersja robocza zapisana.");
+    if (folder === "drafts" || draftSaved) void loadList(folder, null, false);
   };
 
   const saveClient = async (id: string, secret: string) => {
@@ -180,7 +323,9 @@ export default function App() {
             </svg>
             <span>RustMail</span>
           </div>
-          <button className="primary" disabled title="Redagowanie pojawi się w etapie 3">Nowa wiadomość</button>
+          <button className="primary" disabled={!email || needsReauth}
+            title={needsReauth ? "Zaloguj się ponownie, aby wysyłać wiadomości" : undefined}
+            onClick={() => startCompose(buildNew(signature))}>Nowa wiadomość</button>
           <nav>
             {FOLDERS.map((f) => (
               <button key={f.id} className={"folder" + (f.id === folder ? " active" : "")}
@@ -252,7 +397,25 @@ export default function App() {
         <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
 
         <main className="reader" aria-label="Konwersacja">
-          {!auth ? (
+          {email && needsReauth && (
+            <div className="banner warn" role="alert">
+              <span>Aby wysyłać wiadomości i zarządzać pocztą, zaloguj się ponownie i zaakceptuj dostęp do poczty.</span>
+              <button className="small solid" disabled={signingIn} onClick={() => void signIn()}>
+                {signingIn ? "Czekam na przeglądarkę…" : "Zaloguj ponownie"}
+              </button>
+            </div>
+          )}
+          {email && restore && !compose && (
+            <div className="banner" role="status">
+              <span>Znaleziono niezapisaną wiadomość z poprzedniej sesji.</span>
+              <button className="small solid" onClick={restoreBackup}>Przywróć</button>
+              <button className="small" onClick={dropBackup}>Usuń</button>
+            </div>
+          )}
+          {authError && email && <p className="error pad" role="alert">{authError}</p>}
+          {email && compose ? (
+            <Compose key={compose.key} init={compose.init} onSent={onSent} onClose={onComposeClosed} />
+          ) : !auth ? (
             <div className="empty"><p>Wczytywanie…</p></div>
           ) : !email ? (
             <AuthPanel auth={auth} error={authError} busy={signingIn}
@@ -267,7 +430,28 @@ export default function App() {
             <>
               <header className="reader-head">
                 <h2>{detail.subject}</h2>
-                <div className="tools">
+                <div className="tools actions" role="toolbar" aria-label="Akcje na konwersacji">
+                  <button className="primary" disabled={needsReauth} onClick={() => reply(false)}>Odpowiedz</button>
+                  <button disabled={needsReauth} onClick={() => reply(true)}>Odpowiedz wszystkim</button>
+                  <button disabled={needsReauth} onClick={forward}>Przekaż dalej</button>
+                  <span className="sep" />
+                  {detail.inInbox && <button disabled={needsReauth} onClick={() => void runAction("archive")}>Archiwizuj</button>}
+                  {!detail.inInbox && !detail.inTrash && !detail.inSpam && (
+                    <button disabled={needsReauth} onClick={() => void runAction("unarchive")}>Do skrzynki</button>
+                  )}
+                  {detail.inSpam
+                    ? <button disabled={needsReauth} onClick={() => void runAction("notspam")}>To nie spam</button>
+                    : <button disabled={needsReauth} onClick={() => void runAction("spam")}>Spam</button>}
+                  {detail.inTrash
+                    ? <button disabled={needsReauth} onClick={() => void runAction("untrash")}>Przywróć z kosza</button>
+                    : <button disabled={needsReauth} onClick={() => void runAction("trash")}>Usuń</button>}
+                  <button disabled={needsReauth} onClick={() => void runAction(detail.unread ? "read" : "unread")}>
+                    {detail.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}
+                  </button>
+                  <button disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
+                    {detail.starred ? "★ Usuń gwiazdkę" : "☆ Gwiazdka"}
+                  </button>
+                  <span className="sep" />
                   <button onClick={() => setCollapsed(new Set())}>Rozwiń wszystkie</button>
                   <button onClick={() => setCollapsed(new Set(detail.messages.map((m) => m.id)))}>Zwiń wszystkie</button>
                 </div>
@@ -307,6 +491,7 @@ export default function App() {
         <span>{info ? `${info.name} ${info.version}${info.appimage ? " · AppImage" : ""}` : "Tryb podglądu w przeglądarce"}</span>
         <span className="pill">{email ?? "brak konta"}</span>
         {email && <button className="linklike plain" onClick={() => void signOut()}>Wyloguj</button>}
+        {email && <button className="linklike plain" onClick={() => setSigOpen(true)}>Podpis</button>}
         <span className="grow" />
         <label className="check">
           <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} />
@@ -323,6 +508,18 @@ export default function App() {
           )
         )}
       </footer>
+
+      {toast && (
+        <div className="toast" role="status" key={toast.key}>
+          <span>{toast.text}</span>
+          {toast.undo && <button className="small" onClick={toast.undo}>Cofnij</button>}
+          <button className="small" aria-label="Zamknij powiadomienie" onClick={() => setToast(null)}>✕</button>
+        </div>
+      )}
+      {sigOpen && (
+        <SignatureDialog initial={signature} onClose={() => setSigOpen(false)}
+          onSaved={(t) => { setSignature(t); setSigOpen(false); showToast("Podpis zapisany."); }} />
+      )}
     </div>
   );
 }

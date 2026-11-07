@@ -1,62 +1,45 @@
-# RustMail – etap 2
+# RustMail
 
-Klient Gmail dla Linuksa: Tauri 2 + Rust + React.
+Klient Gmail dla Linuksa: Tauri 2 + Rust + React. Układ trzech paneli (foldery, lista, widok dymkowy),
+motyw jasny/ciemny/systemowy, minimalne uprawnienia Tauri, integracja z Gmail API i skrypt budujący AppImage.
 
-## Co działa w tym etapie
+## Budowanie (Bazzite, bez zmian w systemie hosta)
 
-- Układ trzech paneli, motyw jasny/ciemny/systemowy, regulowana szerokość paneli.
-- Logowanie przez Google (OAuth 2.0 + PKCE, przekierowanie na 127.0.0.1), tokeny w KDE Wallet / GNOME Keyring.
-- Foldery Gmail (Odebrane, Nieprzeczytane, Wysłane, Wersje robocze, Spam, Kosz, Archiwum, Gwiazdka, Ważne) – tylko odczyt.
-- Konwersacje Gmail (wątki) w widoku dymkowym, rozwijanie i zwijanie, strony po 20 wątków.
-- Treść pokazywana wyłącznie jako zwykły tekst (HTML jest zamieniany na tekst). Bezpieczne renderowanie HTML: etap 5.
-- Samoaktualizacja z wydań GitHub (opis niżej).
+```bash
+./scripts/build-appimage.sh
+```
 
-## Czego jeszcze nie ma
-
-Wysyłanie i redagowanie, oznaczanie i archiwizacja, lokalna baza i tryb offline, synchronizacja przyrostowa,
-filtry bezpieczeństwa, załączniki (widać tylko nazwy), powiadomienia, folder „Podejrzane” (jest pusty).
-
-## Konfiguracja Gmaila
-
-Zobacz `docs/GOOGLE_OAUTH.md`.
-
-## Budowanie
-
-GitHub Actions buduje plik po każdej zmianie w gałęzi `main` (zakładka **Actions → artefakt**).
-Alternatywnie lokalnie: `./scripts/build-appimage.sh` (distrobox, nie zmienia systemu hosta).
+Skrypt tworzy kontener distrobox z Ubuntu 22.04, instaluje w nim Rust, Node i WebKitGTK,
+uruchamia `tsc` oraz `cargo test`, a potem buduje AppImage. Pierwszy build trwa kilkanaście minut.
+Wynik: `dist-release/RustMail-x86_64.AppImage` (+ `.sha256`, `VERSION.txt`).
 
 ## Uruchomienie
 
 ```bash
-chmod +x RustMail-x86_64.AppImage
-./RustMail-x86_64.AppImage
+chmod +x dist-release/RustMail-x86_64.AppImage
+./dist-release/RustMail-x86_64.AppImage
 # bez FUSE:
-./RustMail-x86_64.AppImage --appimage-extract-and-run
+./dist-release/RustMail-x86_64.AppImage --appimage-extract-and-run
 ```
 
-Jeśli okno jest puste: `GDK_BACKEND=x11 ./RustMail-x86_64.AppImage`.
+Jeśli okno jest puste, spróbuj `WEBKIT_DISABLE_DMABUF_RENDERER=0` lub `GDK_BACKEND=x11`.
 
-## Aktualizacje automatyczne
+## Stan projektu (wersja 0.3.0, etap 3)
 
-Aplikacja co 6 godzin (i 8 sekund po starcie) pyta GitHub o najnowsze wydanie. Gdy jest nowsze, pokazuje baner
-z pytaniem „Zaktualizować?”. Dopiero po kliknięciu **Zaktualizuj teraz** pobiera plik, sprawdza sumę SHA-256
-z wydania, zachowuje poprzednią wersję (`…AppImage.previous`) i podmienia plik. Potem proponuje ponowne uruchomienie.
-W pasku stanu można wyłączyć automatyczne sprawdzanie, sprawdzić ręcznie albo przywrócić poprzednią wersję.
+Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google w przeglądarce, odczyt wątków i widok dymkowy,
+samoaktualizacja z GitHuba oraz – nowe w etapie 3 – nowa wiadomość, odpowiedz, odpowiedz wszystkim, przekaż dalej
+(tekst sformatowany, DW/UDW, załączniki do 20 MB), wersje robocze (zapis ręczny, automatyczny co 20 s i kopia lokalna
+na wypadek awarii), podpis, oraz akcje na konwersacji: archiwizuj, spam, kosz, przeczytana/nieprzeczytana, gwiazdka,
+z możliwością cofnięcia.
 
-Wymagania:
-- repozytorium musi być **publiczne** (prywatne wymagałoby tokenu w aplikacji),
-- nowa wersja to **wydanie** (Releases) z tagiem `vX.Y.Z`; workflow sam ustawia wersję z tagu i dołącza
-  `RustMail-x86_64.AppImage` oraz `RustMail-x86_64.AppImage.sha256`,
-- aktualizacja działa tylko po uruchomieniu z pliku AppImage (nie z rozpakowanego katalogu),
-- katalog z plikiem AppImage musi być zapisywalny.
-
-Jak wydać nową wersję: GitHub → **Releases → Create a new release** → pole tagu: wpisz np. `v0.2.1` i **Create new tag**
-→ **Publish release**. Workflow zbuduje aplikację i dołączy pliki (kilkanaście minut).
-
-Ograniczenie: suma SHA-256 pochodzi z tego samego wydania, więc chroni przed uszkodzonym pobraniem, ale nie przed
-przejęciem konta GitHub. Podpisy kryptograficzne wydań można dodać później.
+Ograniczenia etapu 3: podpis jest lokalny (nie synchronizuje się z Gmailem), brak podpowiedzi adresów (to wymaga
+osobnego uprawnienia do kontaktów), przekazywanie nie dołącza załączników oryginału, brak rozmiaru czcionki i obrazów
+w treści, brak trwałego usuwania z kosza, brak operacji grupowych. Nadal brak: bezpieczne renderowanie HTML,
+skanowanie załączników, wyszukiwanie, tryb offline, powiadomienia (kolejne etapy).
 
 ## Niezweryfikowane
 
-Kod nie był kompilowany ani uruchamiany w środowisku, w którym powstał (brak sieci), więc pierwszy build może wymagać poprawek.
-Logowanie, pobieranie poczty i samoaktualizacja nie były testowane na prawdziwym koncie ani na Bazzite.
+Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `compose.rs` i
+`signature.rs` oraz logika odpowiedzi (`replyLogic.ts`) zostały uruchomione i przetestowane osobno; pozostały kod
+(komunikacja z Gmailem, polecenia Tauri, komponenty React) zweryfikowano tylko składniowo i typowo, więc pierwszy build
+na GitHubie może wymagać drobnych poprawek. Wysyłanie i zapis wersji roboczych nie były testowane na prawdziwym koncie.

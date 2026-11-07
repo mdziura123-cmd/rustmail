@@ -9,7 +9,7 @@ Nazwy w konsoli Google bywają zmieniane, więc jeśli jakiejś pozycji nie widz
 4. **Ekran zgody OAuth** (w nowszej konsoli: **Google Auth Platform**):
    - typ użytkowników: **Zewnętrzni**,
    - nazwa aplikacji: RustMail, e-mail pomocy i kontaktowy: Twój adres,
-   - zakresy (Data Access): dodaj `https://www.googleapis.com/auth/gmail.readonly`,
+   - zakresy (Data Access): dodaj `https://www.googleapis.com/auth/gmail.modify` (od wersji 0.3.0; wcześniejsze wersje używały `gmail.readonly`),
    - użytkownicy testowi (Audience): dodaj swój adres Gmail.
 5. **Dane logowania → Utwórz dane logowania → Identyfikator klienta OAuth →** typ aplikacji **Aplikacja komputerowa**.
    Skopiuj **Identyfikator klienta** i **Klucz tajny klienta**.
@@ -23,8 +23,9 @@ Nazwy w konsoli Google bywają zmieniane, więc jeśli jakiejś pozycji nie widz
 - W trybie **testowym** Google unieważnia token po **7 dniach** i trzeba zalogować się ponownie. Aby tego uniknąć,
   w ekranie zgody kliknij **Opublikuj aplikację** (status „W produkcji”). Dla użytku osobistego weryfikacja nie jest potrzebna,
   zostanie tylko ostrzeżenie z kroku 7.
-- Etap 2 prosi wyłącznie o zakres **tylko do odczytu**. Wysyłanie, archiwizacja i etykiety (etapy 3+) będą wymagały
-  szerszego zakresu, więc wtedy trzeba będzie zalogować się ponownie.
+- Od wersji 0.3.0 (etap 3) RustMail prosi o zakres `gmail.modify`: czytanie, wysyłanie, wersje robocze, etykiety i kosz.
+  Zakres **nie pozwala na trwałe usunięcie** wiadomości z Gmaila (usuwanie = przeniesienie do kosza).
+  Po aktualizacji ze starszej wersji dodaj ten zakres w Data Access i kliknij w aplikacji „Zaloguj ponownie”.
 - Klucz tajny klienta i token odświeżania trafiają do systemowego magazynu haseł (KDE Wallet / GNOME Keyring),
   nigdy do plików. Hasło do Google nigdy nie jest widoczne dla aplikacji.
 - Odwołanie dostępu: przycisk **Wyloguj** w RustMail albo https://myaccount.google.com/permissions.

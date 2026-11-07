@@ -1,7 +1,9 @@
 mod auth;
 mod commands;
+mod compose;
 mod gmail;
 mod secrets;
+mod signature;
 mod update;
 
 pub fn run() {
@@ -23,6 +25,13 @@ pub fn run() {
             commands::sign_out,
             commands::list_threads,
             commands::get_thread,
+            commands::send_message,
+            commands::save_draft,
+            commands::delete_draft,
+            commands::open_draft,
+            commands::thread_action,
+            commands::get_signature,
+            commands::set_signature,
             update::check_update,
             update::install_update,
             update::rollback_update,

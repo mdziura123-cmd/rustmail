@@ -117,13 +117,25 @@ pub struct MessageView {
     pub body: String,
     pub html_only: bool,
     pub attachments: Vec<AttachmentInfo>,
+    pub to: String,
+    pub cc: String,
+    pub reply_to: String,
+    pub message_id: String,
+    pub references: String,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadDetail {
     pub id: String,
     pub subject: String,
     pub messages: Vec<MessageView>,
+    pub unread: bool,
+    pub starred: bool,
+    pub in_inbox: bool,
+    pub in_spam: bool,
+    pub in_trash: bool,
+    pub is_draft: bool,
 }
 
 // ---------- Mapowanie folderów na etykiety Gmail ----------
@@ -283,7 +295,288 @@ pub async fn get_thread(state: &AppState, id: &str, my_email: &str) -> Result<Th
     let raw = fetch_thread(&state.http, &token, id, "full").await?;
     let subject = subject_of(&raw);
     let messages = raw.messages.iter().map(|m| message_view(m, my_email)).collect();
-    Ok(ThreadDetail { id: raw.id, subject, messages })
+    let has = |l: &str| raw.messages.iter().any(|m| m.label_ids.iter().any(|x| x == l));
+    Ok(ThreadDetail {
+        unread: has("UNREAD"),
+        starred: has("STARRED"),
+        in_inbox: has("INBOX"),
+        in_spam: has("SPAM"),
+        in_trash: has("TRASH"),
+        is_draft: has("DRAFT"),
+        id: raw.id.clone(),
+        subject,
+        messages,
+    })
+}
+
+// ---------- Zapis: wysyłanie, wersje robocze, akcje na wątkach ----------
+
+const UPLOAD: &str = "https://gmail.googleapis.com/upload/gmail/v1/users/me";
+const REAUTH_MSG: &str =
+    "Brak uprawnień do wysyłania i zarządzania pocztą. Zaloguj się ponownie i zaakceptuj dostęp do poczty.";
+
+fn check_id(id: &str) -> Result<(), String> {
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err("Niepoprawny identyfikator".to_string());
+    }
+    Ok(())
+}
+
+/// Zamienia odpowiedź HTTP na wynik; rozpoznaje brak uprawnień (stary token tylko do odczytu).
+async fn read_response(resp: reqwest::Response) -> Result<String, String> {
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    if status.as_u16() == 401 {
+        return Err("Autoryzacja Gmail wygasła. Zaloguj się ponownie.".to_string());
+    }
+    if status.as_u16() == 403 && (text.contains("insufficient") || text.contains("SCOPE") || text.contains("scope")) {
+        return Err(REAUTH_MSG.to_string());
+    }
+    if !status.is_success() {
+        let short: String = text.chars().take(300).collect();
+        return Err(format!("Gmail zwrócił błąd {status}: {short}"));
+    }
+    Ok(text)
+}
+
+/// Ciało zapytania multipart/related: część JSON z metadanymi + surowa wiadomość (message/rfc822).
+pub fn multipart_related(boundary: &str, metadata_json: &str, rfc822: &[u8]) -> Vec<u8> {
+    let mut b: Vec<u8> = Vec::with_capacity(rfc822.len() + metadata_json.len() + 256);
+    b.extend_from_slice(
+        format!("--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata_json}\r\n--{boundary}\r\nContent-Type: message/rfc822\r\n\r\n")
+            .as_bytes(),
+    );
+    b.extend_from_slice(rfc822);
+    b.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    b
+}
+
+async fn upload(
+    state: &AppState,
+    method: reqwest::Method,
+    path: &str,
+    metadata_json: &str,
+    rfc822: &[u8],
+) -> Result<String, String> {
+    let token = access_token(state).await?;
+    let boundary = format!("rustmail{}", crate::auth::random_urlsafe(12).replace(['-', '_'], "x"));
+    let body = multipart_related(&boundary, metadata_json, rfc822);
+    let resp = state
+        .http
+        .request(method, format!("{UPLOAD}/{path}?uploadType=multipart"))
+        .bearer_auth(token)
+        .header("Content-Type", format!("multipart/related; boundary={boundary}"))
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("Brak połączenia z Gmail: {e}"))?;
+    read_response(resp).await
+}
+
+async fn post_json(state: &AppState, path: &str, body: &serde_json::Value) -> Result<String, String> {
+    let token = access_token(state).await?;
+    let resp = state
+        .http
+        .post(format!("{API}/{path}"))
+        .bearer_auth(token)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("Brak połączenia z Gmail: {e}"))?;
+    read_response(resp).await
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SentInfo {
+    pub id: String,
+    #[serde(default, rename(deserialize = "threadId"))]
+    pub thread_id: String,
+}
+
+#[derive(Deserialize)]
+struct DraftResp {
+    id: String,
+}
+
+fn thread_meta(thread_id: Option<&str>) -> Result<serde_json::Value, String> {
+    match thread_id {
+        Some(t) if !t.is_empty() => {
+            check_id(t)?;
+            Ok(serde_json::json!({ "threadId": t }))
+        }
+        _ => Ok(serde_json::json!({})),
+    }
+}
+
+/// Wysyła gotową wiadomość. Nie ponawiamy automatycznie – ponowienie mogłoby wysłać duplikat.
+pub async fn send_raw(state: &AppState, rfc822: &[u8], thread_id: Option<&str>) -> Result<SentInfo, String> {
+    let meta = thread_meta(thread_id)?.to_string();
+    let text = upload(state, reqwest::Method::POST, "messages/send", &meta, rfc822).await?;
+    serde_json::from_str(&text).map_err(|e| format!("Nieoczekiwana odpowiedź Gmail: {e}"))
+}
+
+/// Tworzy (draft_id = None) lub nadpisuje wersję roboczą. Zwraca identyfikator wersji roboczej.
+pub async fn save_draft(
+    state: &AppState,
+    draft_id: Option<&str>,
+    rfc822: &[u8],
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    let meta = serde_json::json!({ "message": thread_meta(thread_id)? }).to_string();
+    let text = match draft_id {
+        Some(id) if !id.is_empty() => {
+            check_id(id)?;
+            upload(state, reqwest::Method::PUT, &format!("drafts/{id}"), &meta, rfc822).await?
+        }
+        _ => upload(state, reqwest::Method::POST, "drafts", &meta, rfc822).await?,
+    };
+    let d: DraftResp = serde_json::from_str(&text).map_err(|e| format!("Nieoczekiwana odpowiedź Gmail: {e}"))?;
+    Ok(d.id)
+}
+
+pub async fn send_draft(state: &AppState, draft_id: &str) -> Result<SentInfo, String> {
+    check_id(draft_id)?;
+    let text = post_json(state, "drafts/send", &serde_json::json!({ "id": draft_id })).await?;
+    serde_json::from_str(&text).map_err(|e| format!("Nieoczekiwana odpowiedź Gmail: {e}"))
+}
+
+pub async fn delete_draft(state: &AppState, draft_id: &str) -> Result<(), String> {
+    check_id(draft_id)?;
+    let token = access_token(state).await?;
+    let resp = state
+        .http
+        .delete(format!("{API}/drafts/{draft_id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("Brak połączenia z Gmail: {e}"))?;
+    read_response(resp).await.map(|_| ())
+}
+
+/// Etykiety do dodania i usunięcia dla danej akcji na wątku. `None` = akcja nieznana lub specjalna.
+pub fn action_labels(action: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
+    Some(match action {
+        "archive" => (&[], &["INBOX"]),
+        "unarchive" => (&["INBOX"], &[]),
+        "read" => (&[], &["UNREAD"]),
+        "unread" => (&["UNREAD"], &[]),
+        "star" => (&["STARRED"], &[]),
+        "unstar" => (&[], &["STARRED"]),
+        "spam" => (&["SPAM"], &["INBOX"]),
+        "notspam" => (&["INBOX"], &["SPAM"]),
+        _ => return None,
+    })
+}
+
+pub async fn thread_action(state: &AppState, id: &str, action: &str) -> Result<(), String> {
+    check_id(id)?;
+    if action == "trash" || action == "untrash" {
+        post_json(state, &format!("threads/{id}/{action}"), &serde_json::json!({})).await?;
+        return Ok(());
+    }
+    let (add, remove) = action_labels(action).ok_or_else(|| format!("Nieznana akcja: {action}"))?;
+    post_json(
+        state,
+        &format!("threads/{id}/modify"),
+        &serde_json::json!({ "addLabelIds": add, "removeLabelIds": remove }),
+    )
+    .await?;
+    Ok(())
+}
+
+// ---------- Odczyt wersji roboczej do dalszej edycji ----------
+
+#[derive(Deserialize)]
+struct DraftList {
+    #[serde(default)]
+    drafts: Vec<DraftRef>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DraftRef {
+    id: String,
+    message: Option<DraftMsgRef>,
+}
+
+#[derive(Deserialize)]
+struct DraftMsgRef {
+    #[serde(default, rename = "threadId")]
+    thread_id: String,
+}
+
+#[derive(Deserialize)]
+struct RawDraft {
+    id: String,
+    message: Option<RawMessage>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftContent {
+    pub draft_id: String,
+    pub to: String,
+    pub cc: String,
+    pub bcc: String,
+    pub subject: String,
+    pub html: String,
+    pub in_reply_to: String,
+    pub references: String,
+}
+
+pub fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// Zamienia zwykły tekst na prosty HTML (akapity i łamanie linii) – z zachowaniem bezpieczeństwa.
+pub fn text_to_html(text: &str) -> String {
+    html_escape(text.trim_end()).replace("\r\n", "\n").replace('\n', "<br>")
+}
+
+pub async fn open_draft(state: &AppState, thread_id: &str) -> Result<DraftContent, String> {
+    check_id(thread_id)?;
+    let token = access_token(state).await?;
+    let mut page: Option<String> = None;
+    let mut found: Option<String> = None;
+    for _ in 0..5 {
+        let mut params: Vec<(&str, &str)> = vec![("maxResults", "100")];
+        if let Some(p) = page.as_deref() {
+            params.push(("pageToken", p));
+        }
+        let list: DraftList = get_json(&state.http, &token, "drafts", &params).await?;
+        if let Some(d) = list
+            .drafts
+            .iter()
+            .find(|d| d.message.as_ref().map_or(false, |m| m.thread_id == thread_id))
+        {
+            found = Some(d.id.clone());
+            break;
+        }
+        match list.next_page_token {
+            Some(n) => page = Some(n),
+            None => break,
+        }
+    }
+    let draft_id = found.ok_or("Nie znaleziono wersji roboczej tej konwersacji.")?;
+    let raw: RawDraft = get_json(&state.http, &token, &format!("drafts/{draft_id}"), &[("format", "full")]).await?;
+    let msg = raw.message.ok_or("Wersja robocza jest pusta.")?;
+    let payload = msg.payload.as_ref();
+    let html = match payload.and_then(|p| find_part(p, "text/html")) {
+        Some(part) => decode_part(part),
+        None => text_to_html(&payload.and_then(|p| find_part(p, "text/plain")).map(decode_part).unwrap_or_default()),
+    };
+    Ok(DraftContent {
+        draft_id: raw.id,
+        to: hdr(&msg, "To"),
+        cc: hdr(&msg, "Cc"),
+        bcc: hdr(&msg, "Bcc"),
+        subject: hdr(&msg, "Subject"),
+        html,
+        in_reply_to: hdr(&msg, "In-Reply-To"),
+        references: hdr(&msg, "References"),
+    })
 }
 
 // ---------- Przetwarzanie danych ----------
@@ -355,6 +648,11 @@ fn summarize(t: &RawThread, my_email: &str) -> ThreadSummary {
     }
 }
 
+/// Nagłówek (zdekodowany z MIME), pusty gdy go nie ma.
+fn hdr(m: &RawMessage, name: &str) -> String {
+    m.payload.as_ref().and_then(|p| header(p, name)).map(decode_mime_words).unwrap_or_default()
+}
+
 fn message_view(m: &RawMessage, my_email: &str) -> MessageView {
     let (name, email) = from_of(m);
     let mine = is_mine(m, my_email);
@@ -378,6 +676,11 @@ fn message_view(m: &RawMessage, my_email: &str) -> MessageView {
         body: body.chars().take(100_000).collect(),
         html_only,
         attachments,
+        to: hdr(m, "To"),
+        cc: hdr(m, "Cc"),
+        reply_to: hdr(m, "Reply-To"),
+        message_id: m.payload.as_ref().and_then(|p| header(p, "Message-ID").or_else(|| header(p, "Message-Id"))).unwrap_or("").trim().to_string(),
+        references: hdr(m, "References"),
     }
 }
 
@@ -576,6 +879,35 @@ pub fn decode_mime_words(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multipart_body_has_two_parts_and_closing_boundary() {
+        let b = String::from_utf8(multipart_related("BB", "{\"threadId\":\"abc\"}", b"Subject: x\r\n\r\nhi")).unwrap();
+        assert!(b.starts_with("--BB\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{\"threadId\":\"abc\"}\r\n--BB\r\nContent-Type: message/rfc822\r\n\r\nSubject: x"));
+        assert!(b.ends_with("hi\r\n--BB--\r\n"));
+    }
+
+    #[test]
+    fn thread_actions_map_to_labels() {
+        assert_eq!(action_labels("archive"), Some((&[][..], &["INBOX"][..])));
+        assert_eq!(action_labels("spam"), Some((&["SPAM"][..], &["INBOX"][..])));
+        assert_eq!(action_labels("read"), Some((&[][..], &["UNREAD"][..])));
+        assert!(action_labels("delete_forever").is_none());
+        assert!(action_labels("trash").is_none());
+    }
+
+    #[test]
+    fn ids_are_checked() {
+        assert!(check_id("18c3fA09").is_ok());
+        assert!(check_id("").is_err());
+        assert!(check_id("a/b").is_err());
+        assert!(check_id("a?b=c").is_err());
+    }
+
+    #[test]
+    fn plain_text_becomes_escaped_html() {
+        assert_eq!(text_to_html("a<b>\nc & d\n"), "a&lt;b&gt;<br>c &amp; d");
+    }
 
     #[test]
     fn splits_addresses() {

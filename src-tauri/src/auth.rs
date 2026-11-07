@@ -13,7 +13,9 @@ use tokio::net::TcpListener;
 use crate::secrets;
 
 /// Etap 2 jest tylko do odczytu, więc prosimy o najmniejszy możliwy zakres.
-pub const SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
+/// Zakres "modify": czytanie, wysyłanie, wersje robocze, etykiety, kosz. Nie pozwala na trwałe
+/// usunięcie poczty (to wymagałoby szerszego zakresu, którego świadomie nie używamy).
+pub const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
@@ -21,6 +23,13 @@ const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 pub const KEY_CLIENT: &str = "google_client";
 pub const KEY_REFRESH: &str = "refresh_token";
 pub const KEY_EMAIL: &str = "account_email";
+/// Zakresy faktycznie przyznane przez użytkownika przy ostatnim logowaniu.
+pub const KEY_SCOPE: &str = "granted_scope";
+
+/// Czy przyznane uprawnienia wystarczają do wysyłania i zarządzania pocztą.
+pub fn scope_allows_modify(granted: Option<&str>) -> bool {
+    granted.map_or(false, |g| g.split_whitespace().any(|s| s == SCOPE))
+}
 
 /// Wspólny stan aplikacji: klient HTTP i token dostępowy trzymany tylko w pamięci.
 pub struct AppState {
@@ -92,6 +101,7 @@ pub struct TokenResponse {
     #[serde(default = "default_expires")]
     pub expires_in: u64,
     pub refresh_token: Option<String>,
+    pub scope: Option<String>,
 }
 
 pub fn random_urlsafe(bytes: usize) -> String {
@@ -273,6 +283,13 @@ pub async fn revoke(http: &reqwest::Client, token: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn modify_scope_detection() {
+        assert!(super::scope_allows_modify(Some("openid https://www.googleapis.com/auth/gmail.modify")));
+        assert!(!super::scope_allows_modify(Some("https://www.googleapis.com/auth/gmail.readonly")));
+        assert!(!super::scope_allows_modify(None));
+    }
+
     use super::*;
 
     #[test]

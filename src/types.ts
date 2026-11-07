@@ -9,6 +9,7 @@ export interface AuthStatus {
   configured: boolean;
   builtin?: boolean;
   email: string | null;
+  needsReauth?: boolean;
 }
 
 export interface ThreadSummary {
@@ -42,13 +43,63 @@ export interface MessageView {
   body: string;
   htmlOnly: boolean;
   attachments: Attachment[];
+  to: string;
+  cc: string;
+  replyTo: string;
+  messageId: string;
+  references: string;
 }
 
 export interface ThreadDetail {
   id: string;
   subject: string;
   messages: MessageView[];
+  unread: boolean;
+  starred: boolean;
+  inInbox: boolean;
+  inSpam: boolean;
+  inTrash: boolean;
+  isDraft: boolean;
 }
+
+export interface OutAttachment {
+  name: string;
+  mime: string;
+  dataBase64: string;
+}
+
+export interface OutgoingMessage {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  html: string;
+  inReplyTo: string | null;
+  references: string | null;
+  threadId: string | null;
+  draftId: string | null;
+  attachments: OutAttachment[];
+}
+
+export interface SentInfo {
+  id: string;
+  threadId: string;
+}
+
+export interface DraftContent {
+  draftId: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  html: string;
+  inReplyTo: string;
+  references: string;
+}
+
+export type ThreadAction =
+  | "archive" | "unarchive" | "read" | "unread" | "star" | "unstar"
+  | "spam" | "notspam" | "trash" | "untrash";
 
 export interface UpdateInfo {
   available: boolean;
