@@ -987,7 +987,7 @@ mod tests {
     #[test]
     fn decodes_base64url_body() {
         let p = Part {
-            body: Some(Body { size: 5, data: Some("SGVsbG8".to_string()) }),
+            body: Some(Body { size: 5, data: Some("SGVsbG8".to_string()), attachment_id: None }),
             ..Default::default()
         };
         assert_eq!(decode_part(&p), "Hello");
