@@ -24,10 +24,19 @@ chmod +x dist-release/RustMail-x86_64.AppImage
 
 Jeśli okno jest puste, spróbuj `WEBKIT_DISABLE_DMABUF_RENDERER=0` lub `GDK_BACKEND=x11`.
 
-## Stan projektu (wersja 0.7.0, etap 7)
+## Stan projektu (wersja 0.8.0, etap 8)
 
 Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google, odczyt, redagowanie i wysyłanie (etap 3), bezpieczny HTML,
-linki i załączniki (etap 4), ocena ryzyka phishingu z folderem „Podejrzane” (etap 5), skanowanie załączników i listy nadawców (etap 6) oraz – nowe w etapie 7:
+linki i załączniki (etap 4), ocena ryzyka phishingu z folderem „Podejrzane” (etap 5), skanowanie załączników i listy nadawców (etap 6) oraz etap 7 (wyszukiwanie, tryb offline). Nowe w etapie 8:
+
+- **Liczniki nieprzeczytanych** przy „Odebrane”, „Spam” i własnych etykietach oraz w tytule okna (odświeżane co minutę).
+- **Powiadomienia pulpitowe** (Ustawienia, domyślnie wyłączone) przez systemowe `notify-send`. Domyślnie bez treści; opcjonalnie
+  nadawca i temat, nigdy dla wiadomości z ostrzeżeniem. Przy starcie nic nie jest ogłaszane. Nie ma powiadomień, gdy aplikacja jest zamknięta.
+- **Własne etykiety Gmaila:** lista w panelu bocznym, tworzenie, przypisywanie i zdejmowanie w wątku. Etykiet systemowych nie da się
+  tędy zmienić. Foldery etykiet wymagają sieci (nie są zapisywane offline).
+- **Ustawienia** (przycisk na dole) i **lista testów ręcznych** w `docs/TESTY_BAZZITE.md`.
+
+Etap 7:
 
 - **Wyszukiwanie** (pole nad listą): zapytanie idzie do Gmaila, więc działa składnia Gmaila (`from:`, `has:attachment`, `after:2026/01/01`…).
   Bez sieci, przy włączonym trybie offline, przeszukuje zapisane lokalnie wątki (wszystkie słowa muszą wystąpić).
@@ -59,9 +68,9 @@ ostrożności: antywirus nie wykrywa każdego złośliwego pliku. Archiwa z has�
 
 ## Niezweryfikowane
 
-Etap 7: `store.rs` (rusqlite), synchronizacja History API, wyszukiwanie i polecenia Tauri nie były kompilowane. Zapytania SQL sprawdzono osobno na prawdziwym SQLite (schemat, filtry folderów, upsert, przycinanie), ale połączenie Rust–SQLite i wywołania Gmail History API zostaną sprawdzone dopiero przez CI i na Twoim koncie.
+Etap 8: `poll_mail`, `notify-send`, wywołania etykiet Gmaila i interfejs nie były kompilowane ani uruchamiane (logika `labels.rs` i `notify.rs` jest testowana osobno). Etap 7: `store.rs` (rusqlite), synchronizacja History API, wyszukiwanie i polecenia Tauri nie były kompilowane. Zapytania SQL sprawdzono osobno na prawdziwym SQLite (schemat, filtry folderów, upsert, przycinanie), ale połączenie Rust–SQLite i wywołania Gmail History API zostaną sprawdzone dopiero przez CI i na Twoim koncie.
 
-Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `offline.rs` (logika), a także `compose.rs`, `signature.rs`, `safety.rs`, `phishing.rs`, `dismissed.rs`, `filetype.rs`, `scan.rs` i `blocklist.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
+Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `offline.rs`, `labels.rs`, `notify.rs` (logika), a także `compose.rs`, `signature.rs`, `safety.rs`, `phishing.rs`, `dismissed.rs`, `filetype.rs`, `scan.rs` i `blocklist.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
 zostały uruchomione i przetestowane osobno, a czyszczenie HTML (`mailHtml.ts`) sprawdzone w prawdziwej przeglądarce Chromium na
 złośliwych przykładach; pozostały kod
 (komunikacja z Gmailem, polecenia Tauri, komponenty React) zweryfikowano tylko składniowo i typowo, więc pierwszy build

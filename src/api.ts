@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AppInfo, AuthStatus, DraftContent, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
-  ThreadPage, UpdateInfo, UpdateState,
+  AppInfo, AuthStatus, CacheStatus, DraftContent, LabelInfo, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
+  SyncResult, ThreadPage, UpdateInfo, UpdateState,
 } from "./types";
 
 export const api = {
@@ -15,6 +15,18 @@ export const api = {
   listThreads: (folder: string, pageToken: string | null) =>
     invoke<ThreadPage>("list_threads", { folder, pageToken }),
   getThread: (id: string) => invoke<ThreadDetail>("get_thread", { id }),
+  searchThreads: (query: string, pageToken: string | null) =>
+    invoke<ThreadPage>("search_threads", { query, pageToken }),
+  syncNow: () => invoke<SyncResult>("sync_now"),
+  pollMail: (notifyEnabled: boolean, showContent: boolean) =>
+    invoke<PollResult>("poll_mail", { notifyEnabled, showContent }),
+  createLabel: (name: string) => invoke<LabelInfo>("create_label", { name }),
+  setThreadLabel: (id: string, label: string, add: boolean) =>
+    invoke<void>("set_thread_label", { id, label, add }),
+  testNotification: () => invoke<void>("test_notification"),
+  cacheStatus: () => invoke<CacheStatus>("cache_status"),
+  setOfflineEnabled: (enabled: boolean) => invoke<CacheStatus>("set_offline_enabled", { enabled }),
+  clearCache: () => invoke<CacheStatus>("clear_cache"),
   sendMessage: (msg: OutgoingMessage) => invoke<SentInfo>("send_message", { msg }),
   saveDraft: (msg: OutgoingMessage) => invoke<string>("save_draft", { msg }),
   deleteDraft: (draftId: string) => invoke<void>("delete_draft", { draftId }),

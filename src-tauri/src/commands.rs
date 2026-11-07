@@ -10,7 +10,9 @@ use tauri::{AppHandle, Manager, State};
 use crate::auth::{self, AppState, ClientCreds};
 use crate::compose::{self, OutAttachment, Outgoing};
 use crate::blocklist::{self, Rules};
-use crate::{dismissed, filetype, gmail, remote, safety, scan, secrets, signature};
+use crate::store::{CacheStatus, Store};
+use crate::notify::{self, Notifier};
+use crate::{dismissed, filetype, gmail, offline, remote, safety, scan, secrets, signature};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct AppInfo {
@@ -70,7 +72,8 @@ pub fn save_client(client_id: String, client_secret: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub async fn clear_client(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_client(state: State<'_, AppState>, store: State<'_, Store>) -> Result<(), String> {
+    let _ = store.clear();
     secrets::delete(auth::KEY_CLIENT)?;
     secrets::delete(auth::KEY_REFRESH)?;
     secrets::delete(auth::KEY_EMAIL)?;
@@ -80,7 +83,10 @@ pub async fn clear_client(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn sign_in(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn sign_in(state: State<'_, AppState>, store: State<'_, Store>, notifier: State<'_, Notifier>) -> Result<String, String> {
+    if let Ok(mut s) = notifier.0.lock() {
+        *s = notify::Seen::default();
+    }
     let creds = auth::load_creds()?.ok_or("Najpierw zapisz dane klienta Google.")?;
     let tr = auth::sign_in_flow(&state.http, &creds).await?;
     let refresh = tr.refresh_token.clone().ok_or(
@@ -90,12 +96,18 @@ pub async fn sign_in(state: State<'_, AppState>) -> Result<String, String> {
     secrets::set(auth::KEY_REFRESH, &refresh)?;
     secrets::set(auth::KEY_EMAIL, &email)?;
     secrets::set(auth::KEY_SCOPE, tr.scope.as_deref().unwrap_or(""))?;
+    // Pamięć podręczna mogła należeć do innego konta.
+    let _ = store.clear();
     *state.token.lock().await = Some((tr.access_token, Instant::now() + Duration::from_secs(tr.expires_in)));
     Ok(email)
 }
 
 #[tauri::command]
-pub async fn sign_out(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn sign_out(state: State<'_, AppState>, store: State<'_, Store>, notifier: State<'_, Notifier>) -> Result<(), String> {
+    if let Ok(mut s) = notifier.0.lock() {
+        *s = notify::Seen::default();
+    }
+    let _ = store.clear();
     if let Some(token) = secrets::get(auth::KEY_REFRESH)? {
         auth::revoke(&state.http, &token).await;
     }
@@ -121,25 +133,197 @@ fn load_rules(app: &AppHandle) -> Result<Rules, String> {
     })
 }
 
+/// Odświeża flagę „uznany za bezpieczny” w wynikach z pamięci podręcznej (zmienia się lokalnie).
+fn refresh_dismissed(rows: &mut [gmail::ThreadSummary], safe: &std::collections::HashSet<String>) {
+    for t in rows.iter_mut() {
+        t.dismissed = safe.contains(&t.id);
+    }
+}
+
+const PAGE: usize = 20;
+
 #[tauri::command]
 pub async fn list_threads(
     app: AppHandle,
     state: State<'_, AppState>,
+    store: State<'_, Store>,
     folder: String,
     page_token: Option<String>,
 ) -> Result<gmail::ThreadPage, String> {
     let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
     let safe = dismissed::load(&dismissed_path(&app)?);
     let rules = load_rules(&app)?;
-    gmail::list_threads(&state, &folder, page_token, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await
+    let filters = gmail::Filters { dismissed: &safe, rules: &rules };
+    match gmail::list_threads(&state, &folder, page_token.clone(), &email, &filters).await {
+        Ok(page) => {
+            if store.ready() {
+                let _ = store.put_summaries(&page.threads);
+            }
+            Ok(page)
+        }
+        Err(e) if offline::is_network_error(&e) && store.ready() => {
+            let off = offline::parse_offset(page_token.as_deref());
+            let mut rows = if folder == "suspicious" {
+                let mut all = store.list_folder("suspicious", 0, 1000)?;
+                refresh_dismissed(&mut all, &safe);
+                all.into_iter().filter(|t| !t.dismissed).skip(off).take(PAGE + 1).collect()
+            } else {
+                let mut r = store.list_folder(&folder, off, PAGE + 1)?;
+                refresh_dismissed(&mut r, &safe);
+                r
+            };
+            let next = if rows.len() > PAGE {
+                rows.truncate(PAGE);
+                Some((off + PAGE).to_string())
+            } else {
+                None
+            };
+            Ok(gmail::ThreadPage { threads: rows, next_page_token: next, offline: true })
+        }
+        Err(e) => Err(e),
+    }
 }
 
 #[tauri::command]
-pub async fn get_thread(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<gmail::ThreadDetail, String> {
+pub async fn get_thread(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    store: State<'_, Store>,
+    id: String,
+) -> Result<gmail::ThreadDetail, String> {
     let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
     let safe = dismissed::load(&dismissed_path(&app)?);
     let rules = load_rules(&app)?;
-    gmail::get_thread(&state, &id, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await
+    match gmail::get_thread(&state, &id, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await {
+        Ok(d) => {
+            if store.ready() {
+                let summary = gmail::summary_of_detail(&d);
+                let _ = store.put_detail(&d, &summary);
+            }
+            Ok(d)
+        }
+        Err(e) if offline::is_network_error(&e) && store.ready() => match store.get_detail(&id) {
+            Some(mut d) => {
+                d.offline = true;
+                d.dismissed = safe.contains(&d.id);
+                Ok(d)
+            }
+            None => Err("Brak połączenia z Gmail, a ten wątek nie jest zapisany w pamięci offline.".to_string()),
+        },
+        Err(e) => Err(e),
+    }
+}
+
+/// Wyszukiwanie: najpierw w Gmailu; bez sieci (i z włączonym trybem offline) w zapisanych wątkach.
+#[tauri::command]
+pub async fn search_threads(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    store: State<'_, Store>,
+    query: String,
+    page_token: Option<String>,
+) -> Result<gmail::ThreadPage, String> {
+    let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    let safe = dismissed::load(&dismissed_path(&app)?);
+    let rules = load_rules(&app)?;
+    let filters = gmail::Filters { dismissed: &safe, rules: &rules };
+    match gmail::search_threads(&state, &query, page_token, &email, &filters).await {
+        Ok(page) => {
+            if store.ready() {
+                let _ = store.put_summaries(&page.threads);
+            }
+            Ok(page)
+        }
+        Err(e) if offline::is_network_error(&e) && store.ready() => {
+            let mut rows = store.search(&query, 50)?;
+            refresh_dismissed(&mut rows, &safe);
+            Ok(gmail::ThreadPage { threads: rows, next_page_token: None, offline: true })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResult {
+    /// Fałsz, gdy tryb offline jest wyłączony (nic nie zrobiono).
+    pub active: bool,
+    /// Identyfikatory wątków zmienionych od ostatniej synchronizacji.
+    pub changed: Vec<String>,
+    /// Prawda, gdy pamięć podręczną opróżniono i zaczęto od nowa.
+    pub reset: bool,
+}
+
+const MAX_SYNC_THREADS: usize = 100;
+
+/// Synchronizacja przyrostowa przez Gmail History API: odświeża tylko zapisane wątki, które się zmieniły.
+#[tauri::command]
+pub async fn sync_now(app: AppHandle, state: State<'_, AppState>, store: State<'_, Store>) -> Result<SyncResult, String> {
+    let idle = SyncResult { active: false, changed: vec![], reset: false };
+    if !store.enabled() {
+        return Ok(idle);
+    }
+    let restart = |h: String| -> Result<SyncResult, String> {
+        store.clear_threads()?;
+        store.set_history_id(&h)?;
+        Ok(SyncResult { active: true, changed: vec![], reset: true })
+    };
+    let Some(start) = store.history_id() else {
+        let h = gmail::current_history_id(&state).await?;
+        return restart(h);
+    };
+    let Some(ch) = gmail::history_since(&state, &start).await? else {
+        let h = gmail::current_history_id(&state).await?;
+        return restart(h);
+    };
+    if ch.thread_ids.len() > MAX_SYNC_THREADS {
+        return restart(ch.new_history_id);
+    }
+    let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    let safe = dismissed::load(&dismissed_path(&app)?);
+    let rules = load_rules(&app)?;
+    let filters = gmail::Filters { dismissed: &safe, rules: &rules };
+    for id in &ch.thread_ids {
+        if !store.has_thread(id) {
+            continue;
+        }
+        // Błąd (np. brak sieci) przerywa synchronizację BEZ przesuwania punktu odniesienia: zmiany zostaną ponowione.
+        match gmail::refresh_summary(&state, id, &email, &filters).await? {
+            Some(s) => {
+                store.put_summaries(&[s])?;
+                store.invalidate_detail(id)?;
+            }
+            None => store.delete_thread(id)?,
+        }
+    }
+    store.set_history_id(&ch.new_history_id)?;
+    Ok(SyncResult { active: true, changed: ch.thread_ids, reset: false })
+}
+
+fn cache_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("cache"))
+}
+
+#[tauri::command]
+pub fn cache_status(app: AppHandle, store: State<'_, Store>) -> Result<CacheStatus, String> {
+    let path = cache_dir(&app)?.join("rustmail.db");
+    Ok(store.status(path.to_string_lossy().to_string()))
+}
+
+/// Włącza lub wyłącza tryb offline. Zawsze zaczyna od pustej bazy; wyłączenie usuwa zapisaną treść.
+#[tauri::command]
+pub fn set_offline_enabled(app: AppHandle, store: State<'_, Store>, enabled: bool) -> Result<CacheStatus, String> {
+    if !store.available() {
+        return Err("Nie udało się otworzyć lokalnej bazy danych.".to_string());
+    }
+    store.set_enabled(enabled)?;
+    cache_status(app, store)
+}
+
+#[tauri::command]
+pub fn clear_cache(app: AppHandle, store: State<'_, Store>) -> Result<CacheStatus, String> {
+    store.clear()?;
+    cache_status(app, store)
 }
 
 #[derive(Serialize)]
@@ -416,4 +600,76 @@ mod tests {
     fn rejects_malformed_client_id_before_touching_keyring() {
         assert!(save_client("zly-id".to_string(), "sekret".to_string()).is_err());
     }
+}
+
+// ---------- Etap 8: liczniki, powiadomienia, własne etykiety ----------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PollResult {
+    pub inbox_unread: u32,
+    pub spam_unread: u32,
+    pub labels: Vec<gmail::LabelInfo>,
+    /// Ile nowych wiadomości zgłoszono w powiadomieniu pulpitowym.
+    pub notified: usize,
+}
+
+/// Odpytywanie poczty co minutę: liczniki + wykrycie nowych wiadomości w skrzynce. Powiadomienie pokazuje się tylko
+/// o wiadomościach, które pojawiły się PO pierwszym sprawdzeniu (przy starcie nic nie jest ogłaszane).
+#[tauri::command]
+pub async fn poll_mail(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    notifier: State<'_, Notifier>,
+    notify_enabled: bool,
+    show_content: bool,
+) -> Result<PollResult, String> {
+    let stats = gmail::mail_stats(&state).await?;
+    let key = (stats.inbox_unread, stats.inbox_total);
+    let unchanged = notifier.0.lock().map(|s| s.counts == Some(key) && s.ids.is_some()).unwrap_or(false);
+    let mut notified = 0usize;
+    if !unchanged {
+        let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+        let safe = dismissed::load(&dismissed_path(&app)?);
+        let rules = load_rules(&app)?;
+        let page = gmail::list_threads(&state, "unread", None, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await?;
+        let ids: Vec<String> = page.threads.iter().map(|t| t.id.clone()).collect();
+        let new_ids = match notifier.0.lock() {
+            Ok(mut s) => {
+                let n = notify::diff_new(&mut s.ids, &ids);
+                s.counts = Some(key);
+                n
+            }
+            Err(_) => Vec::new(),
+        };
+        if notify_enabled && !new_ids.is_empty() {
+            let items: Vec<notify::Item> = page
+                .threads
+                .iter()
+                .filter(|t| new_ids.contains(&t.id))
+                .map(|t| notify::Item { sender: &t.participants, subject: &t.subject, risky: t.risk.level != "none" && !t.dismissed })
+                .collect();
+            if let Some((title, body)) = notify::build_text(&items, show_content) {
+                if notify::send(&title, &body).is_ok() {
+                    notified = items.len();
+                }
+            }
+        }
+    }
+    Ok(PollResult { inbox_unread: stats.inbox_unread, spam_unread: stats.spam_unread, labels: stats.labels, notified })
+}
+
+#[tauri::command]
+pub async fn create_label(state: State<'_, AppState>, name: String) -> Result<gmail::LabelInfo, String> {
+    gmail::create_label(&state, &name).await
+}
+
+#[tauri::command]
+pub async fn set_thread_label(state: State<'_, AppState>, id: String, label: String, add: bool) -> Result<(), String> {
+    gmail::set_thread_label(&state, &id, &label, add).await
+}
+
+#[tauri::command]
+pub fn test_notification() -> Result<(), String> {
+    notify::send("RustMail", "Powiadomienia działają.")
 }

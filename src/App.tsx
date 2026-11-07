@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
+import { CacheDialog } from "./CacheDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import { BACKUP_KEY, Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
@@ -13,12 +15,12 @@ import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
-import type { AppInfo, AuthStatus, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import type { AppInfo, AuthStatus, LabelInfo, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import "./styles.css";
 import "./compose.css";
 
 type Theme = "auto" | "light" | "dark";
-const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate" };
+const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent" };
 const STAR = "M12 3l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.8 6.1 21l1.2-6.5L2.5 9.9 9.1 9z";
 
 function load(key: string, fallback: string): string {
@@ -92,6 +94,16 @@ export default function App() {
   const [senderDlg, setSenderDlg] = useState<{ email: string | null } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [restore, setRestore] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [searchTerm, setSearchTerm] = useState<string | null>(null);
+  const [listOffline, setListOffline] = useState(false);
+  const [cacheOpen, setCacheOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
+  const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "0") === "1");
+  const [stats, setStats] = useState<{ inbox: number; spam: number; labels: LabelInfo[] }>({ inbox: 0, spam: 0, labels: [] });
+  const [newLabel, setNewLabel] = useState<string | null>(null);
+  const searchRef = useRef<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   const composeKey = useRef(0);
   const updater = useUpdater(autoUpdate);
@@ -128,10 +140,12 @@ export default function App() {
     setLoadingList(true);
     setListError(null);
     try {
-      const page = await api.listThreads(f, token);
+      const q = searchRef.current;
+      const page = q ? await api.searchThreads(q, token) : await api.listThreads(f, token);
       if (my !== listReq.current) return;
       setThreads((prev) => (append ? [...prev, ...page.threads] : page.threads));
       setNextToken(page.nextPageToken);
+      setListOffline(Boolean(page.offline));
     } catch (e) {
       if (my === listReq.current) setListError(errText(e));
     } finally {
@@ -168,7 +182,7 @@ export default function App() {
       const d = await api.getThread(id);
       if (my !== threadReq.current) return;
       setDetail(d);
-      if (d.unread && !needsReauth) {
+      if (d.unread && !needsReauth && !d.offline) {
         // jak w Outlooku: otwarcie konwersacji oznacza ją jako przeczytaną
         api.threadAction(id, "read").then(() => {
           setDetail((cur) => (cur && cur.id === id ? { ...cur, unread: false } : cur));
@@ -340,7 +354,100 @@ export default function App() {
     setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleAuto = (on: boolean) => { setAutoUpdate(on); save(LS.auto, on ? "1" : "0"); };
 
-  const folderLabel = FOLDERS.find((f) => f.id === folder)?.label ?? "";
+  const labelName = (id: string) => stats.labels.find((l) => l.id === id)?.name ?? "";
+  const folderLabel = folder.startsWith("label:")
+    ? labelName(folder.slice(6)) || "Etykieta"
+    : (FOLDERS.find((f) => f.id === folder)?.label ?? "");
+
+  const addLabel = async () => {
+    const name = (newLabel ?? "").trim();
+    if (!name) { setNewLabel(null); return; }
+    try {
+      const l = await api.createLabel(name);
+      setStats((s) => ({ ...s, labels: [...s.labels, l].sort((a, b) => a.name.localeCompare(b.name)) }));
+      setNewLabel(null);
+      showToast(`Utworzono etykietę „${l.name}”.`);
+    } catch (e) { showToast(errText(e)); }
+  };
+  const toggleLabel = async (id: string, on: boolean) => {
+    if (!detail) return;
+    const tid = detail.id;
+    try {
+      await api.setThreadLabel(tid, id, on);
+      setDetail((d) => (d && d.id === tid
+        ? { ...d, labels: on ? [...(d.labels ?? []), id] : (d.labels ?? []).filter((x) => x !== id) } : d));
+      void pollOnce();
+      if (folder === `label:${id}` && !on) setThreads((prev) => prev.filter((t) => t.id !== tid));
+    } catch (e) { showToast(errText(e)); }
+  };
+
+  const clearSearch = () => {
+    searchRef.current = null;
+    setSearchTerm(null);
+    setQuery("");
+  };
+  const pickFolder = (id: FolderId) => {
+    const wasSearching = searchRef.current !== null;
+    clearSearch();
+    if (id === folder) {
+      if (wasSearching) void loadList(id, null, false);
+    } else {
+      setFolder(id);
+    }
+  };
+  const doSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q) {
+      if (searchRef.current !== null) { clearSearch(); void loadList(folder, null, false); }
+      return;
+    }
+    searchRef.current = q;
+    setSearchTerm(q);
+    setOpenId(null);
+    setDetail(null);
+    void loadList(folder, null, false);
+  };
+
+  // Synchronizacja przyrostowa (tylko gdy tryb offline jest włączony; w przeciwnym razie polecenie nic nie robi).
+  const live = useRef({ openId: null as string | null, count: 0, composing: false });
+  live.current = { openId, count: threads.length, composing: Boolean(compose) };
+  const folderRef = useRef(folder);
+  folderRef.current = folder;
+  const settingsRef = useRef({ notify: notifyOn, content: notifyContent });
+  settingsRef.current = { notify: notifyOn, content: notifyContent };
+  const pollOnce = useCallback(async () => {
+    try {
+      const r = await api.pollMail(settingsRef.current.notify, settingsRef.current.content);
+      setStats({ inbox: r.inboxUnread, spam: r.spamUnread, labels: r.labels });
+      document.title = r.inboxUnread > 0 ? `(${r.inboxUnread}) RustMail` : "RustMail";
+    } catch { /* brak sieci – spróbujemy za minutę */ }
+  }, []);
+  useEffect(() => {
+    if (!email) return;
+    void pollOnce();
+    const t = window.setInterval(() => void pollOnce(), 60_000);
+    return () => window.clearInterval(t);
+  }, [email, pollOnce]);
+  const syncing = useRef(false);
+  const syncOnce = useCallback(async () => {
+    if (syncing.current) return;
+    syncing.current = true;
+    try {
+      const r = await api.syncNow();
+      if (!r.active || r.changed.length === 0) return;
+      const l = live.current;
+      if (l.count <= 20 && !l.composing) void loadList(folderRef.current, null, false);
+      if (l.openId && !l.composing && r.changed.includes(l.openId)) void loadDetail(l.openId);
+    } catch { /* brak sieci – spróbujemy za minutę */ } finally {
+      syncing.current = false;
+    }
+  }, [loadList, loadDetail]);
+  useEffect(() => {
+    if (!email) return;
+    const t = window.setInterval(() => void syncOnce(), 60_000);
+    return () => window.clearInterval(t);
+  }, [email, syncOnce]);
 
   return (
     <div className="app">
@@ -360,11 +467,35 @@ export default function App() {
           <nav>
             {FOLDERS.map((f) => (
               <button key={f.id} className={"folder" + (f.id === folder ? " active" : "")}
-                onClick={() => setFolder(f.id)} aria-current={f.id === folder}>
+                onClick={() => pickFolder(f.id)} aria-current={f.id === folder && !searchTerm}>
                 <Icon d={f.icon} />
                 <span>{f.label}</span>
+                {f.id === "inbox" && stats.inbox > 0 && <span className="badge">{stats.inbox}</span>}
+                {f.id === "spam" && stats.spam > 0 && <span className="badge muted">{stats.spam}</span>}
               </button>
             ))}
+            {email && (
+              <>
+                <div className="nav-title">Etykiety</div>
+                {stats.labels.map((l) => (
+                  <button key={l.id} className={"folder" + (folder === `label:${l.id}` ? " active" : "")}
+                    onClick={() => pickFolder(`label:${l.id}`)} aria-current={folder === `label:${l.id}` && !searchTerm}>
+                    <Icon d="M4 4h9l7 8-7 8H4z" />
+                    <span>{l.name}</span>
+                    {l.unread > 0 && <span className="badge">{l.unread}</span>}
+                  </button>
+                ))}
+                {newLabel === null ? (
+                  <button className="folder dim" disabled={needsReauth} onClick={() => setNewLabel("")}>+ Nowa etykieta</button>
+                ) : (
+                  <form className="newlabel" onSubmit={(e) => { e.preventDefault(); void addLabel(); }}>
+                    <input autoFocus value={newLabel} maxLength={100} aria-label="Nazwa nowej etykiety"
+                      onChange={(e) => setNewLabel(e.target.value)} onBlur={() => { if (!newLabel.trim()) setNewLabel(null); }} />
+                    <button className="small" type="submit">Dodaj</button>
+                  </form>
+                )}
+              </>
+            )}
           </nav>
           <div className="spacer" />
           <div className="theme" role="group" aria-label="Motyw">
@@ -380,13 +511,27 @@ export default function App() {
 
         <section className="list" aria-label="Lista konwersacji">
           <header className="list-head">
-            <h2>{folderLabel}</h2>
+            <h2>{searchTerm ? `Wyniki: „${searchTerm}”` : folderLabel}</h2>
             {email && (
               <button className="small" disabled={loadingList} onClick={() => void loadList(folder, null, false)}>
                 {loadingList ? "Wczytywanie…" : "Odśwież"}
               </button>
             )}
           </header>
+          {email && (
+            <form className="search" role="search" onSubmit={doSearch}>
+              <input type="search" value={query} maxLength={500} placeholder="Szukaj w poczcie (np. from:ala faktura)"
+                aria-label="Szukaj w poczcie" onChange={(e) => setQuery(e.target.value)} />
+              <button className="small" type="submit">Szukaj</button>
+              {searchTerm && <button className="small" type="button" onClick={() => { clearSearch(); void loadList(folder, null, false); }}>Wyczyść</button>}
+            </form>
+          )}
+          {email && listOffline && (
+            <p className="offline-note" role="status">
+              Brak połączenia z Gmail – pokazuję wiadomości zapisane na tym komputerze (mogą być nieaktualne).
+              {searchTerm ? " Wyszukiwanie obejmuje tylko zapisane wątki." : ""}
+            </p>
+          )}
           {!email ? (
             <div className="empty">
               <h3>Nie połączono konta</h3>
@@ -422,6 +567,10 @@ export default function App() {
                             {t.risk.level === "high" ? "Podejrzane" : "Uwaga"}
                           </span>
                         )}
+                        {(t.labels ?? []).map((id) => {
+                          const n = labelName(id);
+                          return n ? <span key={id} className="label-chip">{n}</span> : null;
+                        })}
                         {t.subject}
                       </span>
                       <span className="snip">{t.snippet}</span>
@@ -454,6 +603,11 @@ export default function App() {
               <span>Znaleziono niezapisaną wiadomość z poprzedniej sesji.</span>
               <button className="small solid" onClick={restoreBackup}>Przywróć</button>
               <button className="small" onClick={dropBackup}>Usuń</button>
+            </div>
+          )}
+          {email && detail?.offline && (
+            <div className="banner" role="status">
+              <span>Ta konwersacja pochodzi z pamięci offline – nie masz połączenia z Gmail. Odpowiadanie i akcje wymagają sieci.</span>
             </div>
           )}
           {authError && email && <p className="error pad" role="alert">{authError}</p>}
@@ -492,6 +646,21 @@ export default function App() {
                   <button disabled={needsReauth} onClick={() => void runAction(detail.unread ? "read" : "unread")}>
                     {detail.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}
                   </button>
+                  {stats.labels.length > 0 && (
+                    <details className="label-menu">
+                      <summary>Etykiety</summary>
+                      <div className="label-pop">
+                        {stats.labels.map((l) => (
+                          <label key={l.id} className="check">
+                            <input type="checkbox" disabled={needsReauth || Boolean(detail.offline)}
+                              checked={(detail.labels ?? []).includes(l.id)}
+                              onChange={(e) => void toggleLabel(l.id, e.target.checked)} />
+                            {l.name}
+                          </label>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   <button disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
                     {detail.starred ? "★ Usuń gwiazdkę" : "☆ Gwiazdka"}
                   </button>
@@ -537,8 +706,7 @@ export default function App() {
         <span>{info ? `${info.name} ${info.version}${info.appimage ? " · AppImage" : ""}` : "Tryb podglądu w przeglądarce"}</span>
         <span className="pill">{email ?? "brak konta"}</span>
         {email && <button className="linklike plain" onClick={() => void signOut()}>Wyloguj</button>}
-        {email && <button className="linklike plain" onClick={() => setSigOpen(true)}>Podpis</button>}
-        {email && <button className="linklike plain" onClick={() => setSenderDlg({ email: null })}>Listy nadawców</button>}
+        {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
         <label className="check">
           <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} />
@@ -566,6 +734,14 @@ export default function App() {
       {senderDlg && (
         <SenderLists email={senderDlg.email} onClose={() => setSenderDlg(null)} onChanged={(s) => void senderChanged(s)} />
       )}
+      {settingsOpen && (
+        <SettingsDialog notify={notifyOn} content={notifyContent}
+          onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}
+          onContent={(on) => { setNotifyContent(on); save(LS.content, on ? "1" : "0"); }}
+          onOpen={(w) => { setSettingsOpen(false); if (w === "signature") setSigOpen(true); else if (w === "senders") setSenderDlg({ email: null }); else setCacheOpen(true); }}
+          onClose={() => setSettingsOpen(false)} />
+      )}
+      {cacheOpen && <CacheDialog onClose={() => setCacheOpen(false)} onChanged={() => void syncOnce()} />}
       {sigOpen && (
         <SignatureDialog initial={signature} onClose={() => setSigOpen(false)}
           onSaved={(t) => { setSignature(t); setSigOpen(false); showToast("Podpis zapisany."); }} />

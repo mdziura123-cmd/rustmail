@@ -91,20 +91,20 @@ pub struct Filters<'a> {
 }
 
 /// Ocena ryzyka phishingu przekazywana do interfejsu (powody po polsku).
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Risk {
-    pub level: &'static str,
+    pub level: String,
     pub score: u32,
     pub reasons: Vec<String>,
 }
 
 impl From<Assessment> for Risk {
     fn from(a: Assessment) -> Self {
-        Risk { level: a.level.as_str(), score: a.score, reasons: a.reasons }
+        Risk { level: a.level.as_str().to_string(), score: a.score, reasons: a.reasons }
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSummary {
     pub id: String,
@@ -118,6 +118,9 @@ pub struct ThreadSummary {
     /// Wstępna ocena z nagłówków (nadawca, uwierzytelnianie, temat); pełna ocena jest po otwarciu wątku.
     pub risk: Risk,
     pub dismissed: bool,
+    /// Etykiety Gmail wszystkich wiadomości wątku (do filtrowania folderów w trybie offline).
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -125,9 +128,11 @@ pub struct ThreadSummary {
 pub struct ThreadPage {
     pub threads: Vec<ThreadSummary>,
     pub next_page_token: Option<String>,
+    /// Prawda, gdy wynik pochodzi z lokalnej pamięci podręcznej (brak połączenia).
+    pub offline: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AttachmentInfo {
     pub name: String,
     pub mime: String,
@@ -136,7 +141,7 @@ pub struct AttachmentInfo {
     pub id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageView {
     pub id: String,
@@ -157,7 +162,7 @@ pub struct MessageView {
     pub risk: Risk,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadDetail {
     pub id: String,
@@ -170,6 +175,11 @@ pub struct ThreadDetail {
     pub in_trash: bool,
     pub is_draft: bool,
     pub dismissed: bool,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// Prawda, gdy wątek pochodzi z lokalnej pamięci podręcznej (brak połączenia).
+    #[serde(default)]
+    pub offline: bool,
 }
 
 // ---------- Mapowanie folderów na etykiety Gmail ----------
@@ -334,7 +344,7 @@ async fn scan_suspicious(
             None => break,
         }
     }
-    Ok(ThreadPage { threads: found, next_page_token: None })
+    Ok(ThreadPage { threads: found, next_page_token: None, offline: false })
 }
 
 pub async fn list_threads(
@@ -347,8 +357,18 @@ pub async fn list_threads(
     if folder == "suspicious" {
         return scan_suspicious(state, my_email, f).await;
     }
+    if let Some(label) = folder.strip_prefix("label:") {
+        crate::labels::check_user_label_id(label)?;
+        let token = access_token(state).await?;
+        let mut params: Vec<(&str, &str)> = vec![("maxResults", PAGE_SIZE), ("labelIds", label)];
+        if let Some(p) = page.as_deref() {
+            params.push(("pageToken", p));
+        }
+        let (threads, next) = page_summaries(state, &token, &params, my_email, f).await?;
+        return Ok(ThreadPage { threads, next_page_token: next, offline: false });
+    }
     let Some(fq) = folder_query(folder)? else {
-        return Ok(ThreadPage { threads: vec![], next_page_token: None });
+        return Ok(ThreadPage { threads: vec![], next_page_token: None, offline: false });
     };
     let token = access_token(state).await?;
 
@@ -367,7 +387,7 @@ pub async fn list_threads(
     }
     let borrowed: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let (threads, next) = page_summaries(state, &token, &borrowed, my_email, f).await?;
-    Ok(ThreadPage { threads, next_page_token: next })
+    Ok(ThreadPage { threads, next_page_token: next, offline: false })
 }
 
 pub async fn get_thread(
@@ -392,10 +412,293 @@ pub async fn get_thread(
         in_trash: has("TRASH"),
         is_draft: has("DRAFT"),
         dismissed: f.dismissed.contains(&raw.id),
+        labels: thread_labels(&raw),
+        offline: false,
         id: raw.id.clone(),
         subject,
         messages,
     })
+}
+
+// ---------- Wyszukiwanie, podsumowanie z szczegółów i synchronizacja przyrostowa ----------
+
+/// Wyszukiwanie w Gmailu (składnia jak w oknie wyszukiwania Gmaila). Zapytanie jest oczyszczone i przycięte.
+pub async fn search_threads(
+    state: &AppState,
+    query: &str,
+    page: Option<String>,
+    my_email: &str,
+    f: &Filters<'_>,
+) -> Result<ThreadPage, String> {
+    let q = crate::offline::clean_remote_query(query)?;
+    let token = access_token(state).await?;
+    let mut params: Vec<(&str, String)> = vec![("maxResults", PAGE_SIZE.to_string()), ("q", q)];
+    if let Some(p) = page {
+        params.push(("pageToken", p));
+    }
+    let borrowed: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let (threads, next) = page_summaries(state, &token, &borrowed, my_email, f).await?;
+    Ok(ThreadPage { threads, next_page_token: next, offline: false })
+}
+
+/// Podsumowanie wątku zbudowane z jego pełnych danych (do zapisu w pamięci podręcznej).
+pub fn summary_of_detail(d: &ThreadDetail) -> ThreadSummary {
+    let mut names: Vec<String> = Vec::new();
+    for m in &d.messages {
+        if !m.from.is_empty() && !names.contains(&m.from) {
+            names.push(m.from.clone());
+        }
+    }
+    let last = d.messages.last();
+    let snippet: String = last
+        .map(|m| m.body.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default()
+        .chars()
+        .take(160)
+        .collect();
+    ThreadSummary {
+        id: d.id.clone(),
+        subject: d.subject.clone(),
+        participants: names.into_iter().take(3).collect::<Vec<_>>().join(", "),
+        snippet,
+        last_date_ms: last.map(|m| m.date_ms).unwrap_or(0),
+        unread: d.unread,
+        starred: d.starred,
+        count: d.messages.len(),
+        risk: d
+            .messages
+            .iter()
+            .max_by_key(|m| m.risk.score)
+            .map(|m| m.risk.clone())
+            .unwrap_or(Risk { level: "none".to_string(), score: 0, reasons: vec![] }),
+        dismissed: d.dismissed,
+        labels: d.labels.clone(),
+    }
+}
+
+/// Bieżący identyfikator historii skrzynki (punkt odniesienia dla synchronizacji przyrostowej).
+pub async fn current_history_id(state: &AppState) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Profile {
+        #[serde(rename = "historyId")]
+        history_id: String,
+    }
+    let token = access_token(state).await?;
+    Ok(get_json::<Profile>(&state.http, &token, "profile", &[]).await?.history_id)
+}
+
+pub struct HistoryChanges {
+    pub thread_ids: Vec<String>,
+    pub new_history_id: String,
+}
+
+/// Zmiany od podanego punktu odniesienia. `Ok(None)` = historia wygasła (Gmail trzyma ją krótko),
+/// trzeba zacząć od nowa. Zbyt wiele stron zmian też traktujemy jak wygasłą historię.
+pub async fn history_since(state: &AppState, start: &str) -> Result<Option<HistoryChanges>, String> {
+    #[derive(Deserialize, Default)]
+    struct MsgRef {
+        #[serde(default, rename = "threadId")]
+        thread_id: String,
+    }
+    #[derive(Deserialize)]
+    struct MsgWrap {
+        message: MsgRef,
+    }
+    #[derive(Deserialize, Default)]
+    struct Item {
+        #[serde(default, rename = "messagesAdded")]
+        added: Vec<MsgWrap>,
+        #[serde(default, rename = "messagesDeleted")]
+        deleted: Vec<MsgWrap>,
+        #[serde(default, rename = "labelsAdded")]
+        labels_added: Vec<MsgWrap>,
+        #[serde(default, rename = "labelsRemoved")]
+        labels_removed: Vec<MsgWrap>,
+    }
+    #[derive(Deserialize)]
+    struct HistoryList {
+        #[serde(default)]
+        history: Vec<Item>,
+        #[serde(rename = "nextPageToken")]
+        next_page_token: Option<String>,
+        #[serde(default, rename = "historyId")]
+        history_id: String,
+    }
+    if start.is_empty() || !start.chars().all(|c| c.is_ascii_digit()) {
+        return Ok(None);
+    }
+    let token = access_token(state).await?;
+    let mut ids: Vec<String> = Vec::new();
+    let mut page: Option<String> = None;
+    let mut latest = String::new();
+    for _ in 0..10 {
+        let mut params: Vec<(&str, &str)> = vec![
+            ("startHistoryId", start),
+            ("maxResults", "100"),
+            ("historyTypes", "messageAdded"),
+            ("historyTypes", "messageDeleted"),
+            ("historyTypes", "labelAdded"),
+            ("historyTypes", "labelRemoved"),
+        ];
+        if let Some(p) = page.as_deref() {
+            params.push(("pageToken", p));
+        }
+        let list: HistoryList = match get_json(&state.http, &token, "history", &params).await {
+            Ok(l) => l,
+            Err(e) if crate::offline::is_not_found(&e) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if !list.history_id.is_empty() {
+            latest = list.history_id.clone();
+        }
+        for h in &list.history {
+            for w in h.added.iter().chain(&h.deleted).chain(&h.labels_added).chain(&h.labels_removed) {
+                let t = &w.message.thread_id;
+                if !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric()) && !ids.contains(t) {
+                    ids.push(t.clone());
+                }
+            }
+        }
+        match list.next_page_token {
+            Some(n) => page = Some(n),
+            None => {
+                if latest.is_empty() {
+                    latest = start.to_string();
+                }
+                return Ok(Some(HistoryChanges { thread_ids: ids, new_history_id: latest }));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Odświeża podsumowanie jednego wątku. `Ok(None)` = wątek już nie istnieje (usunięty).
+pub async fn refresh_summary(
+    state: &AppState,
+    id: &str,
+    my_email: &str,
+    f: &Filters<'_>,
+) -> Result<Option<ThreadSummary>, String> {
+    check_id(id)?;
+    let token = access_token(state).await?;
+    match fetch_thread(&state.http, &token, id, "metadata").await {
+        Ok(raw) if raw.messages.is_empty() => Ok(None),
+        Ok(raw) => Ok(Some(summarize(&raw, my_email, f))),
+        Err(e) if crate::offline::is_not_found(&e) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+// ---------- Liczniki nieprzeczytanych i własne etykiety ----------
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelInfo {
+    pub id: String,
+    pub name: String,
+    pub unread: u32,
+}
+
+pub struct MailStats {
+    pub inbox_unread: u32,
+    pub inbox_total: u32,
+    pub spam_unread: u32,
+    pub labels: Vec<LabelInfo>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawLabel {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default, rename = "threadsUnread")]
+    threads_unread: u32,
+    #[serde(default, rename = "threadsTotal")]
+    threads_total: u32,
+}
+
+const MAX_LABELS: usize = 20;
+
+/// Liczniki skrzynki i własnych etykiet (etykiety systemowe poza Odebrane i Spam są pomijane).
+pub async fn mail_stats(state: &AppState) -> Result<MailStats, String> {
+    #[derive(Deserialize, Default)]
+    struct LabelList {
+        #[serde(default)]
+        labels: Vec<RawLabel>,
+    }
+    let token = access_token(state).await?;
+    let list: LabelList = get_json(&state.http, &token, "labels", &[]).await?;
+    let mut user: Vec<RawLabel> = list
+        .labels
+        .into_iter()
+        .filter(|l| l.kind == "user" && crate::labels::check_user_label_id(&l.id).is_ok())
+        .collect();
+    user.sort_by_key(|l| l.name.to_lowercase());
+    user.truncate(MAX_LABELS);
+
+    let mut ids: Vec<String> = vec!["INBOX".to_string(), "SPAM".to_string()];
+    ids.extend(user.iter().map(|l| l.id.clone()));
+    let mut set = JoinSet::new();
+    for id in ids {
+        let http = state.http.clone();
+        let tok = token.clone();
+        set.spawn(async move {
+            let r: Result<RawLabel, String> = get_json(&http, &tok, &format!("labels/{id}"), &[]).await;
+            (id, r)
+        });
+    }
+    let mut got: std::collections::HashMap<String, RawLabel> = std::collections::HashMap::new();
+    while let Some(r) = set.join_next().await {
+        let (id, res) = r.map_err(|e| e.to_string())?;
+        got.insert(id, res?);
+    }
+    let inbox = got.remove("INBOX").unwrap_or_default();
+    let spam = got.remove("SPAM").unwrap_or_default();
+    let labels = user
+        .into_iter()
+        .map(|l| LabelInfo { unread: got.get(&l.id).map(|g| g.threads_unread).unwrap_or(0), id: l.id, name: l.name })
+        .collect();
+    Ok(MailStats {
+        inbox_unread: inbox.threads_unread,
+        inbox_total: inbox.threads_total,
+        spam_unread: spam.threads_unread,
+        labels,
+    })
+}
+
+pub async fn create_label(state: &AppState, name: &str) -> Result<LabelInfo, String> {
+    let name = crate::labels::clean_label_name(name)?;
+    let body = serde_json::json!({
+        "name": name,
+        "labelListVisibility": "labelShow",
+        "messageListVisibility": "show",
+    });
+    let text = post_json(state, "labels", &body).await.map_err(|e| {
+        if e.contains("409") {
+            "Etykieta o tej nazwie już istnieje.".to_string()
+        } else {
+            e
+        }
+    })?;
+    let raw: RawLabel = serde_json::from_str(&text).map_err(|e| format!("Nieoczekiwana odpowiedź Gmail: {e}"))?;
+    crate::labels::check_user_label_id(&raw.id)?;
+    Ok(LabelInfo { id: raw.id, name: raw.name, unread: 0 })
+}
+
+/// Dodaje lub zdejmuje własną etykietę z wątku (etykiety systemowe są tu niedozwolone).
+pub async fn set_thread_label(state: &AppState, id: &str, label: &str, add: bool) -> Result<(), String> {
+    check_id(id)?;
+    crate::labels::check_user_label_id(label)?;
+    let body = if add {
+        serde_json::json!({ "addLabelIds": [label], "removeLabelIds": [] })
+    } else {
+        serde_json::json!({ "addLabelIds": [], "removeLabelIds": [label] })
+    };
+    post_json(state, &format!("threads/{id}/modify"), &body).await?;
+    Ok(())
 }
 
 // ---------- Zapis: wysyłanie, wersje robocze, akcje na wątkach ----------
@@ -810,7 +1113,21 @@ fn summarize(t: &RawThread, my_email: &str, f: &Filters<'_>) -> ThreadSummary {
             .map(Risk::from)
             .unwrap_or_else(|| Assessment::none().into()),
         dismissed: f.dismissed.contains(&t.id),
+        labels: thread_labels(t),
     }
+}
+
+/// Suma etykiet wszystkich wiadomości wątku (bez duplikatów, w kolejności pierwszego wystąpienia).
+fn thread_labels(t: &RawThread) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for m in &t.messages {
+        for l in &m.label_ids {
+            if !out.contains(l) {
+                out.push(l.clone());
+            }
+        }
+    }
+    out
 }
 
 /// Nagłówek (zdekodowany z MIME), pusty gdy go nie ma.

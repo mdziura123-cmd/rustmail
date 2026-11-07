@@ -1,6 +1,7 @@
 export type FolderId =
   | "inbox" | "unread" | "sent" | "drafts" | "spam"
-  | "suspicious" | "trash" | "archive" | "starred" | "important";
+  | "suspicious" | "trash" | "archive" | "starred" | "important"
+  | `label:${string}`;
 
 export interface Folder {
   id: FolderId;

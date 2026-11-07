@@ -29,11 +29,41 @@ export interface ThreadSummary {
   count: number;
   risk: Risk;
   dismissed: boolean;
+  labels?: string[];
 }
 
 export interface ThreadPage {
   threads: ThreadSummary[];
   nextPageToken: string | null;
+  /** Prawda, gdy wynik pochodzi z lokalnej pamięci (brak połączenia). */
+  offline: boolean;
+}
+
+export interface CacheStatus {
+  available: boolean;
+  enabled: boolean;
+  ready: boolean;
+  threads: number;
+  dbPath: string;
+}
+
+export interface LabelInfo {
+  id: string;
+  name: string;
+  unread: number;
+}
+
+export interface PollResult {
+  inboxUnread: number;
+  spamUnread: number;
+  labels: LabelInfo[];
+  notified: number;
+}
+
+export interface SyncResult {
+  active: boolean;
+  changed: string[];
+  reset: boolean;
 }
 
 export interface Attachment {
@@ -86,6 +116,8 @@ export interface ThreadDetail {
   inTrash: boolean;
   isDraft: boolean;
   dismissed: boolean;
+  offline?: boolean;
+  labels?: string[];
 }
 
 export interface OutAttachment {
