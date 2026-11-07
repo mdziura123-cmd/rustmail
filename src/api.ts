@@ -1,8 +1,44 @@
 import { invoke } from "@tauri-apps/api/core";
+import { cleanDisplay } from "./util";
 import type {
   AppInfo, AuthStatus, CacheStatus, DraftContent, LabelInfo, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
 } from "./types";
+
+/** Lista nie może wisieć w nieskończoność: po limicie czasu pokazujemy błąd zamiast pustego ekranu. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error("Gmail nie odpowiedział na czas. Spróbuj ponownie.")), ms);
+    p.then((v) => { window.clearTimeout(t); resolve(v); }, (e) => { window.clearTimeout(t); reject(e); });
+  });
+}
+
+function cleanPage(p: ThreadPage): ThreadPage {
+  return {
+    ...p,
+    threads: p.threads.map((t) => ({
+      ...t,
+      subject: cleanDisplay(t.subject, 200),
+      participants: cleanDisplay(t.participants, 120),
+      snippet: cleanDisplay(t.snippet, 200),
+      risk: { ...t.risk, reasons: t.risk.reasons.map((r) => cleanDisplay(r, 300)) },
+    })),
+  };
+}
+
+function cleanDetail(d: ThreadDetail): ThreadDetail {
+  return {
+    ...d,
+    subject: cleanDisplay(d.subject, 300),
+    messages: d.messages.map((m) => ({
+      ...m,
+      from: cleanDisplay(m.from, 120),
+      to: cleanDisplay(m.to, 500),
+      cc: cleanDisplay(m.cc, 500),
+      risk: { ...m.risk, reasons: m.risk.reasons.map((r) => cleanDisplay(r, 300)) },
+    })),
+  };
+}
 
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
@@ -13,10 +49,10 @@ export const api = {
   signIn: () => invoke<string>("sign_in"),
   signOut: () => invoke<void>("sign_out"),
   listThreads: (folder: string, pageToken: string | null) =>
-    invoke<ThreadPage>("list_threads", { folder, pageToken }),
-  getThread: (id: string) => invoke<ThreadDetail>("get_thread", { id }),
+    withTimeout(invoke<ThreadPage>("list_threads", { folder, pageToken }), 60_000).then(cleanPage),
+  getThread: (id: string) => invoke<ThreadDetail>("get_thread", { id }).then(cleanDetail),
   searchThreads: (query: string, pageToken: string | null) =>
-    invoke<ThreadPage>("search_threads", { query, pageToken }),
+    invoke<ThreadPage>("search_threads", { query, pageToken }).then(cleanPage),
   syncNow: () => invoke<SyncResult>("sync_now"),
   pollMail: (notifyEnabled: boolean, showContent: boolean) =>
     invoke<PollResult>("poll_mail", { notifyEnabled, showContent }),
