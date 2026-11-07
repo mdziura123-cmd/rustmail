@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isSafeHref, sanitizeHtml } from "./sanitize";
+import { FONTS, isSafeHref, SIZES, sanitizeHtml } from "./sanitize";
 
 interface Props {
   initialHtml: string;
@@ -51,6 +51,19 @@ export function RichEditor({ initialHtml, onChange, disabled }: Props) {
     }
   };
 
+  // Lista rozwijana odbiera fokus edytorowi, więc zaznaczenie zapamiętujemy i przywracamy.
+  const applyWithSelection = (name: string, value: string) => {
+    if (!value) return;
+    ref.current?.focus();
+    const sel = window.getSelection();
+    if (sel && savedRange.current) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+    }
+    document.execCommand(name, false, value);
+    emit();
+  };
+
   const applyLink = () => {
     if (!isSafeHref(href) || href.trim().length < 8) {
       setLinkErr("Adres musi zaczynać się od https://, http:// lub mailto:");
@@ -92,6 +105,18 @@ export function RichEditor({ initialHtml, onChange, disabled }: Props) {
         {btn("B", "Pogrubienie", () => cmd("bold"), "b")}
         {btn("I", "Kursywa", () => cmd("italic"), "i")}
         {btn("U", "Podkreślenie", () => cmd("underline"), "u")}
+        <select className="tb-select" aria-label="Czcionka" disabled={disabled} value=""
+          onMouseDown={rememberSelection} onFocus={rememberSelection}
+          onChange={(e) => applyWithSelection("fontName", e.target.value)}>
+          <option value="">Czcionka</option>
+          {FONTS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+        </select>
+        <select className="tb-select" aria-label="Rozmiar czcionki" disabled={disabled} value=""
+          onMouseDown={rememberSelection} onFocus={rememberSelection}
+          onChange={(e) => applyWithSelection("fontSize", e.target.value)}>
+          <option value="">Rozmiar</option>
+          {SIZES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
         {btn("• Lista", "Lista punktowana", () => cmd("insertUnorderedList"))}
         {btn("1. Lista", "Lista numerowana", () => cmd("insertOrderedList"))}
         {btn("Link", "Wstaw link", () => { rememberSelection(); setLinkOpen((v) => !v); })}

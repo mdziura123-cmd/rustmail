@@ -44,3 +44,4 @@
 .modal textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); resize: vertical; }
 .modal-actions { display: flex; gap: 10px; }
 .modal-actions button:not(.primary) { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.tb-select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); max-width: 130px; }

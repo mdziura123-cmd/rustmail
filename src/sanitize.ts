@@ -3,8 +3,17 @@
 // i wszelkie atrybuty poza href w linkach są usuwane. DOMParser nie uruchamia skryptów.
 
 const ALLOWED = new Set([
-  "P", "BR", "DIV", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "UL", "OL", "LI", "A", "BLOCKQUOTE",
+  "P", "BR", "DIV", "SPAN", "B", "STRONG", "I", "EM", "U", "S", "UL", "OL", "LI", "A", "BLOCKQUOTE", "FONT",
 ]);
+
+/** Czcionki dostępne w edytorze (bezpieczne, powszechnie dostępne u odbiorców). */
+export const FONTS = ["Arial", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Courier New"];
+/** Rozmiary w skali HTML 1–7 (3 = normalny). */
+export const SIZES: { value: string; label: string }[] = [
+  { value: "1", label: "Bardzo mały" }, { value: "2", label: "Mały" }, { value: "3", label: "Normalny" },
+  { value: "4", label: "Średni" }, { value: "5", label: "Duży" }, { value: "6", label: "Bardzo duży" },
+  { value: "7", label: "Największy" },
+];
 const DROP_WITH_CONTENT = new Set([
   "SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "IMG", "SVG", "LINK", "META", "FORM", "INPUT",
   "BUTTON", "TEXTAREA", "SELECT", "VIDEO", "AUDIO", "CANVAS", "NOSCRIPT", "TEMPLATE", "HEAD", "TITLE",
@@ -35,6 +44,12 @@ function clean(node: Node, out: Node, doc: Document) {
         copy.setAttribute("href", href.trim());
         copy.setAttribute("rel", "noopener noreferrer");
       }
+    }
+    if (tag === "FONT") {
+      const face = (el.getAttribute("face") ?? "").trim();
+      const size = (el.getAttribute("size") ?? "").trim();
+      if (FONTS.some((f) => f.toLowerCase() === face.toLowerCase())) copy.setAttribute("face", face);
+      if (/^[1-7]$/.test(size)) copy.setAttribute("size", size);
     }
     if (tag === "BLOCKQUOTE") {
       copy.setAttribute("style", "margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex");
