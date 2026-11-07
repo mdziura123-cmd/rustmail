@@ -21,7 +21,7 @@
     "active": true,
     "targets": ["appimage"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
-    "category": "Email",
+    "category": "Productivity",
     "shortDescription": "Bezpieczny klient poczty Gmail",
     "longDescription": "RustMail – konwersacyjny klient Gmail z naciskiem na bezpieczeństwo.",
     "linux": { "appimage": { "bundleMediaFramework": false } }
