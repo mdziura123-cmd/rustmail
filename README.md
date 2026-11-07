@@ -24,28 +24,31 @@ chmod +x dist-release/RustMail-x86_64.AppImage
 
 Jeśli okno jest puste, spróbuj `WEBKIT_DISABLE_DMABUF_RENDERER=0` lub `GDK_BACKEND=x11`.
 
-## Stan projektu (wersja 0.4.0, etap 4)
+## Stan projektu (wersja 0.5.0, etap 5)
 
-Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google, odczyt wątków, redagowanie i wysyłanie
-(etap 3: odpowiedzi, przekazywanie, wersje robocze, podpis, czcionki, akcje na konwersacji) oraz – nowe w etapie 4:
+Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google, odczyt, redagowanie i wysyłanie (etap 3),
+bezpieczne wyświetlanie HTML, blokada obrazów, potwierdzenia linków i pobieranie załączników (etap 4) oraz – nowe
+w etapie 5 – **ocena ryzyka phishingu liczona wyłącznie na Twoim komputerze** (treść poczty nie jest nigdzie wysyłana):
 
-- **Wiadomości HTML** pokazywane po oczyszczeniu: bez skryptów, ramek, formularzy i niebezpiecznych stylów. Zawsze można
-  przełączyć na zwykły tekst.
-- **Zdalne obrazy są zablokowane**, dopóki nie klikniesz „Pokaż obrazy” (lub „Zawsze ufaj nadawcy”). Obraz pobiera aplikacja,
-  tylko przez https, tylko z publicznych adresów (nigdy z Twojej sieci lokalnej), do 5 MB, typy PNG/JPEG/GIF/WebP.
-- **Linki** otwierają się w przeglądarce dopiero po potwierdzeniu, z pokazanym prawdziwym adresem i ostrzeżeniami
-  (tekst linku udaje inną stronę, adres IP, „@” w adresie, znaki xn--, brak szyfrowania).
-- **Załączniki** pobierane tylko na kliknięcie do ~/Downloads, bez prawa uruchamiania i bez nadpisywania plików.
-  Pliki wykonywalne i skrypty (także „faktura.pdf.exe”) wymagają dodatkowego potwierdzenia.
+- wyniki SPF/DKIM/DMARC odczytywane z nagłówka dodanego przez Gmail (nagłówki podstawione przez nadawcę są ignorowane),
+- nazwa nadawcy udająca znaną markę lub zawierająca obcy adres e-mail, domeny łudząco podobne do znanych (paypa1.com,
+  arnazon.com, allegro-pl.com), znaki międzynarodowe w domenie, inny adres „Reply-To”,
+- presja czasu i prośby o hasła/kody/dane karty w temacie i treści,
+- linki: tekst niezgodny z adresem, „@” w adresie, adres IP, skracacze, brak szyfrowania,
+- załączniki: pliki wykonywalne i skrypty, strony HTML, archiwa.
 
-Ograniczenia etapu 4: obrazy wbudowane w wiadomość (cid:) nie są wyświetlane; zaufani nadawcy są zapamiętywani lokalnie
-(w pamięci aplikacji, nie w Gmailu); pobieranie obrazu nie przechodzi przez przekierowania poza trzy kolejne;
-to jeszcze nie jest skaner wirusów ani wykrywanie phishingu na podstawie treści (etapy 5–6). Z etapu 3 pozostają:
-lokalny podpis, brak podpowiedzi adresów, przekazywanie bez załączników oryginału, brak operacji grupowych.
+Każda ocena (brak / uwaga / podejrzane) ma wypisane powody po polsku. Nad wiadomością pojawia się pasek ostrzeżenia, na liście
+plakietka, a przy wysokim ryzyku linki i załączniki wymagają dodatkowego potwierdzenia, a obrazy się nie ładują nawet od
+zaufanego nadawcy. Folder „Podejrzane” pokazuje wiadomości z ostrzeżeniem spośród ostatnich 100 wątków skrzynki odbiorczej
+(to widok w aplikacji – nic nie jest przenoszone ani usuwane w Gmailu). „To fałszywy alarm” zapisuje decyzję lokalnie.
+
+Ograniczenia etapu 5: to reguły, nie gwarancja – część oszustw przejdzie, a część zwykłych wiadomości dostanie ostrzeżenie.
+Lista marek jest wbudowana i ograniczona (ok. 30). Ocena na liście (z nagłówków) jest wstępna; pełna – po otwarciu wątku.
+Folder „Podejrzane” sprawdza tylko 100 ostatnich wątków. Brak skanera antywirusowego i listy blokowanych nadawców (etap 6).
 
 ## Niezweryfikowane
 
-Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `compose.rs`, `signature.rs` i `safety.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
+Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `compose.rs`, `signature.rs`, `safety.rs`, `phishing.rs` i `dismissed.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
 zostały uruchomione i przetestowane osobno, a czyszczenie HTML (`mailHtml.ts`) sprawdzone w prawdziwej przeglądarce Chromium na
 złośliwych przykładach; pozostały kod
 (komunikacja z Gmailem, polecenia Tauri, komponenty React) zweryfikowano tylko składniowo i typowo, więc pierwszy build
