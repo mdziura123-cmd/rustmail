@@ -35,6 +35,7 @@ pub fn app_info() -> AppInfo {
 #[derive(Serialize)]
 pub struct AuthStatus {
     pub configured: bool,
+    pub builtin: bool,
     pub email: Option<String>,
 }
 
@@ -46,7 +47,7 @@ pub fn auth_status() -> Result<AuthStatus, String> {
     } else {
         None
     };
-    Ok(AuthStatus { configured, email })
+    Ok(AuthStatus { configured, builtin: auth::builtin_creds().is_some(), email })
 }
 
 #[tauri::command]

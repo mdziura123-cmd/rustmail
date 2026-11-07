@@ -13,7 +13,8 @@ Nazwy w konsoli Google bywają zmieniane, więc jeśli jakiejś pozycji nie widz
    - użytkownicy testowi (Audience): dodaj swój adres Gmail.
 5. **Dane logowania → Utwórz dane logowania → Identyfikator klienta OAuth →** typ aplikacji **Aplikacja komputerowa**.
    Skopiuj **Identyfikator klienta** i **Klucz tajny klienta**.
-6. W RustMail wklej oba dane w panelu „Połącz konto Gmail”, kliknij **Zapisz dane klienta**, potem **Zaloguj przez Google**.
+6. W RustMail wklej oba dane w panelu „Połącz konto Gmail”, kliknij **Zapisz dane klienta**, potem **Zaloguj przez Google**
+   (albo wbuduj je w aplikację, patrz sekcja na końcu tego pliku).
 7. W przeglądarce pojawi się ostrzeżenie „Google nie zweryfikowało tej aplikacji”. To normalne dla własnego projektu:
    **Zaawansowane → Przejdź do RustMail (niebezpieczne)** i zezwól na dostęp do odczytu poczty.
 
@@ -27,3 +28,20 @@ Nazwy w konsoli Google bywają zmieniane, więc jeśli jakiejś pozycji nie widz
 - Klucz tajny klienta i token odświeżania trafiają do systemowego magazynu haseł (KDE Wallet / GNOME Keyring),
   nigdy do plików. Hasło do Google nigdy nie jest widoczne dla aplikacji.
 - Odwołanie dostępu: przycisk **Wyloguj** w RustMail albo https://myaccount.google.com/permissions.
+
+## Logowanie jak w Thunderbirdzie (dane klienta wbudowane w aplikację)
+
+Po wykonaniu kroków 1–5 możesz wbudować dane klienta w aplikację, żeby w programie była tylko opcja
+„Zaloguj przez Google”, bez formularza:
+
+1. W repozytorium na GitHubie: **Settings → Secrets and variables → Actions → New repository secret**.
+2. Dodaj dwa sekrety: `GOOGLE_CLIENT_ID` (identyfikator klienta) i `GOOGLE_CLIENT_SECRET` (klucz tajny klienta).
+3. Uruchom budowanie ponownie (**Actions → Build AppImage → Run workflow**) i pobierz nowy plik.
+
+Uwagi:
+- Dane trafiają do pliku AppImage. Dla aplikacji komputerowych Google nie traktuje klucza tajnego klienta jako tajemnicy,
+  ale każdy, kto pobierze Twój AppImage (np. z publicznego wydania), może go wyciągnąć i użyć Twojego projektu jako własnego.
+  Dla użytku osobistego to akceptowalne.
+- Tak działa też Thunderbird, ale Mozilla ma zarejestrowaną i zweryfikowaną przez Google aplikację. Własny projekt
+  pokaże ostrzeżenie „Google nie zweryfikowało tej aplikacji” (krok 7) i w trybie testowym ma limit 100 użytkowników.
+  Publiczna, zweryfikowana aplikacja z dostępem do poczty wymaga u Google przeglądu bezpieczeństwa (zwykle płatnego).

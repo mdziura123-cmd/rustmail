@@ -7,6 +7,7 @@ export interface AppInfo {
 
 export interface AuthStatus {
   configured: boolean;
+  builtin?: boolean;
   email: string | null;
 }
 

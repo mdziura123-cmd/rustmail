@@ -38,11 +38,11 @@ export function AuthPanel({ auth, error, busy, onSave, onSignIn, onClear }: Prop
         </>
       ) : (
         <>
-          <p>Dane klienta są zapisane. Logowanie odbywa się w przeglądarce, RustMail nie widzi Twojego hasła.</p>
+          <p>Kliknij przycisk, aby zalogować się przez Google. Otworzy się przeglądarka, a po zalogowaniu wrócisz tutaj. RustMail nie widzi Twojego hasła.</p>
           <button className="solid" disabled={busy} onClick={onSignIn}>
             {busy ? "Czekam na logowanie w przeglądarce…" : "Zaloguj przez Google"}
           </button>
-          <button disabled={busy} onClick={onClear}>Zmień dane klienta</button>
+          {!auth.builtin && <button disabled={busy} onClick={onClear}>Zmień dane klienta</button>}
         </>
       )}
     </div>

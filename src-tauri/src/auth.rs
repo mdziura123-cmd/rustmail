@@ -47,7 +47,30 @@ pub struct ClientCreds {
     pub client_secret: String,
 }
 
+fn creds_from(id: Option<&str>, secret: Option<&str>) -> Option<ClientCreds> {
+    match (id, secret) {
+        (Some(i), Some(s)) if !i.trim().is_empty() && !s.trim().is_empty() => Some(ClientCreds {
+            client_id: i.trim().to_string(),
+            client_secret: s.trim().to_string(),
+        }),
+        _ => None,
+    }
+}
+
+/// Dane klienta Google wbudowane w aplikację podczas budowania
+/// (zmienne RUSTMAIL_GOOGLE_CLIENT_ID i RUSTMAIL_GOOGLE_CLIENT_SECRET). Dzięki nim logowanie
+/// działa jak w Thunderbirdzie: jedno kliknięcie, bez ręcznego wklejania kodów.
+pub fn builtin_creds() -> Option<ClientCreds> {
+    creds_from(
+        option_env!("RUSTMAIL_GOOGLE_CLIENT_ID"),
+        option_env!("RUSTMAIL_GOOGLE_CLIENT_SECRET"),
+    )
+}
+
 pub fn load_creds() -> Result<Option<ClientCreds>, String> {
+    if let Some(c) = builtin_creds() {
+        return Ok(Some(c));
+    }
     match secrets::get(KEY_CLIENT)? {
         Some(s) => serde_json::from_str(&s).map(Some).map_err(|e| e.to_string()),
         None => Ok(None),
@@ -251,6 +274,15 @@ pub async fn revoke(http: &reqwest::Client, token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_creds_require_both_values() {
+        assert!(creds_from(None, None).is_none());
+        assert!(creds_from(Some("id"), None).is_none());
+        assert!(creds_from(Some("  "), Some("sekret")).is_none());
+        let c = creds_from(Some(" id.apps.googleusercontent.com "), Some("sekret")).unwrap();
+        assert_eq!(c.client_id, "id.apps.googleusercontent.com");
+    }
 
     #[test]
     fn pkce_matches_rfc7636_example() {
