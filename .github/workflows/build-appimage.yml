@@ -1,0 +1,67 @@
+name: Build AppImage
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    # Ubuntu 22.04 = starsze glibc, dzięki czemu AppImage działa też na nowszych systemach (np. Bazzite).
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # potrzebne tylko do publikacji wydania po otagowaniu (v*)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Zależności systemowe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file pkg-config \
+            libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev \
+            librsvg2-dev libgtk-3-dev patchelf desktop-file-utils
+
+      - name: Zależności frontendu i kontrola typów
+        run: |
+          npm install
+          npm run typecheck
+
+      - name: Testy Rust
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Budowanie AppImage
+        env:
+          NO_STRIP: "true"
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: npm run tauri build -- --bundles appimage
+
+      - name: Nazwa pliku i suma SHA-256
+        run: |
+          mkdir -p dist-release
+          cp "$(ls -t src-tauri/target/release/bundle/appimage/*.AppImage | head -n1)" dist-release/RustMail-x86_64.AppImage
+          chmod +x dist-release/RustMail-x86_64.AppImage
+          (cd dist-release && sha256sum RustMail-x86_64.AppImage > RustMail-x86_64.AppImage.sha256)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RustMail-x86_64.AppImage
+          path: dist-release/*
+          if-no-files-found: error
+
+      - name: Publikacja wydania (tylko dla tagów v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-release/*
