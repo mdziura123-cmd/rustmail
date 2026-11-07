@@ -97,23 +97,20 @@ function bodyHtml(text: string): string {
   return escapeHtml(text.slice(0, 20000).trimEnd()).replace(/\r?\n/g, "<br>");
 }
 
+/** Odpowiedź bez cytowania: poprzednie wiadomości są widoczne w konwersacji tuż nad edytorem. */
 export function buildReply(
-  messages: MessageView[], subject: string, me: string, all: boolean, signature: string,
-  threadId: string, fmtDate: (ms: number) => string,
+  messages: MessageView[], subject: string, me: string, all: boolean, signature: string, threadId: string,
 ): ComposeInit | null {
   const m = replyTarget(messages);
   if (!m) return null;
   const r = replyRecipients(m, me, all);
-  const quote =
-    `<div>${escapeHtml(fmtDate(m.dateMs))}, ${escapeHtml(m.from === "Ja" ? me : m.from)} napisał(a):</div>` +
-    `<blockquote>${bodyHtml(m.body)}</blockquote>`;
   return {
     mode: all ? "replyAll" : "reply",
     to: r.to,
     cc: r.cc,
     bcc: "",
     subject: subjectWith("Re", subject),
-    html: `<div><br></div>${signatureHtml(signature)}<div><br></div>${quote}`,
+    html: `<div><br></div>${signatureHtml(signature)}`,
     threadId,
     inReplyTo: m.messageId || null,
     references: [m.references, m.messageId].filter((x) => x.trim()).join(" ") || null,

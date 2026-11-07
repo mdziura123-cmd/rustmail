@@ -32,6 +32,12 @@ export interface Attachment {
   name: string;
   mime: string;
   size: number;
+  id?: string | null;
+}
+
+export interface SavedFile {
+  path: string;
+  risky: boolean;
 }
 
 export interface MessageView {
@@ -42,6 +48,7 @@ export interface MessageView {
   dateMs: number;
   body: string;
   htmlOnly: boolean;
+  html: string;
   attachments: Attachment[];
   to: string;
   cc: string;

@@ -2,6 +2,8 @@ mod auth;
 mod commands;
 mod compose;
 mod gmail;
+mod remote;
+mod safety;
 mod secrets;
 mod signature;
 mod update;
@@ -30,6 +32,9 @@ pub fn run() {
             commands::delete_draft,
             commands::open_draft,
             commands::thread_action,
+            commands::fetch_image,
+            commands::open_url,
+            commands::download_attachment,
             commands::get_signature,
             commands::set_signature,
             update::check_update,

@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::auth::{self, AppState, ClientCreds};
 use crate::compose::{self, OutAttachment, Outgoing};
-use crate::{gmail, secrets, signature};
+use crate::{gmail, remote, safety, secrets, signature};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct AppInfo {
@@ -214,6 +214,37 @@ pub async fn open_draft(state: State<'_, AppState>, thread_id: String) -> Result
 #[tauri::command]
 pub async fn thread_action(state: State<'_, AppState>, id: String, action: String) -> Result<(), String> {
     gmail::thread_action(&state, &id, &action).await
+}
+
+// ---------- Etap 4: zdalna zawartość, linki, załączniki (tylko na żądanie użytkownika) ----------
+
+#[tauri::command]
+pub async fn fetch_image(url: String) -> Result<String, String> {
+    remote::fetch_image(&url).await
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    remote::open_external(&url)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedFile {
+    pub path: String,
+    pub risky: bool,
+}
+
+#[tauri::command]
+pub async fn download_attachment(
+    state: State<'_, AppState>,
+    message_id: String,
+    attachment_id: String,
+    name: String,
+) -> Result<SavedFile, String> {
+    let bytes = gmail::download_attachment(&state, &message_id, &attachment_id).await?;
+    let path = remote::save_download(&name, &bytes)?;
+    Ok(SavedFile { path: path.to_string_lossy().into_owned(), risky: safety::risky_extension(&name) })
 }
 
 fn signature_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {

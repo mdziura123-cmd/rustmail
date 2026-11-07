@@ -75,6 +75,8 @@ struct Body {
     #[serde(default)]
     size: u64,
     data: Option<String>,
+    #[serde(default, rename = "attachmentId")]
+    attachment_id: Option<String>,
 }
 
 // ---------- Modele dla interfejsu ----------
@@ -104,6 +106,8 @@ pub struct AttachmentInfo {
     pub name: String,
     pub mime: String,
     pub size: u64,
+    /// Identyfikator do pobrania; brak oznacza, że Gmail nie udostępnił załącznika do pobrania.
+    pub id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -116,6 +120,8 @@ pub struct MessageView {
     pub date_ms: i64,
     pub body: String,
     pub html_only: bool,
+    /// Surowy HTML wiadomości (niezaufany!). Interfejs czyści go przed wyświetleniem.
+    pub html: String,
     pub attachments: Vec<AttachmentInfo>,
     pub to: String,
     pub cc: String,
@@ -485,6 +491,36 @@ pub async fn thread_action(state: &AppState, id: &str, action: &str) -> Result<(
     Ok(())
 }
 
+// ---------- Pobieranie załącznika ----------
+
+const MAX_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
+
+/// Pobiera zawartość załącznika (wyłącznie na żądanie użytkownika).
+pub async fn download_attachment(state: &AppState, message_id: &str, attachment_id: &str) -> Result<Vec<u8>, String> {
+    check_id(message_id)?;
+    let id_ok = !attachment_id.is_empty()
+        && attachment_id.len() <= 2000
+        && attachment_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !id_ok {
+        return Err("Niepoprawny identyfikator załącznika".to_string());
+    }
+    #[derive(Deserialize)]
+    struct AttachBody {
+        #[serde(default)]
+        data: String,
+    }
+    let token = access_token(state).await?;
+    let body: AttachBody =
+        get_json(&state.http, &token, &format!("messages/{message_id}/attachments/{attachment_id}"), &[]).await?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(body.data.trim_end_matches('='))
+        .map_err(|_| "Nie można odczytać załącznika (błędne dane).".to_string())?;
+    if bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err("Załącznik jest zbyt duży.".to_string());
+    }
+    Ok(bytes)
+}
+
 // ---------- Odczyt wersji roboczej do dalszej edycji ----------
 
 #[derive(Deserialize)]
@@ -675,6 +711,12 @@ fn message_view(m: &RawMessage, my_email: &str) -> MessageView {
         date_ms: m.internal_date.parse::<i64>().unwrap_or(0),
         body: body.chars().take(100_000).collect(),
         html_only,
+        html: m
+            .payload
+            .as_ref()
+            .and_then(|p| find_part(p, "text/html"))
+            .map(|part| decode_part(part).chars().take(400_000).collect())
+            .unwrap_or_default(),
         attachments,
         to: hdr(m, "To"),
         cc: hdr(m, "Cc"),
@@ -727,6 +769,7 @@ fn collect_attachments(p: &Part, out: &mut Vec<AttachmentInfo>) {
             name: p.filename.clone(),
             mime: p.mime_type.clone(),
             size: p.body.as_ref().map(|b| b.size).unwrap_or(0),
+            id: p.body.as_ref().and_then(|b| b.attachment_id.clone()),
         });
     }
     for c in &p.parts {

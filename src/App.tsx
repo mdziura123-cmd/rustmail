@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
+import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
 import { BACKUP_KEY, Compose } from "./Compose";
+import { MessageBody } from "./MessageBody";
+import { splitQuoted } from "./quoteTrim";
 import { SignatureDialog } from "./SignatureDialog";
 import { buildForward, buildNew, buildReply, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
-import { fmtDate, fmtFull, fmtSize } from "./util";
+import { fmtDate, fmtFull } from "./util";
 import type { AppInfo, AuthStatus, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import "./styles.css";
 import "./compose.css";
@@ -228,7 +231,7 @@ export default function App() {
 
   const reply = (all: boolean) => {
     if (!detail || !email) return;
-    const init = buildReply(detail.messages, detail.subject, email, all, signature, detail.id, fmtFull);
+    const init = buildReply(detail.messages, detail.subject, email, all, signature, detail.id);
     if (init) startCompose(init);
   };
   const forward = () => {
@@ -460,22 +463,17 @@ export default function App() {
                 {detail.messages.map((m) => {
                   const folded = collapsed.has(m.id);
                   return (
-                    <article key={m.id} className={"bubble " + (m.mine ? "sent" : "received")}>
+                    <article key={m.id} className={"bubble " + (m.mine ? "sent" : "received") + (m.html ? " wide" : "")}>
                       <button className="bubble-head" onClick={() => toggleMsg(m.id)} aria-expanded={!folded}>
                         <strong title={m.fromEmail}>{m.from}</strong>
                         <time>{fmtFull(m.dateMs)}</time>
                       </button>
                       {folded ? (
-                        <p className="fold">{m.body.slice(0, 120)}</p>
+                        <p className="fold">{splitQuoted(m.body).main.slice(0, 120)}</p>
                       ) : (
                         <>
-                          {m.htmlOnly && (
-                            <p className="note">Wiadomość HTML pokazana jako uproszczony tekst. Bezpieczne renderowanie pełnego HTML pojawi się w etapie 5.</p>
-                          )}
-                          <p className="msg">{m.body || "(brak treści tekstowej)"}</p>
-                          {m.attachments.map((a) => (
-                            <div key={a.name + a.size} className="attach">{a.name} · {fmtSize(a.size)}</div>
-                          ))}
+                          <MessageBody m={m} />
+                          <Attachments m={m} />
                         </>
                       )}
                     </article>
