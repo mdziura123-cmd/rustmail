@@ -1,55 +1,62 @@
-# RustMail – etap 1 (szkielet)
+# RustMail – etap 2
 
-Klient Gmail dla Linuksa: Tauri 2 + Rust + React. Ten etap zawiera układ trzech paneli
-(foldery, lista, widok dymkowy), motyw jasny/ciemny/systemowy, zmianę szerokości paneli,
-minimalne uprawnienia Tauri i skrypt budujący AppImage. **Nie ma jeszcze integracji z Gmailem.**
+Klient Gmail dla Linuksa: Tauri 2 + Rust + React.
 
-## Budowanie przez GitHub Actions (zalecane, bez instalacji czegokolwiek lokalnie)
+## Co działa w tym etapie
 
-1. Załóż darmowe konto na github.com i utwórz **prywatne** repozytorium `rustmail`.
-2. W katalogu projektu:
-   ```bash
-   git init -b main && git add . && git commit -m "RustMail etap 1"
-   git remote add origin https://github.com/TWOJ_LOGIN/rustmail.git
-   git push -u origin main
-   ```
-3. Wejdź w zakładkę **Actions**. Workflow „Build AppImage” startuje sam po wysłaniu kodu (można go też uruchomić ręcznie).
-4. Po zakończeniu pobierz artefakt `RustMail-x86_64.AppImage` (to archiwum zip z plikiem AppImage i sumą SHA-256).
-5. Rozpakuj, nadaj prawa wykonywania (`chmod +x RustMail-x86_64.AppImage`) i uruchom. Archiwa z GitHuba nie zachowują bitu wykonywania.
+- Układ trzech paneli, motyw jasny/ciemny/systemowy, regulowana szerokość paneli.
+- Logowanie przez Google (OAuth 2.0 + PKCE, przekierowanie na 127.0.0.1), tokeny w KDE Wallet / GNOME Keyring.
+- Foldery Gmail (Odebrane, Nieprzeczytane, Wysłane, Wersje robocze, Spam, Kosz, Archiwum, Gwiazdka, Ważne) – tylko odczyt.
+- Konwersacje Gmail (wątki) w widoku dymkowym, rozwijanie i zwijanie, strony po 20 wątków.
+- Treść pokazywana wyłącznie jako zwykły tekst (HTML jest zamieniany na tekst). Bezpieczne renderowanie HTML: etap 5.
+- Samoaktualizacja z wydań GitHub (opis niżej).
 
-Wydanie z plikiem do pobrania: `git tag v0.1.0 && git push origin v0.1.0`.
+## Czego jeszcze nie ma
 
-## Budowanie lokalnie (alternatywa)
+Wysyłanie i redagowanie, oznaczanie i archiwizacja, lokalna baza i tryb offline, synchronizacja przyrostowa,
+filtry bezpieczeństwa, załączniki (widać tylko nazwy), powiadomienia, folder „Podejrzane” (jest pusty).
 
-### Lokalnie w distrobox (Bazzite, bez zmian w systemie hosta)
+## Konfiguracja Gmaila
 
-```bash
-./scripts/build-appimage.sh
-```
+Zobacz `docs/GOOGLE_OAUTH.md`.
 
-Skrypt tworzy kontener distrobox z Ubuntu 22.04, instaluje w nim Rust, Node i WebKitGTK,
-uruchamia `tsc` oraz `cargo test`, a potem buduje AppImage. Pierwszy build trwa kilkanaście minut.
-Wynik: `dist-release/RustMail-x86_64.AppImage` (+ `.sha256`, `VERSION.txt`).
+## Budowanie
+
+GitHub Actions buduje plik po każdej zmianie w gałęzi `main` (zakładka **Actions → artefakt**).
+Alternatywnie lokalnie: `./scripts/build-appimage.sh` (distrobox, nie zmienia systemu hosta).
 
 ## Uruchomienie
 
 ```bash
-chmod +x dist-release/RustMail-x86_64.AppImage
-./dist-release/RustMail-x86_64.AppImage
+chmod +x RustMail-x86_64.AppImage
+./RustMail-x86_64.AppImage
 # bez FUSE:
-./dist-release/RustMail-x86_64.AppImage --appimage-extract-and-run
+./RustMail-x86_64.AppImage --appimage-extract-and-run
 ```
 
-Jeśli okno jest puste, spróbuj `WEBKIT_DISABLE_DMABUF_RENDERER=0` lub `GDK_BACKEND=x11`.
+Jeśli okno jest puste: `GDK_BACKEND=x11 ./RustMail-x86_64.AppImage`.
 
-## Stan etapu 1
+## Aktualizacje automatyczne
 
-Działa: układ okna, wybór folderów, zmiana szerokości paneli (zapamiętywana), motyw, rozwijanie
-i zwijanie dymków, gwiazdka (lokalnie), komenda `app_info` z testami jednostkowymi.
-Nieaktywne (celowo wyłączone z opisem w podpowiedzi): „Dodaj konto Gmail” (etap 2) i „Nowa wiadomość” (etap 3).
-Przycisk „Pokaż układ z danymi przykładowymi” w pasku stanu wyświetla fikcyjne dane wyłącznie do oceny wyglądu.
+Aplikacja co 6 godzin (i 8 sekund po starcie) pyta GitHub o najnowsze wydanie. Gdy jest nowsze, pokazuje baner
+z pytaniem „Zaktualizować?”. Dopiero po kliknięciu **Zaktualizuj teraz** pobiera plik, sprawdza sumę SHA-256
+z wydania, zachowuje poprzednią wersję (`…AppImage.previous`) i podmienia plik. Potem proponuje ponowne uruchomienie.
+W pasku stanu można wyłączyć automatyczne sprawdzanie, sprawdzić ręcznie albo przywrócić poprzednią wersję.
+
+Wymagania:
+- repozytorium musi być **publiczne** (prywatne wymagałoby tokenu w aplikacji),
+- nowa wersja to **wydanie** (Releases) z tagiem `vX.Y.Z`; workflow sam ustawia wersję z tagu i dołącza
+  `RustMail-x86_64.AppImage` oraz `RustMail-x86_64.AppImage.sha256`,
+- aktualizacja działa tylko po uruchomieniu z pliku AppImage (nie z rozpakowanego katalogu),
+- katalog z plikiem AppImage musi być zapisywalny.
+
+Jak wydać nową wersję: GitHub → **Releases → Create a new release** → pole tagu: wpisz np. `v0.2.1` i **Create new tag**
+→ **Publish release**. Workflow zbuduje aplikację i dołączy pliki (kilkanaście minut).
+
+Ograniczenie: suma SHA-256 pochodzi z tego samego wydania, więc chroni przed uszkodzonym pobraniem, ale nie przed
+przejęciem konta GitHub. Podpisy kryptograficzne wydań można dodać później.
 
 ## Niezweryfikowane
 
-Kod nie był kompilowany w środowisku, w którym powstał (brak sieci). Pierwszy build może wymagać drobnych poprawek.
-Działanie AppImage na Bazzite KDE trzeba potwierdzić na Twoim komputerze.
+Kod nie był kompilowany ani uruchamiany w środowisku, w którym powstał (brak sieci), więc pierwszy build może wymagać poprawek.
+Logowanie, pobieranie poczty i samoaktualizacja nie były testowane na prawdziwym koncie ani na Bazzite.
