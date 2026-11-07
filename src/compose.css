@@ -73,3 +73,37 @@
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge-danger { color: #f2b8b5; } }
 .ok-line { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .quote-toggle { font-size: 12px; margin-top: 4px; display: block; }
+
+/* Etap 5: ostrzeżenia o phishingu */
+.risk-banner { margin: 10px 18px 0; padding: 12px 14px; border-radius: 10px; border: 1px solid; display: grid; gap: 6px; font-size: 13px; }
+.risk-banner.high { background: #fdecea; border-color: #b3261e; color: #5c0f0a; }
+.risk-banner.warn { background: #fff4d6; border-color: #b58105; color: #4a3500; }
+.risk-banner ul { margin: 0; padding-left: 20px; }
+.risk-banner .hint { font-size: 12px; opacity: .85; }
+.risk-banner .small { justify-self: start; background: #ffffff; color: #1a1a1a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .risk-banner.high { background: #3a1512; color: #f9d7d3; border-color: #e0534a; }
+  :root:not([data-theme="light"]) .risk-banner.warn { background: #382b08; color: #f6e2a8; border-color: #c9951a; }
+}
+:root[data-theme="dark"] .risk-banner.high { background: #3a1512; color: #f9d7d3; border-color: #e0534a; }
+:root[data-theme="dark"] .risk-banner.warn { background: #382b08; color: #f6e2a8; border-color: #c9951a; }
+.risk-note { margin: 10px 18px 0; font-size: 12px; color: var(--muted); }
+.bubble.risk-high { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
+.bubble.risk-warn { border-color: #b58105; }
+.risk-chip { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+.risk-chip.high { background: #b3261e; color: #ffffff; }
+.risk-chip.warn { background: #f2c14e; color: #3a2a00; }
+.list .hint { font-size: 12px; color: var(--muted); }
+
+/* Etap 6: skanowanie załączników, listy nadawców */
+.scan-result { display: grid; gap: 2px; flex-basis: 100%; }
+.wide-modal { width: min(640px, 100%); max-height: 90vh; overflow-y: auto; }
+.sender-now { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.sender-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.rule-list h4 { margin: 4px 0; font-size: 13px; }
+.rule-list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 140px; overflow-y: auto; }
+.rule-list li { display: flex; justify-content: space-between; gap: 10px; padding: 3px 8px; border-radius: 6px; font-size: 13px; }
+.rule-list li:hover { background: var(--panel-2); }
+.rule-add { display: flex; flex-wrap: wrap; gap: 8px; }
+.rule-add input { flex: 1; min-width: 180px; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); }
+.rule-add select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }

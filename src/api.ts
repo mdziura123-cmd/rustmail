@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AppInfo, AuthStatus, DraftContent, OutgoingMessage, SavedFile, SentInfo, ThreadAction, ThreadDetail,
+  AppInfo, AuthStatus, DraftContent, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   ThreadPage, UpdateInfo, UpdateState,
 } from "./types";
 
@@ -20,6 +20,10 @@ export const api = {
   deleteDraft: (draftId: string) => invoke<void>("delete_draft", { draftId }),
   openDraft: (threadId: string) => invoke<DraftContent>("open_draft", { threadId }),
   threadAction: (id: string, action: ThreadAction) => invoke<void>("thread_action", { id, action }),
+  getSenderLists: () => invoke<SenderLists>("get_sender_lists"),
+  addSenderRule: (kind: "blocked" | "allowed", entry: string) => invoke<string>("add_sender_rule", { kind, entry }),
+  removeSenderRule: (kind: "blocked" | "allowed", entry: string) => invoke<void>("remove_sender_rule", { kind, entry }),
+  setThreadSafe: (id: string, safe: boolean) => invoke<void>("set_thread_safe", { id, safe }),
   fetchImage: (url: string) => invoke<string>("fetch_image", { url }),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   downloadAttachment: (messageId: string, attachmentId: string, name: string) =>

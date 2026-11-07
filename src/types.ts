@@ -12,6 +12,12 @@ export interface AuthStatus {
   needsReauth?: boolean;
 }
 
+export interface Risk {
+  level: "none" | "warn" | "high";
+  score: number;
+  reasons: string[];
+}
+
 export interface ThreadSummary {
   id: string;
   subject: string;
@@ -21,6 +27,8 @@ export interface ThreadSummary {
   unread: boolean;
   starred: boolean;
   count: number;
+  risk: Risk;
+  dismissed: boolean;
 }
 
 export interface ThreadPage {
@@ -36,8 +44,17 @@ export interface Attachment {
 }
 
 export interface SavedFile {
-  path: string;
+  /** Brak ścieżki oznacza, że skaner wykrył zagrożenie i plik nie został zapisany. */
+  path: string | null;
   risky: boolean;
+  scan: "clean" | "infected" | "unavailable" | "failed";
+  scanDetail: string;
+  typeWarning: string | null;
+}
+
+export interface SenderLists {
+  blocked: string[];
+  allowed: string[];
 }
 
 export interface MessageView {
@@ -55,6 +72,7 @@ export interface MessageView {
   replyTo: string;
   messageId: string;
   references: string;
+  risk: Risk;
 }
 
 export interface ThreadDetail {
@@ -67,6 +85,7 @@ export interface ThreadDetail {
   inSpam: boolean;
   inTrash: boolean;
   isDraft: boolean;
+  dismissed: boolean;
 }
 
 export interface OutAttachment {

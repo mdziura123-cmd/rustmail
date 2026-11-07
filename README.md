@@ -24,31 +24,30 @@ chmod +x dist-release/RustMail-x86_64.AppImage
 
 Jeśli okno jest puste, spróbuj `WEBKIT_DISABLE_DMABUF_RENDERER=0` lub `GDK_BACKEND=x11`.
 
-## Stan projektu (wersja 0.5.0, etap 5)
+## Stan projektu (wersja 0.6.0, etap 6)
 
-Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google, odczyt, redagowanie i wysyłanie (etap 3),
-bezpieczne wyświetlanie HTML, blokada obrazów, potwierdzenia linków i pobieranie załączników (etap 4) oraz – nowe
-w etapie 5 – **ocena ryzyka phishingu liczona wyłącznie na Twoim komputerze** (treść poczty nie jest nigdzie wysyłana):
+Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google, odczyt, redagowanie i wysyłanie (etap 3), bezpieczny HTML,
+linki i załączniki (etap 4), ocena ryzyka phishingu z folderem „Podejrzane” (etap 5) oraz – nowe w etapie 6:
 
-- wyniki SPF/DKIM/DMARC odczytywane z nagłówka dodanego przez Gmail (nagłówki podstawione przez nadawcę są ignorowane),
-- nazwa nadawcy udająca znaną markę lub zawierająca obcy adres e-mail, domeny łudząco podobne do znanych (paypa1.com,
-  arnazon.com, allegro-pl.com), znaki międzynarodowe w domenie, inny adres „Reply-To”,
-- presja czasu i prośby o hasła/kody/dane karty w temacie i treści,
-- linki: tekst niezgodny z adresem, „@” w adresie, adres IP, skracacze, brak szyfrowania,
-- załączniki: pliki wykonywalne i skrypty, strony HTML, archiwa.
+- **Skanowanie załączników lokalnym ClamAV** (`clamdscan`, a gdy go brak – `clamscan`), jeśli jest zainstalowany. Plik z wykrytym
+  zagrożeniem **nie jest zapisywany** w ~/Downloads. Gdy ClamAV nie ma albo skan się nie udał, plik jest zapisywany, ale aplikacja
+  wyraźnie pisze, że **nie został sprawdzony antywirusem**. Nic nie jest wysyłane do internetu.
+- **Kontrola typu pliku po zawartości:** ostrzeżenie, gdy „faktura.pdf” w środku jest programem, skryptem lub stroną HTML
+  (także gdy obraz/PDF ma niezgodną zawartość).
+- **Listy nadawców** (przycisk „Nadawca…” w konwersacji oraz „Listy nadawców” na dole): zablokowany adres lub domena dostaje
+  czerwone ostrzeżenie w aplikacji, opcjonalnie możesz przenieść konwersację do spamu w Gmailu (z cofnięciem). Zaufany nadawca nie
+  dostaje ostrzeżeń od nadawcy/domeny, **ale tylko gdy Gmail potwierdza DMARC=pass** (adres można podrobić); ostrzeżenia
+  o załącznikach i linkach nadal działają.
 
-Każda ocena (brak / uwaga / podejrzane) ma wypisane powody po polsku. Nad wiadomością pojawia się pasek ostrzeżenia, na liście
-plakietka, a przy wysokim ryzyku linki i załączniki wymagają dodatkowego potwierdzenia, a obrazy się nie ładują nawet od
-zaufanego nadawcy. Folder „Podejrzane” pokazuje wiadomości z ostrzeżeniem spośród ostatnich 100 wątków skrzynki odbiorczej
-(to widok w aplikacji – nic nie jest przenoszone ani usuwane w Gmailu). „To fałszywy alarm” zapisuje decyzję lokalnie.
-
-Ograniczenia etapu 5: to reguły, nie gwarancja – część oszustw przejdzie, a część zwykłych wiadomości dostanie ostrzeżenie.
-Lista marek jest wbudowana i ograniczona (ok. 30). Ocena na liście (z nagłówków) jest wstępna; pełna – po otwarciu wątku.
-Folder „Podejrzane” sprawdza tylko 100 ostatnich wątków. Brak skanera antywirusowego i listy blokowanych nadawców (etap 6).
+Ograniczenia etapu 6: listy działają tylko w RustMail – Gmail API nie pozwala blokować nadawców bez dodatkowego, szerszego
+uprawnienia, więc aplikacja niczego nie ukrywa i nie usuwa automatycznie. Skaner działa tylko, jeśli ClamAV jest zainstalowany
+w systemie (na Bazzite np. warstwą rpm-ostree albo w kontenerze – aplikacja szuka programów w PATH hosta). Skan nie zastępuje
+ostrożności: antywirus nie wykrywa każdego złośliwego pliku. Archiwa z hasłem nie są skanowane. Brak: wyszukiwanie, tryb offline,
+powiadomienia (kolejne etapy).
 
 ## Niezweryfikowane
 
-Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `compose.rs`, `signature.rs`, `safety.rs`, `phishing.rs` i `dismissed.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
+Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `compose.rs`, `signature.rs`, `safety.rs`, `phishing.rs`, `dismissed.rs`, `filetype.rs`, `scan.rs` i `blocklist.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
 zostały uruchomione i przetestowane osobno, a czyszczenie HTML (`mailHtml.ts`) sprawdzone w prawdziwej przeglądarce Chromium na
 złośliwych przykładach; pozostały kod
 (komunikacja z Gmailem, polecenia Tauri, komponenty React) zweryfikowano tylko składniowo i typowo, więc pierwszy build

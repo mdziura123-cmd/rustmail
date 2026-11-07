@@ -22,10 +22,10 @@ interface Pending extends LinkAnalysis {
 }
 
 /** Treść wiadomości: oczyszczony HTML (obrazy zablokowane do czasu zgody) albo zwykły tekst. */
-export function MessageBody({ m }: { m: MessageView }) {
+export function MessageBody({ m, strict }: { m: MessageView; strict: boolean }) {
   const sender = m.fromEmail.toLowerCase();
   const [trusted, setTrusted] = useState<string[]>(loadTrusted);
-  const isTrusted = !m.mine && trusted.includes(sender);
+  const isTrusted = !strict && !m.mine && trusted.includes(sender);
   const [showImages, setShowImages] = useState(false);
   const [asText, setAsText] = useState(!m.html);
   const [showQuote, setShowQuote] = useState(false);
@@ -69,7 +69,9 @@ export function MessageBody({ m }: { m: MessageView }) {
     if (!a) return false;
     const href = a.getAttribute("data-href") ?? "";
     setNote(null);
-    setPending({ href, ...analyzeLink(a.textContent ?? "", href) });
+    const info = analyzeLink(a.textContent ?? "", href);
+    if (strict) info.warnings.push("Wiadomość z tym linkiem została oceniona jako wysokiego ryzyka (phishing).");
+    setPending({ href, ...info });
     return true;
   };
 
@@ -117,7 +119,7 @@ export function MessageBody({ m }: { m: MessageView }) {
         <div className="img-bar" role="status">
           <span>Zablokowano zdalne obrazy ({clean.remoteImages}) – mogą ujawniać, że otworzyłeś wiadomość.</span>
           <button className="small" onClick={() => setShowImages(true)}>Pokaż obrazy</button>
-          {!m.mine && <button className="small" onClick={() => { trustSender(); }}>Zawsze ufaj {m.fromEmail}</button>}
+          {!m.mine && !strict && <button className="small" onClick={() => { trustSender(); }}>Zawsze ufaj {m.fromEmail}</button>}
         </div>
       )}
       {isTrusted && clean.remoteImages > 0 && (
@@ -137,7 +139,7 @@ export function MessageBody({ m }: { m: MessageView }) {
           {pending.warnings.map((w) => <div key={w} className="warn-line">⚠ {w}</div>)}
           {note && <div className="note">{note}</div>}
           <div className="link-actions">
-            <button className="small solid" onClick={() => void open()}>Otwórz w przeglądarce</button>
+            <button className="small solid" onClick={() => void open()}>{strict ? "Rozumiem ryzyko – otwórz" : "Otwórz w przeglądarce"}</button>
             <button className="small" onClick={() => void copy()}>Kopiuj adres</button>
             <button className="small" onClick={() => { setPending(null); setNote(null); }}>Anuluj</button>
           </div>

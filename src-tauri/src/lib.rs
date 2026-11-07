@@ -1,9 +1,14 @@
 mod auth;
+mod blocklist;
 mod commands;
 mod compose;
+mod dismissed;
+mod filetype;
 mod gmail;
+mod phishing;
 mod remote;
 mod safety;
+mod scan;
 mod secrets;
 mod signature;
 mod update;
@@ -27,6 +32,10 @@ pub fn run() {
             commands::sign_out,
             commands::list_threads,
             commands::get_thread,
+            commands::set_thread_safe,
+            commands::get_sender_lists,
+            commands::add_sender_rule,
+            commands::remove_sender_rule,
             commands::send_message,
             commands::save_draft,
             commands::delete_draft,

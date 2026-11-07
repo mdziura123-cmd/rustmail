@@ -9,7 +9,8 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::auth::{self, AppState, ClientCreds};
 use crate::compose::{self, OutAttachment, Outgoing};
-use crate::{gmail, remote, safety, secrets, signature};
+use crate::blocklist::{self, Rules};
+use crate::{dismissed, filetype, gmail, remote, safety, scan, secrets, signature};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct AppInfo {
@@ -105,20 +106,82 @@ pub async fn sign_out(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+fn config_file(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join(name))
+}
+
+fn dismissed_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    config_file(app, "dismissed.txt")
+}
+
+fn load_rules(app: &AppHandle) -> Result<Rules, String> {
+    Ok(Rules {
+        blocked: blocklist::load_list(&config_file(app, "blocked.txt")?),
+        allowed: blocklist::load_list(&config_file(app, "allowed.txt")?),
+    })
+}
+
 #[tauri::command]
 pub async fn list_threads(
+    app: AppHandle,
     state: State<'_, AppState>,
     folder: String,
     page_token: Option<String>,
 ) -> Result<gmail::ThreadPage, String> {
     let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
-    gmail::list_threads(&state, &folder, page_token, &email).await
+    let safe = dismissed::load(&dismissed_path(&app)?);
+    let rules = load_rules(&app)?;
+    gmail::list_threads(&state, &folder, page_token, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await
 }
 
 #[tauri::command]
-pub async fn get_thread(state: State<'_, AppState>, id: String) -> Result<gmail::ThreadDetail, String> {
+pub async fn get_thread(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<gmail::ThreadDetail, String> {
     let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
-    gmail::get_thread(&state, &id, &email).await
+    let safe = dismissed::load(&dismissed_path(&app)?);
+    let rules = load_rules(&app)?;
+    gmail::get_thread(&state, &id, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await
+}
+
+#[derive(Serialize)]
+pub struct SenderLists {
+    pub blocked: Vec<String>,
+    pub allowed: Vec<String>,
+}
+
+#[tauri::command]
+pub fn get_sender_lists(app: AppHandle) -> Result<SenderLists, String> {
+    let r = load_rules(&app)?;
+    Ok(SenderLists { blocked: r.blocked, allowed: r.allowed })
+}
+
+fn list_file(app: &AppHandle, kind: &str) -> Result<std::path::PathBuf, String> {
+    match kind {
+        "blocked" => config_file(app, "blocked.txt"),
+        "allowed" => config_file(app, "allowed.txt"),
+        _ => Err("Nieznany rodzaj listy.".to_string()),
+    }
+}
+
+/// Dodaje adres lub domenę do listy. Wpis nie może być jednocześnie zablokowany i zaufany.
+#[tauri::command]
+pub fn add_sender_rule(app: AppHandle, kind: String, entry: String) -> Result<String, String> {
+    let path = list_file(&app, &kind)?;
+    let other = list_file(&app, if kind == "blocked" { "allowed" } else { "blocked" })?;
+    let added = blocklist::add(&path, &entry)?;
+    blocklist::remove(&other, &added)?;
+    Ok(added)
+}
+
+#[tauri::command]
+pub fn remove_sender_rule(app: AppHandle, kind: String, entry: String) -> Result<(), String> {
+    blocklist::remove(&list_file(&app, &kind)?, &entry)
+}
+
+/// Użytkownik uznaje wątek za bezpieczny (fałszywy alarm) albo cofa tę decyzję.
+#[tauri::command]
+pub fn set_thread_safe(app: AppHandle, id: String, safe: bool) -> Result<(), String> {
+    let path = dismissed_path(&app)?;
+    if safe { dismissed::add(&path, &id) } else { dismissed::remove(&path, &id) }
 }
 
 // ---------- Etap 3: redagowanie, wysyłanie, wersje robocze, akcje ----------
@@ -231,20 +294,57 @@ pub fn open_url(url: String) -> Result<(), String> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedFile {
-    pub path: String,
+    /// Ścieżka zapisanego pliku; `None`, gdy skaner wykrył zagrożenie i plik NIE został zapisany.
+    pub path: Option<String>,
     pub risky: bool,
+    /// "clean" | "infected" | "unavailable" | "failed"
+    pub scan: &'static str,
+    pub scan_detail: String,
+    /// Ostrzeżenie, gdy zawartość pliku nie zgadza się z jego nazwą.
+    pub type_warning: Option<String>,
 }
 
+/// Pobiera załącznik, sprawdza typ po zawartości, skanuje ClamAV (jeśli jest) i dopiero wtedy zapisuje.
+/// Plik z wykrytym zagrożeniem nie trafia na dysk w katalogu Pobrane.
 #[tauri::command]
 pub async fn download_attachment(
+    app: AppHandle,
     state: State<'_, AppState>,
     message_id: String,
     attachment_id: String,
     name: String,
 ) -> Result<SavedFile, String> {
     let bytes = gmail::download_attachment(&state, &message_id, &attachment_id).await?;
+    let risky = safety::risky_extension(&name);
+    let type_warning = filetype::mismatch(&name, &bytes);
+
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("Nie można utworzyć katalogu tymczasowego: {e}"))?;
+    let nonce: String = auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let tmp = cache.join(format!("scan-{nonce}.bin"));
+    scan::write_private(&tmp, &bytes).map_err(|e| format!("Nie można utworzyć pliku do skanowania: {e}"))?;
+    let tmp2 = tmp.clone();
+    let status = tokio::task::spawn_blocking(move || scan::scan_file(&tmp2)).await.map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&tmp);
+    let status = status?;
+
+    let (scan_label, detail) = match &status {
+        scan::ScanStatus::Clean => ("clean", String::new()),
+        scan::ScanStatus::Infected(sig) => ("infected", sig.clone()),
+        scan::ScanStatus::Unavailable => ("unavailable", String::new()),
+        scan::ScanStatus::Failed(why) => ("failed", why.clone()),
+    };
+    if matches!(status, scan::ScanStatus::Infected(_)) {
+        return Ok(SavedFile { path: None, risky, scan: scan_label, scan_detail: detail, type_warning });
+    }
     let path = remote::save_download(&name, &bytes)?;
-    Ok(SavedFile { path: path.to_string_lossy().into_owned(), risky: safety::risky_extension(&name) })
+    Ok(SavedFile {
+        path: Some(path.to_string_lossy().into_owned()),
+        risky,
+        scan: scan_label,
+        scan_detail: detail,
+        type_warning,
+    })
 }
 
 fn signature_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {

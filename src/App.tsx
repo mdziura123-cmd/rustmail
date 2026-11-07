@@ -4,9 +4,11 @@ import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
 import { BACKUP_KEY, Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
+import { RiskBanner } from "./RiskBanner";
 import { splitQuoted } from "./quoteTrim";
+import { SenderLists } from "./SenderLists";
 import { SignatureDialog } from "./SignatureDialog";
-import { buildForward, buildNew, buildReply, type ComposeInit } from "./replyLogic";
+import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
@@ -87,6 +89,7 @@ export default function App() {
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [signature, setSignature] = useState("");
   const [sigOpen, setSigOpen] = useState(false);
+  const [senderDlg, setSenderDlg] = useState<{ email: string | null } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [restore, setRestore] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
@@ -273,6 +276,31 @@ export default function App() {
     } : t)));
   };
 
+  const setSafe = async (safe: boolean) => {
+    if (!detail) return;
+    const id = detail.id;
+    try {
+      await api.setThreadSafe(id, safe);
+    } catch (e) {
+      showToast(errText(e));
+      return;
+    }
+    setDetail((d) => (d && d.id === id ? { ...d, dismissed: safe } : d));
+    setThreads((prev) =>
+      folder === "suspicious" && safe
+        ? prev.filter((t) => t.id !== id)
+        : prev.map((t) => (t.id === id ? { ...t, dismissed: safe } : t)));
+    showToast(safe ? "Oznaczono jako bezpieczne." : "Cofnięto oznaczenie jako bezpieczne.");
+  };
+
+  const senderChanged = async (moveToSpam: boolean) => {
+    setSenderDlg(null);
+    const id = detail?.id ?? null;
+    if (moveToSpam && id) await runAction("spam");
+    else if (id) void loadDetail(id);
+    void loadList(folder, null, false);
+  };
+
   const onSent = (info: { threadId: string }) => {
     setCompose(null);
     showToast("Wiadomość wysłana.");
@@ -366,11 +394,17 @@ export default function App() {
             </div>
           ) : (
             <>
+              {folder === "suspicious" && (
+                <p className="hint pad">
+                  Ten folder jest tylko widokiem w RustMail: pokazuje wiadomości z ostatnich 100 wątków skrzynki odbiorczej, które
+                  mają ostrzeżenie. Nic nie jest przenoszone ani usuwane w Gmailu. Ocena z nagłówków jest wstępna.
+                </p>
+              )}
               {listError && <p className="error pad" role="alert">{listError}</p>}
               {!loadingList && !listError && threads.length === 0 && (
                 <div className="empty">
                   <h3>Ten folder jest pusty</h3>
-                  {folder === "suspicious" && <p>Folder „Podejrzane” zostanie wypełniony po wdrożeniu filtrów bezpieczeństwa (etap 5).</p>}
+                  {folder === "suspicious" && <p>Wśród ostatnich 100 wątków skrzynki odbiorczej nie znaleziono wiadomości z ostrzeżeniem.</p>}
                 </div>
               )}
               <ul>
@@ -382,7 +416,14 @@ export default function App() {
                       <span className="when">
                         {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
                       </span>
-                      <span className="subj">{t.subject}</span>
+                      <span className="subj">
+                        {!t.dismissed && t.risk.level !== "none" && (
+                          <span className={"risk-chip " + t.risk.level} title={t.risk.reasons.join("\n")}>
+                            {t.risk.level === "high" ? "Podejrzane" : "Uwaga"}
+                          </span>
+                        )}
+                        {t.subject}
+                      </span>
                       <span className="snip">{t.snippet}</span>
                     </button>
                   </li>
@@ -454,16 +495,23 @@ export default function App() {
                   <button disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
                     {detail.starred ? "★ Usuń gwiazdkę" : "☆ Gwiazdka"}
                   </button>
+                  {(() => {
+                    const t = replyTarget(detail.messages);
+                    return t && !t.mine ? (
+                      <button onClick={() => setSenderDlg({ email: t.fromEmail })}>Nadawca…</button>
+                    ) : null;
+                  })()}
                   <span className="sep" />
                   <button onClick={() => setCollapsed(new Set())}>Rozwiń wszystkie</button>
                   <button onClick={() => setCollapsed(new Set(detail.messages.map((m) => m.id)))}>Zwiń wszystkie</button>
                 </div>
               </header>
+              <RiskBanner messages={detail.messages} dismissed={detail.dismissed} onSafe={(s) => void setSafe(s)} />
               <div className="thread">
                 {detail.messages.map((m) => {
                   const folded = collapsed.has(m.id);
                   return (
-                    <article key={m.id} className={"bubble " + (m.mine ? "sent" : "received") + (m.html ? " wide" : "")}>
+                    <article key={m.id} className={"bubble " + (m.mine ? "sent" : "received") + (m.html ? " wide" : "") + (!detail.dismissed && m.risk.level !== "none" ? " risk-" + m.risk.level : "")}>
                       <button className="bubble-head" onClick={() => toggleMsg(m.id)} aria-expanded={!folded}>
                         <strong title={m.fromEmail}>{m.from}</strong>
                         <time>{fmtFull(m.dateMs)}</time>
@@ -472,8 +520,8 @@ export default function App() {
                         <p className="fold">{splitQuoted(m.body).main.slice(0, 120)}</p>
                       ) : (
                         <>
-                          <MessageBody m={m} />
-                          <Attachments m={m} />
+                          <MessageBody m={m} strict={m.risk.level === "high" && !detail.dismissed} />
+                          <Attachments m={m} strict={m.risk.level === "high" && !detail.dismissed} />
                         </>
                       )}
                     </article>
@@ -490,6 +538,7 @@ export default function App() {
         <span className="pill">{email ?? "brak konta"}</span>
         {email && <button className="linklike plain" onClick={() => void signOut()}>Wyloguj</button>}
         {email && <button className="linklike plain" onClick={() => setSigOpen(true)}>Podpis</button>}
+        {email && <button className="linklike plain" onClick={() => setSenderDlg({ email: null })}>Listy nadawców</button>}
         <span className="grow" />
         <label className="check">
           <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} />
@@ -513,6 +562,9 @@ export default function App() {
           {toast.undo && <button className="small" onClick={toast.undo}>Cofnij</button>}
           <button className="small" aria-label="Zamknij powiadomienie" onClick={() => setToast(null)}>✕</button>
         </div>
+      )}
+      {senderDlg && (
+        <SenderLists email={senderDlg.email} onClose={() => setSenderDlg(null)} onChanged={(s) => void senderChanged(s)} />
       )}
       {sigOpen && (
         <SignatureDialog initial={signature} onClose={() => setSigOpen(false)}

@@ -1,6 +1,7 @@
 //! Odczyt wątków przez oficjalne Gmail API (etap 2: wyłącznie odczyt).
 //! Treść wiadomości jest traktowana jako niezaufana: zwracamy zwykły tekst, nigdy HTML.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use base64::{
@@ -11,6 +12,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::task::JoinSet;
 
 use crate::auth::{access_token, AppState};
+use crate::blocklist::Rules;
+use crate::phishing::{self, Assessment, Signals};
 
 const API: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 const PAGE_SIZE: &str = "20";
@@ -81,6 +84,26 @@ struct Body {
 
 // ---------- Modele dla interfejsu ----------
 
+/// Lokalne ustawienia użytkownika wpływające na ocenę: wątki uznane za bezpieczne oraz listy nadawców.
+pub struct Filters<'a> {
+    pub dismissed: &'a HashSet<String>,
+    pub rules: &'a Rules,
+}
+
+/// Ocena ryzyka phishingu przekazywana do interfejsu (powody po polsku).
+#[derive(Serialize, Clone)]
+pub struct Risk {
+    pub level: &'static str,
+    pub score: u32,
+    pub reasons: Vec<String>,
+}
+
+impl From<Assessment> for Risk {
+    fn from(a: Assessment) -> Self {
+        Risk { level: a.level.as_str(), score: a.score, reasons: a.reasons }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSummary {
@@ -92,6 +115,9 @@ pub struct ThreadSummary {
     pub unread: bool,
     pub starred: bool,
     pub count: usize,
+    /// Wstępna ocena z nagłówków (nadawca, uwierzytelnianie, temat); pełna ocena jest po otwarciu wątku.
+    pub risk: Risk,
+    pub dismissed: bool,
 }
 
 #[derive(Serialize)]
@@ -128,6 +154,7 @@ pub struct MessageView {
     pub reply_to: String,
     pub message_id: String,
     pub references: String,
+    pub risk: Risk,
 }
 
 #[derive(Serialize)]
@@ -142,6 +169,7 @@ pub struct ThreadDetail {
     pub in_spam: bool,
     pub in_trash: bool,
     pub is_draft: bool,
+    pub dismissed: bool,
 }
 
 // ---------- Mapowanie folderów na etykiety Gmail ----------
@@ -227,7 +255,13 @@ async fn fetch_thread(http: &reqwest::Client, token: &str, id: &str, format: &st
             http,
             token,
             &path,
-            &[("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")],
+            &[
+                ("format", "metadata"),
+                ("metadataHeaders", "From"),
+                ("metadataHeaders", "Subject"),
+                ("metadataHeaders", "Reply-To"),
+                ("metadataHeaders", "Authentication-Results"),
+            ],
         )
         .await
     } else {
@@ -235,12 +269,84 @@ async fn fetch_thread(http: &reqwest::Client, token: &str, id: &str, format: &st
     }
 }
 
+/// Pobiera stronę wątków (metadane równolegle) i zamienia je na podsumowania z oceną z nagłówków.
+async fn page_summaries(
+    state: &AppState,
+    token: &str,
+    params: &[(&str, &str)],
+    my_email: &str,
+    f: &Filters<'_>,
+) -> Result<(Vec<ThreadSummary>, Option<String>), String> {
+    let list: ThreadList = get_json(&state.http, token, "threads", params).await?;
+
+    let mut set = JoinSet::new();
+    for (i, t) in list.threads.iter().enumerate() {
+        let http = state.http.clone();
+        let tok = token.to_string();
+        let id = t.id.clone();
+        set.spawn(async move { (i, fetch_thread(&http, &tok, &id, "metadata").await) });
+    }
+    let mut results: Vec<(usize, Result<RawThread, String>)> = Vec::new();
+    while let Some(r) = set.join_next().await {
+        results.push(r.map_err(|e| e.to_string())?);
+    }
+    results.sort_by_key(|(i, _)| *i);
+
+    let mut threads = Vec::new();
+    let mut first_err: Option<String> = None;
+    for (_, r) in results {
+        match r {
+            Ok(raw) => threads.push(summarize(&raw, my_email, f)),
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+    }
+    if threads.is_empty() {
+        if let Some(e) = first_err {
+            return Err(e);
+        }
+    }
+    Ok((threads, list.next_page_token))
+}
+
+/// Folder „Podejrzane”: przeszukuje lokalnie ostatnie 100 wątków skrzynki odbiorczej i zwraca te,
+/// które mają ostrzeżenie (i nie zostały uznane za bezpieczne). Nic nie jest przenoszone w Gmailu.
+const SCAN_PAGES: usize = 5;
+
+async fn scan_suspicious(
+    state: &AppState,
+    my_email: &str,
+    f: &Filters<'_>,
+) -> Result<ThreadPage, String> {
+    let token = access_token(state).await?;
+    let mut found: Vec<ThreadSummary> = Vec::new();
+    let mut page: Option<String> = None;
+    for _ in 0..SCAN_PAGES {
+        let mut params: Vec<(&str, &str)> = vec![("maxResults", PAGE_SIZE), ("labelIds", "INBOX")];
+        if let Some(p) = page.as_deref() {
+            params.push(("pageToken", p));
+        }
+        let (threads, next) = page_summaries(state, &token, &params, my_email, f).await?;
+        found.extend(threads.into_iter().filter(|t| t.risk.level != "none" && !t.dismissed));
+        match next {
+            Some(n) => page = Some(n),
+            None => break,
+        }
+    }
+    Ok(ThreadPage { threads: found, next_page_token: None })
+}
+
 pub async fn list_threads(
     state: &AppState,
     folder: &str,
     page: Option<String>,
     my_email: &str,
+    f: &Filters<'_>,
 ) -> Result<ThreadPage, String> {
+    if folder == "suspicious" {
+        return scan_suspicious(state, my_email, f).await;
+    }
     let Some(fq) = folder_query(folder)? else {
         return Ok(ThreadPage { threads: vec![], next_page_token: None });
     };
@@ -260,47 +366,23 @@ pub async fn list_threads(
         params.push(("pageToken", p));
     }
     let borrowed: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let list: ThreadList = get_json(&state.http, &token, "threads", &borrowed).await?;
-
-    let mut set = JoinSet::new();
-    for (i, t) in list.threads.iter().enumerate() {
-        let http = state.http.clone();
-        let tok = token.clone();
-        let id = t.id.clone();
-        set.spawn(async move { (i, fetch_thread(&http, &tok, &id, "metadata").await) });
-    }
-    let mut results: Vec<(usize, Result<RawThread, String>)> = Vec::new();
-    while let Some(r) = set.join_next().await {
-        results.push(r.map_err(|e| e.to_string())?);
-    }
-    results.sort_by_key(|(i, _)| *i);
-
-    let mut threads = Vec::new();
-    let mut first_err: Option<String> = None;
-    for (_, r) in results {
-        match r {
-            Ok(raw) => threads.push(summarize(&raw, my_email)),
-            Err(e) => {
-                first_err.get_or_insert(e);
-            }
-        }
-    }
-    if threads.is_empty() {
-        if let Some(e) = first_err {
-            return Err(e);
-        }
-    }
-    Ok(ThreadPage { threads, next_page_token: list.next_page_token })
+    let (threads, next) = page_summaries(state, &token, &borrowed, my_email, f).await?;
+    Ok(ThreadPage { threads, next_page_token: next })
 }
 
-pub async fn get_thread(state: &AppState, id: &str, my_email: &str) -> Result<ThreadDetail, String> {
+pub async fn get_thread(
+    state: &AppState,
+    id: &str,
+    my_email: &str,
+    f: &Filters<'_>,
+) -> Result<ThreadDetail, String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("Niepoprawny identyfikator wątku".to_string());
     }
     let token = access_token(state).await?;
     let raw = fetch_thread(&state.http, &token, id, "full").await?;
     let subject = subject_of(&raw);
-    let messages = raw.messages.iter().map(|m| message_view(m, my_email)).collect();
+    let messages = raw.messages.iter().map(|m| message_view(m, my_email, f.rules)).collect();
     let has = |l: &str| raw.messages.iter().any(|m| m.label_ids.iter().any(|x| x == l));
     Ok(ThreadDetail {
         unread: has("UNREAD"),
@@ -309,6 +391,7 @@ pub async fn get_thread(state: &AppState, id: &str, my_email: &str) -> Result<Th
         in_spam: has("SPAM"),
         in_trash: has("TRASH"),
         is_draft: has("DRAFT"),
+        dismissed: f.dismissed.contains(&raw.id),
         id: raw.id.clone(),
         subject,
         messages,
@@ -658,7 +741,45 @@ fn subject_of(t: &RawThread) -> String {
         .unwrap_or_else(|| "(bez tematu)".to_string())
 }
 
-fn summarize(t: &RawThread, my_email: &str) -> ThreadSummary {
+/// Ocena jednej wiadomości. Przy ocenie samych nagłówków `body`, `html` i `attachments` są puste.
+fn assess_message(
+    m: &RawMessage,
+    my_email: &str,
+    rules: &Rules,
+    body: &str,
+    html: &str,
+    attachments: &[AttachmentInfo],
+) -> Assessment {
+    let (name, email) = from_of(m);
+    let reply_to = hdr(m, "Reply-To");
+    let subject = hdr(m, "Subject");
+    let auth_values: Vec<&str> = m
+        .payload
+        .as_ref()
+        .map(|p| {
+            p.headers
+                .iter()
+                .filter(|h| h.name.eq_ignore_ascii_case("Authentication-Results"))
+                .map(|h| h.value.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    phishing::assess(&Signals {
+        from_name: &name,
+        from_email: &email,
+        reply_to: &reply_to,
+        subject: &subject,
+        auth: phishing::parse_auth_results(&auth_values),
+        body,
+        html,
+        attachment_names: attachments.iter().map(|a| a.name.clone()).collect(),
+        mine: is_mine(m, my_email),
+        blocked: rules.is_blocked(&email),
+        allowed: rules.is_allowed(&email),
+    })
+}
+
+fn summarize(t: &RawThread, my_email: &str, f: &Filters<'_>) -> ThreadSummary {
     let last = t.messages.last();
     let mut names: Vec<String> = Vec::new();
     for m in &t.messages {
@@ -681,6 +802,14 @@ fn summarize(t: &RawThread, my_email: &str) -> ThreadSummary {
         unread: t.messages.iter().any(|m| m.label_ids.iter().any(|l| l == "UNREAD")),
         starred: t.messages.iter().any(|m| m.label_ids.iter().any(|l| l == "STARRED")),
         count: t.messages.len(),
+        risk: t
+            .messages
+            .iter()
+            .map(|m| assess_message(m, my_email, f.rules, "", "", &[]))
+            .max_by_key(|a| a.score)
+            .map(Risk::from)
+            .unwrap_or_else(|| Assessment::none().into()),
+        dismissed: f.dismissed.contains(&t.id),
     }
 }
 
@@ -689,14 +818,21 @@ fn hdr(m: &RawMessage, name: &str) -> String {
     m.payload.as_ref().and_then(|p| header(p, name)).map(decode_mime_words).unwrap_or_default()
 }
 
-fn message_view(m: &RawMessage, my_email: &str) -> MessageView {
+fn message_view(m: &RawMessage, my_email: &str, rules: &Rules) -> MessageView {
     let (name, email) = from_of(m);
     let mine = is_mine(m, my_email);
     let (body, html_only) = m.payload.as_ref().map(extract_body).unwrap_or_default();
+    let html: String = m
+        .payload
+        .as_ref()
+        .and_then(|p| find_part(p, "text/html"))
+        .map(|part| decode_part(part).chars().take(400_000).collect())
+        .unwrap_or_default();
     let mut attachments = Vec::new();
     if let Some(p) = &m.payload {
         collect_attachments(p, &mut attachments);
     }
+    let risk: Risk = assess_message(m, my_email, rules, &body, &html, &attachments).into();
     MessageView {
         id: m.id.clone(),
         from: if mine {
@@ -711,18 +847,20 @@ fn message_view(m: &RawMessage, my_email: &str) -> MessageView {
         date_ms: m.internal_date.parse::<i64>().unwrap_or(0),
         body: body.chars().take(100_000).collect(),
         html_only,
-        html: m
-            .payload
-            .as_ref()
-            .and_then(|p| find_part(p, "text/html"))
-            .map(|part| decode_part(part).chars().take(400_000).collect())
-            .unwrap_or_default(),
+        html,
         attachments,
         to: hdr(m, "To"),
         cc: hdr(m, "Cc"),
         reply_to: hdr(m, "Reply-To"),
-        message_id: m.payload.as_ref().and_then(|p| header(p, "Message-ID").or_else(|| header(p, "Message-Id"))).unwrap_or("").trim().to_string(),
+        message_id: m
+            .payload
+            .as_ref()
+            .and_then(|p| header(p, "Message-ID").or_else(|| header(p, "Message-Id")))
+            .unwrap_or("")
+            .trim()
+            .to_string(),
         references: hdr(m, "References"),
+        risk,
     }
 }
 
@@ -1004,7 +1142,11 @@ mod tests {
                "payload":{"headers":[{"name":"From","value":"me@example.com"}]}}]}"#,
         )
         .unwrap();
-        let s = summarize(&raw, "me@example.com");
+        let none = HashSet::new();
+        let rules = Rules::default();
+        let s = summarize(&raw, "me@example.com", &Filters { dismissed: &none, rules: &rules });
+        assert_eq!(s.risk.level, "none");
+        assert!(!s.dismissed);
         assert_eq!(s.subject, "łą");
         assert_eq!(s.participants, "Anna, Ja");
         assert_eq!(s.snippet, "OK");
@@ -1024,7 +1166,7 @@ mod tests {
                   {"mimeType":"application/pdf","filename":"a.pdf","body":{"size":10,"attachmentId":"x"}}]}}"#,
         )
         .unwrap();
-        let v = message_view(&m, "me@example.com");
+        let v = message_view(&m, "me@example.com", &Rules::default());
         assert_eq!(v.body, "Hello");
         assert!(!v.html_only);
         assert!(!v.mine);
