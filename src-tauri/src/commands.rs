@@ -12,6 +12,7 @@ use crate::compose::{self, OutAttachment, Outgoing};
 use crate::blocklist::{self, Rules};
 use crate::store::{CacheStatus, Store};
 use crate::notify::{self, Notifier};
+use crate::accounts::{self, Account};
 use crate::{dismissed, filetype, gmail, offline, remote, safety, scan, secrets, signature};
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -75,6 +76,7 @@ pub fn save_client(client_id: String, client_secret: String) -> Result<(), Strin
 pub async fn clear_client(state: State<'_, AppState>, store: State<'_, Store>) -> Result<(), String> {
     let _ = store.clear();
     secrets::delete(auth::KEY_CLIENT)?;
+    secrets::delete(auth::KEY_ACCOUNTS)?;
     secrets::delete(auth::KEY_REFRESH)?;
     secrets::delete(auth::KEY_EMAIL)?;
     secrets::delete(auth::KEY_SCOPE)?;
@@ -96,6 +98,12 @@ pub async fn sign_in(state: State<'_, AppState>, store: State<'_, Store>, notifi
     secrets::set(auth::KEY_REFRESH, &refresh)?;
     secrets::set(auth::KEY_EMAIL, &email)?;
     secrets::set(auth::KEY_SCOPE, tr.scope.as_deref().unwrap_or(""))?;
+    let mut list = load_accounts()?;
+    accounts::upsert(
+        &mut list,
+        Account { email: email.clone(), refresh: refresh.clone(), scope: tr.scope.clone().unwrap_or_default() },
+    )?;
+    save_accounts(&list)?;
     // Pamięć podręczna mogła należeć do innego konta.
     let _ = store.clear();
     *state.token.lock().await = Some((tr.access_token, Instant::now() + Duration::from_secs(tr.expires_in)));
@@ -108,6 +116,7 @@ pub async fn sign_out(state: State<'_, AppState>, store: State<'_, Store>, notif
         *s = notify::Seen::default();
     }
     let _ = store.clear();
+    let current = secrets::get(auth::KEY_EMAIL)?;
     if let Some(token) = secrets::get(auth::KEY_REFRESH)? {
         auth::revoke(&state.http, &token).await;
     }
@@ -115,7 +124,86 @@ pub async fn sign_out(state: State<'_, AppState>, store: State<'_, Store>, notif
     secrets::delete(auth::KEY_EMAIL)?;
     secrets::delete(auth::KEY_SCOPE)?;
     *state.token.lock().await = None;
+    // Wylogowane konto znika z rejestru; jeśli są inne, pierwsze z nich staje się aktywne.
+    let mut list = load_accounts()?;
+    if let Some(e) = current {
+        accounts::remove(&mut list, &e);
+    }
+    save_accounts(&list)?;
+    if let Some(next) = list.first() {
+        activate(next)?;
+    }
     Ok(())
+}
+
+// ---------- Etap 10: wiele kont ----------
+
+fn load_accounts() -> Result<Vec<Account>, String> {
+    Ok(secrets::get(auth::KEY_ACCOUNTS)?.map(|s| accounts::parse(&s)).unwrap_or_default())
+}
+
+fn save_accounts(list: &[Account]) -> Result<(), String> {
+    if list.is_empty() {
+        secrets::delete(auth::KEY_ACCOUNTS)
+    } else {
+        secrets::set(auth::KEY_ACCOUNTS, &accounts::serialize(list))
+    }
+}
+
+/// Ustawia konto jako aktywne (wszystkie polecenia pracują na aktywnym koncie).
+fn activate(a: &Account) -> Result<(), String> {
+    secrets::set(auth::KEY_REFRESH, &a.refresh)?;
+    secrets::set(auth::KEY_EMAIL, &a.email)?;
+    secrets::set(auth::KEY_SCOPE, &a.scope)
+}
+
+/// Konto zalogowane przed etapem 10 nie ma jeszcze wpisu w rejestrze – dopisujemy je.
+fn ensure_registered() -> Result<Vec<Account>, String> {
+    let mut list = load_accounts()?;
+    if let (Some(refresh), Some(email)) = (secrets::get(auth::KEY_REFRESH)?, secrets::get(auth::KEY_EMAIL)?) {
+        if accounts::find(&list, &email).is_none() {
+            let scope = secrets::get(auth::KEY_SCOPE)?.unwrap_or_default();
+            accounts::upsert(&mut list, Account { email, refresh, scope })?;
+            save_accounts(&list)?;
+        }
+    }
+    Ok(list)
+}
+
+#[derive(Serialize)]
+pub struct AccountDto {
+    pub email: String,
+    pub active: bool,
+}
+
+#[tauri::command]
+pub fn list_accounts() -> Result<Vec<AccountDto>, String> {
+    let list = ensure_registered()?;
+    let active = secrets::get(auth::KEY_EMAIL)?.unwrap_or_default();
+    Ok(list
+        .into_iter()
+        .map(|a| AccountDto { active: a.email.eq_ignore_ascii_case(&active), email: a.email })
+        .collect())
+}
+
+/// Przełącza aktywne konto. Pamięć podręczna wątków jest czyszczona (dotyczy jednego konta naraz);
+/// kolejka wysyłania zostaje i wysyła się dopiero po powrocie na konto, z którego została zapisana.
+#[tauri::command]
+pub async fn switch_account(
+    state: State<'_, AppState>,
+    store: State<'_, Store>,
+    notifier: State<'_, Notifier>,
+    email: String,
+) -> Result<String, String> {
+    let list = ensure_registered()?;
+    let acc = accounts::find(&list, &email).ok_or("Nie ma takiego konta.")?.clone();
+    activate(&acc)?;
+    *state.token.lock().await = None;
+    let _ = store.clear();
+    if let Ok(mut s) = notifier.0.lock() {
+        *s = notify::Seen::default();
+    }
+    Ok(acc.email)
 }
 
 fn config_file(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String> {

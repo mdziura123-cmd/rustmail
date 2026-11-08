@@ -12,7 +12,7 @@ export interface KeyInfo {
 }
 
 const MAP: Record<string, Cmd> = {
-  j: "next", k: "prev", e: "archive", "#": "trash", "!": "spam", r: "reply", a: "replyAll", f: "forward",
+  j: "next", k: "prev", e: "archive", "#": "trash", Delete: "trash", "!": "spam", r: "reply", a: "replyAll", f: "forward",
   c: "compose", s: "star", I: "read", U: "unread", "/": "search", x: "select", "?": "help", Escape: "escape",
 };
 
@@ -32,9 +32,12 @@ export function isTypingTarget(t: { tagName?: string; isContentEditable?: boolea
 
 export const SHORTCUT_HELP: { keys: string; what: string }[] = [
   { keys: "j / k", what: "następna / poprzednia konwersacja" },
+  { keys: "Ctrl+klik", what: "dodaj / odejmij konwersację od zaznaczenia" },
+  { keys: "Shift+klik", what: "zaznacz zakres konwersacji" },
+  { keys: "Ctrl+A", what: "zaznacz wszystkie konwersacje na liście" },
   { keys: "x", what: "zaznacz / odznacz konwersację na liście" },
   { keys: "e", what: "archiwizuj (zaznaczone lub otwartą)" },
-  { keys: "#", what: "usuń (przenieś do kosza)" },
+  { keys: "Delete lub #", what: "usuń (przenieś do kosza)" },
   { keys: "!", what: "oznacz jako spam" },
   { keys: "r / a / f", what: "odpowiedz / odpowiedz wszystkim / przekaż dalej" },
   { keys: "c", what: "nowa wiadomość" },

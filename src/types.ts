@@ -47,6 +47,11 @@ export interface CacheStatus {
   dbPath: string;
 }
 
+export interface Account {
+  email: string;
+  active: boolean;
+}
+
 export interface OutboxItem {
   id: number;
   createdMs: number;

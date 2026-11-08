@@ -61,14 +61,22 @@ Nie wklejaj do czatu haseł, tokenów ani treści prywatnych maili – wystarczy
 - [ ] `j` / `k` przechodzą po liście i otwierają kolejne konwersacje; lista przewija się za zaznaczonym wierszem.
 - [ ] `e` archiwizuje otwartą konwersację (z cofnięciem), `#` przenosi do kosza, `!` do spamu, `s` ustawia gwiazdkę, `r`/`a`/`f` otwierają odpowiedź/przekazanie, `c` nową wiadomość.
 - [ ] W polu wyszukiwania i w edytorze wiadomości skróty NIE działają (pisanie liter nic nie uruchamia).
-- [ ] Pole przy wątku zaznacza go; pojawia się pasek „Zaznaczono: N”. „Archiwizuj”, „Usuń”, „Spam”, „Przeczytane” działają na wszystkie zaznaczone; „Cofnij” w komunikacie przywraca je.
-- [ ] `x` zaznacza/odznacza, `e` przy zaznaczeniu archiwizuje wszystkie zaznaczone, `Esc` odznacza.
+- [ ] Ctrl+klik na wątku zaznacza go (podświetlenie z kreską po lewej), Shift+klik zaznacza zakres, Ctrl+A zaznacza wszystkie; pojawia się pasek „Zaznaczono: N”. Zwykłe kliknięcie czyści zaznaczenie i otwiera wątek. „Archiwizuj”, „Usuń”, „Spam”, „Przeczytane” działają na wszystkie zaznaczone; „Cofnij” w komunikacie przywraca je.
+- [ ] `x` zaznacza/odznacza, `e` przy zaznaczeniu archiwizuje wszystkie zaznaczone, klawisz `Delete` usuwa zaznaczone (lub otwartą konwersację), `Esc` odznacza.
 
 ## 5d. Szyfrowanie bazy (etap 12)
 - [ ] Po pierwszym uruchomieniu nowej wersji: `ls ~/.local/share/pl.rustmail.client/cache/` pokazuje `rustmail.enc.db`, a starego `rustmail.db` już nie ma.
 - [ ] `head -c 16 ~/.local/share/pl.rustmail.client/cache/rustmail.enc.db | xxd` NIE zaczyna się od tekstu „SQLite format 3”.
 - [ ] Jeśli miałeś wiadomości w kolejce lub włączony tryb offline przed aktualizacją: kolejka nadal je zawiera, tryb offline jest włączony (lista zapisanych wątków zaczyna od zera).
 - [ ] W portfelu KDE (KWalletManager) jest wpis RustMail z kluczem `db_key`; tryb offline i kolejka działają po restarcie aplikacji.
+
+## 5e. Wiele kont (etap 10)
+- [ ] Pod „Nowa wiadomość” widać adres bieżącego konta; po rozwinięciu: lista kont, „+ Dodaj konto Gmail”, „Wyloguj to konto”.
+- [ ] „+ Dodaj konto Gmail” otwiera przeglądarkę z wyborem konta Google (drugie konto musi być dodane jako użytkownik testowy, jeśli aplikacja OAuth jest w trybie „Testowanie”). Po zgodzie aplikacja przełącza się na nowe konto.
+- [ ] Przełączenie między kontami pokazuje właściwą skrzynkę, liczniki i etykiety danego konta.
+- [ ] Wiadomość wysłana z drugiego konta ma w polu „Od” adres drugiego konta.
+- [ ] „Wyloguj to konto” usuwa tylko je; aplikacja przechodzi na pozostałe konto. Po wylogowaniu ostatniego konta pojawia się ekran logowania.
+- [ ] Po restarcie aplikacji lista kont jest zachowana.
 
 ## 6. Aktualizacje
 - [ ] „Sprawdź teraz” w stopce; po wydaniu nowej wersji: instalacja i „Przywróć poprzednią wersję”.

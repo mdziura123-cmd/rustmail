@@ -4,6 +4,7 @@ import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
 import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
 import { commandFor, isTypingTarget, SHORTCUT_HELP } from "./shortcuts";
 import { BACKUP_KEY, Compose } from "./Compose";
@@ -17,7 +18,7 @@ import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
-import type { AppInfo, AuthStatus, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import type { Account, AppInfo, AuthStatus, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import "./styles.css";
 import "./compose.css";
 
@@ -104,6 +105,7 @@ export default function App() {
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
   const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "0") === "1");
@@ -304,6 +306,27 @@ export default function App() {
       if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
+  const anchorId = useRef<string | null>(null);
+  // Ctrl+klik dodaje/odejmuje wiersz od zaznaczenia, Shift+klik zaznacza zakres, zwykłe kliknięcie otwiera wątek.
+  const onRowClick = (e: React.MouseEvent, t: ThreadSummary) => {
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelected(t.id);
+      anchorId.current = t.id;
+      return;
+    }
+    if (e.shiftKey && anchorId.current) {
+      const a = threads.findIndex((x) => x.id === anchorId.current);
+      const b = threads.findIndex((x) => x.id === t.id);
+      if (a >= 0 && b >= 0) {
+        const [from, to] = a < b ? [a, b] : [b, a];
+        setSelected(new Set(threads.slice(from, to + 1).map((x) => x.id)));
+        return;
+      }
+    }
+    anchorId.current = t.id;
+    if (selected.size > 0) setSelected(new Set());
+    void openThread(t);
+  };
   const bulkRun = async (action: ThreadAction) => {
     const ids = [...selected].slice(0, 50);
     if (ids.length === 0) return;
@@ -343,6 +366,14 @@ export default function App() {
   // ---------- Skróty klawiszowe ----------
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
+    // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
+      if (isTypingTarget(e.target as HTMLElement | null)) return;
+      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen) return;
+      e.preventDefault();
+      setSelected(new Set(threads.map((t) => t.id)));
+      return;
+    }
     const cmd = commandFor(e);
     if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
     if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
@@ -431,6 +462,23 @@ export default function App() {
   const saveClient = async (id: string, secret: string) => {
     try { await api.saveClient(id, secret); setAuthError(null); await refreshAuth(); }
     catch (e) { setAuthError(errText(e)); }
+  };
+  useEffect(() => {
+    if (!email) { setAccounts([]); return; }
+    api.listAccounts().then(setAccounts).catch(() => setAccounts([]));
+  }, [email]);
+
+  const switchAccount = async (target: string) => {
+    if (compose) { showToast("Najpierw zapisz lub zamknij redagowaną wiadomość."); return; }
+    try {
+      await api.switchAccount(target);
+      setThreads([]); setDetail(null); setOpenId(null); setSelected(new Set()); setOutbox([]);
+      setStats({ inbox: 0, spam: 0, labels: [] });
+      searchRef.current = null; setSearchTerm(null); setQuery("");
+      setFolder("inbox");
+      await refreshAuth();
+      showToast(`Przełączono na ${target}.`);
+    } catch (e) { showToast(errText(e)); }
   };
   const signIn = async () => {
     setSigningIn(true);
@@ -581,6 +629,11 @@ export default function App() {
           <button className="primary" disabled={!email || needsReauth}
             title={needsReauth ? "Zaloguj się ponownie, aby wysyłać wiadomości" : undefined}
             onClick={() => startCompose(buildNew(signature))}>Nowa wiadomość</button>
+          {email && (
+            <AccountSwitcher accounts={accounts.length ? accounts : [{ email, active: true }]} current={email}
+              busy={signingIn} onSwitch={(a) => void switchAccount(a)} onAdd={() => void signIn()}
+              onSignOut={() => void signOut()} />
+          )}
           <nav>
             {FOLDERS.map((f) => (
               <button key={f.id} className={"folder" + (f.id === folder ? " active" : "")}
@@ -690,11 +743,10 @@ export default function App() {
               <ul>
                 {threads.map((t) => (
                   <li key={t.id} className={selected.has(t.id) ? "picked" : ""}>
-                    <input type="checkbox" className="rowcheck" checked={selected.has(t.id)}
-                      aria-label={`Zaznacz: ${t.subject}`} onChange={() => toggleSelected(t.id)} />
                     <button data-thread={t.id}
                       className={"row" + (t.id === openId ? " active" : "") + (t.unread ? " unread" : "")}
-                      onClick={() => void openThread(t)}>
+                      aria-pressed={selected.has(t.id)}
+                      onClick={(e) => onRowClick(e, t)}>
                       <span className="who">{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
                       <span className="when">
                         {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
@@ -843,7 +895,6 @@ export default function App() {
       <footer className="status">
         <span>{info ? `${info.name} ${info.version}${info.appimage ? " · AppImage" : ""}` : "Tryb podglądu w przeglądarce"}</span>
         <span className="pill">{email ?? "brak konta"}</span>
-        {email && <button className="linklike plain" onClick={() => void signOut()}>Wyloguj</button>}
         {email && outbox.length > 0 && (
           <button className="linklike plain" onClick={() => setOutboxOpen(true)}>Do wysłania ({outbox.length})</button>
         )}

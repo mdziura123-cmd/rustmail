@@ -25,6 +25,8 @@ pub const KEY_REFRESH: &str = "refresh_token";
 pub const KEY_EMAIL: &str = "account_email";
 /// Zakresy faktycznie przyznane przez użytkownika przy ostatnim logowaniu.
 pub const KEY_SCOPE: &str = "granted_scope";
+/// Rejestr wszystkich zalogowanych kont (patrz accounts.rs). Aktywne konto jest dodatkowo w KEY_REFRESH/EMAIL/SCOPE.
+pub const KEY_ACCOUNTS: &str = "accounts_registry";
 
 /// Czy przyznane uprawnienia wystarczają do wysyłania i zarządzania pocztą.
 pub fn scope_allows_modify(granted: Option<&str>) -> bool {
@@ -207,7 +209,7 @@ pub async fn sign_in_flow(http: &reqwest::Client, creds: &ClientCreds) -> Result
             ("code_challenge_method", "S256"),
             ("state", state.as_str()),
             ("access_type", "offline"),
-            ("prompt", "consent"),
+            ("prompt", "select_account consent"),
         ],
     )
     .map_err(|e| e.to_string())?;

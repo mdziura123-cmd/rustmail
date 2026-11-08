@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanDisplay } from "./util";
 import type {
-  AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
+  Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
 } from "./types";
 
@@ -54,6 +54,8 @@ export const api = {
   searchThreads: (query: string, pageToken: string | null) =>
     invoke<ThreadPage>("search_threads", { query, pageToken }).then(cleanPage),
   syncNow: () => invoke<SyncResult>("sync_now"),
+  listAccounts: () => invoke<Account[]>("list_accounts"),
+  switchAccount: (email: string) => invoke<string>("switch_account", { email }),
   queueMessage: (msg: OutgoingMessage) => invoke<number>("queue_message", { msg }),
   listOutbox: () => invoke<OutboxItem[]>("list_outbox"),
   retryOutbox: (id: number) => invoke<void>("retry_outbox", { id }),

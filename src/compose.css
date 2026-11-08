@@ -136,11 +136,20 @@
 .outbox-actions { display: flex; gap: 6px; }
 
 li { position: relative; }
-.rowcheck { position: absolute; left: 6px; top: 12px; z-index: 1; width: 15px; height: 15px; cursor: pointer; }
-li:has(.rowcheck) .row { padding-left: 28px; }
-li.picked .row { background: var(--sel); }
+li.picked .row { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+.row { user-select: none; }
 .bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 13px; }
 .keys { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
 .keys th { text-align: left; padding: 4px 12px 4px 0; white-space: nowrap; font-weight: 400; }
 .keys td { padding: 4px 0; }
 kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); font: 12px ui-monospace, monospace; }
+
+.accounts { position: relative; margin: 8px 12px; }
+.accounts summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.acc-email { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-count { padding: 0 6px; border-radius: 8px; background: var(--sel); font-size: 11px; }
+.acc-pop { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; display: grid; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+.acc-item { text-align: left; padding: 8px 10px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
+.acc-item:hover:not(:disabled) { background: var(--sel); }
+.acc-item.active { font-weight: 600; }
+.acc-item.danger { color: #b3261e; border-top: 1px solid var(--line); }

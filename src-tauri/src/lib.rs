@@ -1,3 +1,4 @@
+mod accounts;
 mod auth;
 mod blocklist;
 mod commands;
@@ -59,6 +60,8 @@ pub fn run() {
             commands::get_thread,
             commands::search_threads,
             commands::sync_now,
+            commands::list_accounts,
+            commands::switch_account,
             commands::queue_message,
             commands::list_outbox,
             commands::retry_outbox,
