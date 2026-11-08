@@ -1,0 +1,11 @@
+#!/bin/sh
+# Zastępuje xdg-open w piaskownicy: prosi systemowy portal o otwarcie linku w zwykłej przeglądarce.
+# Wpuszcza tylko adresy http(s) i mailto.
+url="$1"
+case "$url" in
+  https://*|http://*|mailto:*) ;;
+  *) echo "xdg-open: niedozwolony adres" >&2; exit 1 ;;
+esac
+exec gdbus call --session --dest org.freedesktop.portal.Desktop \
+  --object-path /org/freedesktop/portal/desktop \
+  --method org.freedesktop.portal.OpenURI.OpenURI "" "$url" "{}" >/dev/null

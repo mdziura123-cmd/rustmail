@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Uruchamia RustMail w piaskownicy (bubblewrap). Aplikacja widzi tylko własne dane, a do systemu
+# ma dostęp wyłącznie przez wąski, filtrowany kanał D-Bus (pęk kluczy, powiadomienia, otwieranie linków).
+#
+# Użycie:  rustmail-sandbox            uruchom aplikację
+#          rustmail-sandbox --print    tylko pokaż polecenie (do diagnozy), nic nie uruchamiaj
+#          rustmail-sandbox --check    sprawdź, czy system ma wszystko, czego trzeba
+set -euo pipefail
+
+APP_ID="pl.rustmail.app"
+APP_DIR="${RUSTMAIL_SANDBOX_DIR:-$HOME/.local/share/rustmail-sandbox}"
+IMG="$APP_DIR/RustMail-x86_64.AppImage"
+SHIM_DIR="$APP_DIR/shim"
+MODE="run"
+case "${1:-}" in
+  --print) MODE="print" ;;
+  --check) MODE="check" ;;
+  "") ;;
+  *) echo "Nieznana opcja: $1" >&2; exit 2 ;;
+esac
+
+die() { echo "RustMail (piaskownica): $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "brakuje programu '$1'. $2"; }
+
+need bwrap "Na Bazzite powinien być domyślnie (używa go Flatpak)."
+need xdg-dbus-proxy "Na Bazzite jest razem z Flatpakiem."
+need gdbus "Zwykle w pakiecie glib2."
+[ -x "$IMG" ] || die "nie znaleziono aplikacji: $IMG (uruchom najpierw install-sandbox.sh)"
+[ -x "$SHIM_DIR/xdg-open" ] || die "brakuje pliku $SHIM_DIR/xdg-open (uruchom install-sandbox.sh ponownie)"
+
+UID_NUM="$(id -u)"
+RUN="${XDG_RUNTIME_DIR:-/run/user/$UID_NUM}"
+REAL_HOME="$(realpath "$HOME")"
+BUS_ADDR="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$RUN/bus}"
+
+if [ "$MODE" = "check" ]; then
+  echo "bwrap:           $(command -v bwrap)"
+  echo "xdg-dbus-proxy:  $(command -v xdg-dbus-proxy)"
+  echo "gdbus:           $(command -v gdbus)"
+  echo "aplikacja:       $IMG"
+  echo "Wayland:         ${WAYLAND_DISPLAY:-brak}"
+  echo "X11:             ${DISPLAY:-brak}"
+  echo "magistrala D-Bus: $BUS_ADDR"
+  echo "GPU:             $([ -d /dev/dri ] && echo /dev/dri || echo brak)"
+  exit 0
+fi
+
+# Katalogi z danymi aplikacji (te same co poza piaskownicą, więc nie trzeba się logować od nowa).
+DATA_DIRS=()
+for base in .local/share .config .cache; do
+  for name in "$APP_ID" rustmail RustMail; do
+    # Zakładamy tylko katalog głównego identyfikatora; pozostałe wiążemy, jeśli już istnieją.
+    if [ "$name" = "$APP_ID" ]; then mkdir -p "$REAL_HOME/$base/$name"; fi
+    [ -d "$REAL_HOME/$base/$name" ] && DATA_DIRS+=("$base/$name")
+  done
+done
+mkdir -p "$REAL_HOME/Downloads"
+
+BW=(
+  bwrap
+  --unshare-user --unshare-pid --unshare-uts --unshare-cgroup-try --share-net
+  --die-with-parent --new-session --cap-drop ALL
+  --ro-bind /usr /usr
+  --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/bin /bin --symlink usr/sbin /sbin
+  --ro-bind /etc /etc
+  --ro-bind-try /run/systemd/resolve /run/systemd/resolve
+  --ro-bind-try /var/lib/clamav /var/lib/clamav
+  --ro-bind /sys /sys
+  --proc /proc --dev /dev
+  --tmpfs /tmp
+  --perms 0700 --tmpfs "$RUN"
+  --tmpfs "$HOME"
+)
+
+# GPU (rysowanie okna)
+[ -d /dev/dri ] && BW+=(--dev-bind /dev/dri /dev/dri)
+for d in /dev/nvidia*; do [ -e "$d" ] && BW+=(--dev-bind "$d" "$d"); done
+
+# Dane aplikacji i pobrane załączniki (jedyne miejsca zapisu poza /tmp)
+BW+=(--bind "$APP_DIR" "$APP_DIR" --ro-bind "$SHIM_DIR" /shim)
+for d in "${DATA_DIRS[@]}"; do BW+=(--bind "$REAL_HOME/$d" "$HOME/$d"); done
+BW+=(--bind "$REAL_HOME/Downloads" "$HOME/Downloads")
+
+# Wygląd (tylko do odczytu, jeśli istnieje)
+for ro in .config/fontconfig .local/share/fonts .config/gtk-3.0 .config/gtk-4.0 .config/kdeglobals; do
+  [ -e "$REAL_HOME/$ro" ] && BW+=(--ro-bind "$REAL_HOME/$ro" "$HOME/$ro")
+done
+
+# Ekran: Wayland, a tylko gdy go nie ma – X11 (X11 pozwala podglądać inne okna, więc jest ostatecznością)
+ENV_GFX=()
+if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -S "$RUN/$WAYLAND_DISPLAY" ]; then
+  BW+=(--bind "$RUN/$WAYLAND_DISPLAY" "$RUN/$WAYLAND_DISPLAY")
+  ENV_GFX=(--setenv WAYLAND_DISPLAY "$WAYLAND_DISPLAY" --setenv GDK_BACKEND wayland)
+elif [ -n "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then
+  BW+=(--bind /tmp/.X11-unix /tmp/.X11-unix)
+  ENV_GFX=(--setenv DISPLAY "$DISPLAY" --setenv GDK_BACKEND x11)
+  if [ -n "${XAUTHORITY:-}" ] && [ -f "$XAUTHORITY" ]; then
+    BW+=(--ro-bind "$XAUTHORITY" /tmp/.Xauthority)
+    ENV_GFX+=(--setenv XAUTHORITY /tmp/.Xauthority)
+  fi
+else
+  die "nie wykryto sesji graficznej (ani Wayland, ani X11)."
+fi
+
+# Kanał D-Bus: filtrowany. Aplikacja widzi tylko pęk kluczy, powiadomienia i portal otwierania linków.
+PROXY_SOCK="$RUN/rustmail-bus-$$"
+PROXY_PID=""
+cleanup() { [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null || true; rm -f "$PROXY_SOCK"; }
+
+BW+=(
+  --bind "$PROXY_SOCK" "$RUN/bus"
+  --clearenv
+  --setenv HOME "$HOME" --setenv USER "${USER:-user}" --setenv PATH /shim:/usr/bin
+  --setenv LANG "${LANG:-pl_PL.UTF-8}" --setenv TMPDIR /tmp
+  --setenv XDG_RUNTIME_DIR "$RUN" --setenv XDG_SESSION_TYPE "${XDG_SESSION_TYPE:-wayland}"
+  --setenv XDG_CURRENT_DESKTOP "${XDG_CURRENT_DESKTOP:-KDE}"
+  --setenv DBUS_SESSION_BUS_ADDRESS "unix:path=$RUN/bus"
+  --setenv APPIMAGE_EXTRACT_AND_RUN 1
+  --setenv NO_AT_BRIDGE 1
+  --setenv WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS 1
+)
+[ -n "${XCURSOR_THEME:-}" ] && BW+=(--setenv XCURSOR_THEME "$XCURSOR_THEME")
+[ -n "${XCURSOR_SIZE:-}" ] && BW+=(--setenv XCURSOR_SIZE "$XCURSOR_SIZE")
+[ -n "${RUSTMAIL_SAFE_GPU:-}" ] && BW+=(--setenv WEBKIT_DISABLE_DMABUF_RENDERER 1)
+BW+=("${ENV_GFX[@]}" -- "$IMG")
+
+if [ "$MODE" = "print" ]; then
+  printf '%q ' "${BW[@]}"; echo
+  exit 0
+fi
+
+trap cleanup EXIT
+xdg-dbus-proxy "$BUS_ADDR" "$PROXY_SOCK" --filter \
+  --talk=org.freedesktop.secrets \
+  --talk=org.freedesktop.Notifications \
+  --talk=org.freedesktop.portal.Desktop \
+  --talk=org.freedesktop.portal.Documents &
+PROXY_PID=$!
+for _ in $(seq 1 50); do [ -S "$PROXY_SOCK" ] && break; sleep 0.1; done
+[ -S "$PROXY_SOCK" ] || die "nie udało się uruchomić filtra D-Bus."
+
+"${BW[@]}"
