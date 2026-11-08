@@ -84,6 +84,59 @@ export interface SanitizedMail {
   html: string;
   /** Liczba zdalnych obrazów (http/https) w wiadomości. */
   remoteImages: number;
+  /** Liczba zablokowanych pikseli śledzących (blokowane zawsze, także po zgodzie na obrazy). */
+  trackers: number;
+}
+
+// ---------- Ochrona przed śledzeniem ----------
+// Piksel śledzący to zwykle obraz 1x1 (lub ukryty) z adresem unikalnym dla odbiorcy. Pobranie go
+// mówi nadawcy, kiedy, skąd (adres IP) i na jakim urządzeniu otwarto wiadomość.
+const TRACKER_HOSTS = [
+  "mailchimp.com", "list-manage.com", "mandrillapp.com", "sendgrid.net", "sendgrid.com", "mailgun.org",
+  "mailgun.com", "sparkpostmail.com", "sparkpost.com", "hubspot.com", "hs-analytics.net", "hubspotemail.net",
+  "hsforms.com", "mktoweb.com", "marketo.com", "mkt-track.com", "pardot.com", "salesforce.com", "exacttarget.com",
+  "returnpath.net", "250ok.com", "litmus.com", "emltrk.com", "mailtrack.io", "mailtrack.com", "yesware.com",
+  "streak.com", "mixmax.com", "superhuman.com", "bananatag.com", "getnotify.com", "readnotify.com",
+  "mailspring.com", "cmail19.com", "cmail20.com", "createsend.com", "campaign-archive.com", "sendinblue.com",
+  "brevo.com", "sibautomation.com", "klaviyo.com", "klaviyomail.com", "customer.io", "customeriomail.com",
+  "intercom-mail.com", "intercom.io", "braze.com", "appboy.com", "iterable.com", "links.iterable.com",
+  "convertkit.com", "ck.page", "mailerlite.com", "mlsend.com", "getresponse.com", "gr-cdn.com", "freshmail.com",
+  "freshmail.pl", "smsapi.pl", "salesmanago.com", "salesmanago.pl", "edrone.me", "mailjet.com", "mjt.lu",
+  "constantcontact.com", "rs6.net", "campaignmonitor.com", "emarsys.net", "emarsys.com", "bluecore.com",
+  "doubleclick.net", "googleadservices.com", "google-analytics.com", "facebook.com", "facebook.net",
+  "linkedin.com", "licdn.com", "twitter.com", "ads-twitter.com", "t.co", "bat.bing.com", "adform.net",
+  "criteo.com", "criteo.net", "rubiconproject.com", "adsrvr.org", "scorecardresearch.com", "mathtag.com",
+  "tracking.", "track.", "pixel.", "beacon.", "open.", "email.mg.", "trk.",
+];
+const TRACKER_PATH = /(\/|[._-])(track(ing)?|pixel|beacon|open(ed)?(\.gif|\.png|\.jpg|\/)|wf\/open|e\/o\/|oo\.gif|o\.gif|trk|impression|imp\.gif|1x1|spacer\.gif)/i;
+
+function hostOf(u: string): string {
+  try { return new URL(u).hostname.toLowerCase(); } catch { return ""; }
+}
+function hostMatches(host: string): boolean {
+  return TRACKER_HOSTS.some((t) =>
+    t.endsWith(".") ? host.startsWith(t) : host === t || host.endsWith("." + t));
+}
+const px = (v: string | null | undefined): number | null => {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(px)?\s*$/i.exec(v ?? "");
+  return m ? Number(m[1]) : null;
+};
+function styleSize(style: string, prop: "width" | "height"): number | null {
+  const m = new RegExp("(?:^|;)\\s*" + prop + "\\s*:\\s*([^;]+)", "i").exec(style);
+  return m ? px(m[1]) : null;
+}
+/** Czy obraz zdalny wygląda na piksel śledzący (rozmiar ≤ 2 px, ukryty albo znany adres śledzący). */
+export function isTrackingImage(el: Element, src: string): boolean {
+  const style = el.getAttribute("style") ?? "";
+  if (/display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![.\d])/i.test(style)) return true;
+  const w = px(el.getAttribute("width")) ?? styleSize(style, "width");
+  const h = px(el.getAttribute("height")) ?? styleSize(style, "height");
+  if ((w !== null && w <= 2) || (h !== null && h <= 2)) return true;
+  if (hostMatches(hostOf(src))) {
+    // znany serwis wysyłkowy: blokujemy tylko to, co wygląda na licznik (nie logo czy zdjęcia produktów)
+    return TRACKER_PATH.test(src) || (w === null && h === null && /[?&](u|uid|e|em|email|rid|r|id|mid|cid)=/i.test(src));
+  }
+  return TRACKER_PATH.test(new URL(src, "https://x.invalid").pathname) && w === null && h === null;
 }
 
 const DATA_IMG = /^data:image\/(png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i;
@@ -136,6 +189,7 @@ export function sanitizeMail(html: string, allowImages: boolean, hideQuotes = fa
   const box = doc.createElement("div");
   let nodes = 0;
   let remote = 0;
+  let trackers = 0;
 
   const walk = (src: Node, dst: Node, depth: number) => {
     src.childNodes.forEach((child) => {
@@ -161,6 +215,8 @@ export function sanitizeMail(html: string, allowImages: boolean, hideQuotes = fa
           img.setAttribute("alt", alt);
           copyAttrs(el, img, tag);
           dst.appendChild(img);
+        } else if (/^https?:\/\//i.test(src2) && isTrackingImage(el, src2)) {
+          trackers++; // nigdy nie pobieramy – nawet po zgodzie na obrazy
         } else if (/^https?:\/\//i.test(src2)) {
           remote++;
           if (allowImages && /^https:\/\//i.test(src2)) {
@@ -199,5 +255,5 @@ export function sanitizeMail(html: string, allowImages: boolean, hideQuotes = fa
     });
   };
   walk(parsed.body, box, 0);
-  return { html: box.innerHTML, remoteImages: remote, hadQuote };
+  return { html: box.innerHTML, remoteImages: remote, hadQuote, trackers };
 }

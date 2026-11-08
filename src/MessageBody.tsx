@@ -115,6 +115,11 @@ export function MessageBody({ m, strict }: { m: MessageView; strict: boolean }) 
           {showQuote ? "Ukryj cytowany tekst" : "Pokaż cytowany tekst"}
         </button>
       )}
+      {clean.trackers > 0 && (
+        <p className="note" role="status" title="Ukryte obrazki 1x1 i adresy znanych serwisów śledzących nie są pobierane, więc nadawca nie dowie się, kiedy, skąd i na jakim urządzeniu otwarto wiadomość.">
+          Ochrona przed śledzeniem: zablokowano {clean.trackers} {clean.trackers === 1 ? "piksel śledzący" : "pikseli śledzących"}.
+        </p>
+      )}
       {clean.remoteImages > 0 && !allowImages && (
         <div className="img-bar" role="status">
           <span>Zablokowano zdalne obrazy ({clean.remoteImages}) – mogą ujawniać, że otworzyłeś wiadomość.</span>
