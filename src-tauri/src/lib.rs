@@ -16,6 +16,8 @@ mod safety;
 mod scan;
 mod secrets;
 mod signature;
+mod spam;
+mod spam_io;
 mod store;
 mod update;
 
@@ -30,6 +32,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(auth::AppState::new())
         .manage(notify::Notifier::default())
+        .manage(spam_io::SpamState::default())
         .setup(|app| {
             use tauri::Manager;
             // Baza lokalna: jeśli nie da się jej otworzyć, aplikacja działa dalej tylko online.
@@ -68,6 +71,16 @@ pub fn run() {
             commands::delete_outbox,
             commands::flush_outbox,
             commands::poll_mail,
+            commands::spam_get_config,
+            commands::spam_set_config,
+            commands::spam_status,
+            commands::spam_log,
+            commands::spam_scan_now,
+            commands::spam_train,
+            commands::spam_bootstrap,
+            commands::spam_refresh_lists,
+            commands::spam_restore,
+            commands::spam_move,
             commands::create_label,
             commands::test_notification,
             commands::set_thread_label,

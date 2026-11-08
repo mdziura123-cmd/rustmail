@@ -146,3 +146,10 @@ kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; backg
 .acc-item:hover:not(:disabled) { background: var(--sel); }
 .acc-item.active { font-weight: 600; }
 .acc-item.danger { color: #b3261e; border-top: 1px solid var(--line); }
+
+/* Filtr spamu */
+.spam-group { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; display: grid; gap: 8px; }
+.spam-group legend { font-weight: 700; padding: 0 6px; }
+.spam-opt { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; }
+.spam-opt textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.modal-actions.wrap { flex-wrap: wrap; }

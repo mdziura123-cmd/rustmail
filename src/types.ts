@@ -78,6 +78,61 @@ export interface PollResult {
   spamUnread: number;
   labels: LabelInfo[];
   notified: number;
+  spamMoved: number;
+  spamFlagged: FlagInfo[];
+}
+
+export type SpamMode = "off" | "flag" | "certain" | "aggressive";
+
+export interface SpamConfig {
+  mode: SpamMode;
+  headers: boolean;
+  rules: boolean;
+  bayes: boolean;
+  lists: boolean;
+  provider: string;
+  custom: string[];
+}
+
+export interface SpamStatus {
+  bayesSpam: number;
+  bayesHam: number;
+  bayesTokens: number;
+  bayesReady: boolean;
+  listDomains: number;
+  listProvider: string | null;
+  listAgeHours: number | null;
+  providers: { id: string; label: string }[];
+}
+
+export interface SpamLogEntry {
+  id: string;
+  ts: number;
+  action: string;
+  subject: string;
+  sender: string;
+  snippet: string;
+  reason: string;
+  open: boolean;
+}
+
+export interface SpamScanOutcome {
+  moved: number;
+  flagged: number;
+  checked: number;
+  notes: string[];
+}
+
+export interface TrainItem {
+  id: string;
+  subject: string;
+  snippet: string;
+  participants: string;
+}
+
+export interface FlagInfo {
+  id: string;
+  reason: string;
 }
 
 export interface SyncResult {

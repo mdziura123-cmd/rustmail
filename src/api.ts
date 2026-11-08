@@ -3,6 +3,7 @@ import { cleanDisplay, stripEmoji } from "./util";
 import type {
   Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
+  SpamConfig, SpamLogEntry, SpamScanOutcome, SpamStatus, TrainItem,
 } from "./types";
 
 /** Lista nie może wisieć w nieskończoność: po limicie czasu pokazujemy błąd zamiast pustego ekranu. */
@@ -68,6 +69,25 @@ export const api = {
       ...r,
       labels: r.labels.map((l) => ({ ...l, name: cleanDisplay(l.name, 100) || l.id })),
     })),
+  spamGetConfig: () => invoke<SpamConfig>("spam_get_config"),
+  spamSetConfig: (config: SpamConfig) => invoke<SpamConfig>("spam_set_config", { config }),
+  spamStatus: () => invoke<SpamStatus>("spam_status"),
+  spamLog: () =>
+    invoke<SpamLogEntry[]>("spam_log").then((v) =>
+      v.map((e) => ({
+        ...e,
+        subject: cleanDisplay(e.subject, 120),
+        sender: cleanDisplay(e.sender, 80),
+        snippet: cleanDisplay(e.snippet, 200),
+        reason: cleanDisplay(e.reason, 400),
+      })),
+    ),
+  spamScanNow: () => invoke<SpamScanOutcome>("spam_scan_now"),
+  spamTrain: (items: TrainItem[], isSpam: boolean) => invoke<number>("spam_train", { items, isSpam }),
+  spamBootstrap: () => invoke<{ spam: number; ham: number }>("spam_bootstrap"),
+  spamRefreshLists: () => invoke<number>("spam_refresh_lists"),
+  spamRestore: (item: TrainItem) => invoke<void>("spam_restore", { item }),
+  spamMove: (item: TrainItem) => invoke<void>("spam_move", { item }),
   createLabel: (name: string) => invoke<LabelInfo>("create_label", { name }),
   setThreadLabel: (id: string, label: string, add: boolean) =>
     invoke<void>("set_thread_label", { id, label, add }),

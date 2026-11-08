@@ -87,3 +87,7 @@ Kolory każdego motywu są w jednym miejscu: `src/themes.css` (zmienne `--bg`, `
 Kolorowe emoji są wycinane z wyświetlanego tekstu (tematy, nadawcy, treść wiadomości, etykiety). Powód: silnik WebKit
 w niektórych systemach (np. Bazzite) wysypuje się przy rysowaniu kolorowych czcionek COLRv1 (błąd biblioteki Skia),
 co zawieszało foldery Spam i Nieprzeczytane. Wiadomości w Gmailu nie są zmieniane – to tylko sposób wyświetlania.
+
+## Filtr spamu
+
+Stopka → „Filtr spamu”. Cztery silniki (nagłówki, reguły, Bayes uczący się z Twoich decyzji, otwarte listy złośliwych domen) i cztery tryby: wyłączony / tylko oznaczaj / przenoś tylko pewne / przenoś wszystko. Domyślnie wyłączony. Wiadomości z gwiazdką, z Twoimi etykietami i z Twoim udziałem nie są ruszane; każde przeniesienie można cofnąć w oknie filtra. Listy pobierane są z `malware-filter.gitlab.io` i `phish.co.za` (raz na dobę).

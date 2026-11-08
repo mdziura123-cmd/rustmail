@@ -12,6 +12,7 @@ use crate::compose::{self, OutAttachment, Outgoing};
 use crate::blocklist::{self, Rules};
 use crate::store::{CacheStatus, Store};
 use crate::notify::{self, Notifier};
+use crate::spam_io::{self, SpamState};
 use crate::accounts::{self, Account};
 use crate::{dismissed, filetype, gmail, offline, remote, safety, scan, secrets, signature};
 
@@ -193,6 +194,7 @@ pub async fn switch_account(
     state: State<'_, AppState>,
     store: State<'_, Store>,
     notifier: State<'_, Notifier>,
+    spam: State<'_, SpamState>,
     email: String,
 ) -> Result<String, String> {
     let list = ensure_registered()?;
@@ -202,6 +204,9 @@ pub async fn switch_account(
     let _ = store.clear();
     if let Ok(mut s) = notifier.0.lock() {
         *s = notify::Seen::default();
+    }
+    if let Ok(mut k) = spam.last_key.lock() {
+        *k = None;
     }
     Ok(acc.email)
 }
@@ -700,6 +705,10 @@ pub struct PollResult {
     pub labels: Vec<gmail::LabelInfo>,
     /// Ile nowych wiadomości zgłoszono w powiadomieniu pulpitowym.
     pub notified: usize,
+    /// Ile wiadomości filtr spamu przeniósł przy tym sprawdzeniu.
+    pub spam_moved: usize,
+    /// Wiadomości oznaczone przez filtr jako podejrzane (czekają na decyzję użytkownika).
+    pub spam_flagged: Vec<spam_io::FlagInfo>,
 }
 
 /// Odpytywanie poczty co minutę: liczniki + wykrycie nowych wiadomości w skrzynce. Powiadomienie pokazuje się tylko
@@ -709,11 +718,17 @@ pub async fn poll_mail(
     app: AppHandle,
     state: State<'_, AppState>,
     notifier: State<'_, Notifier>,
+    spam: State<'_, SpamState>,
     notify_enabled: bool,
     show_content: bool,
 ) -> Result<PollResult, String> {
     let stats = gmail::mail_stats(&state).await?;
     let key = (stats.inbox_unread, stats.inbox_total);
+    // Filtr spamu działa przed powiadomieniami, żeby o wiadomościach przeniesionych do Spamu nie powiadamiać.
+    let mut spam_moved = 0usize;
+    if let Some(my_email) = secrets::get(auth::KEY_EMAIL)? {
+        spam_moved = spam_io::auto_scan(&app, &spam, &state, &my_email, key).await.moved;
+    }
     let unchanged = notifier.0.lock().map(|s| s.counts == Some(key) && s.ids.is_some()).unwrap_or(false);
     let mut notified = 0usize;
     if !unchanged {
@@ -744,7 +759,14 @@ pub async fn poll_mail(
             }
         }
     }
-    Ok(PollResult { inbox_unread: stats.inbox_unread, spam_unread: stats.spam_unread, labels: stats.labels, notified })
+    Ok(PollResult {
+        inbox_unread: stats.inbox_unread,
+        spam_unread: stats.spam_unread,
+        labels: stats.labels,
+        notified,
+        spam_moved,
+        spam_flagged: spam_io::open_flags(&app),
+    })
 }
 
 #[tauri::command]
@@ -853,4 +875,71 @@ pub async fn flush_outbox(state: State<'_, AppState>, store: State<'_, Store>) -
         }
     }
     Ok(out)
+}
+
+
+// ---------- Filtr spamu ----------
+
+fn my_email() -> Result<String, String> {
+    secrets::get(auth::KEY_EMAIL)?.ok_or_else(|| "Nie jesteś zalogowany.".to_string())
+}
+
+#[tauri::command]
+pub async fn spam_get_config(app: AppHandle) -> Result<spam_io::Config, String> {
+    Ok(spam_io::load_config(&app))
+}
+
+#[tauri::command]
+pub async fn spam_set_config(app: AppHandle, spam: State<'_, SpamState>, config: spam_io::Config) -> Result<spam_io::Config, String> {
+    spam_io::save_config(&app, &spam, config)
+}
+
+#[tauri::command]
+pub async fn spam_status(app: AppHandle, spam: State<'_, SpamState>) -> Result<spam_io::Status, String> {
+    Ok(spam_io::status(&app, &spam))
+}
+
+#[tauri::command]
+pub async fn spam_log(app: AppHandle) -> Result<Vec<spam_io::LogEntry>, String> {
+    Ok(spam_io::read_log(&app))
+}
+
+/// Ręczne sprawdzenie skrzynki odbiorczej (do 100 ostatnich wątków, także przeczytanych).
+#[tauri::command]
+pub async fn spam_scan_now(app: AppHandle, state: State<'_, AppState>, spam: State<'_, SpamState>) -> Result<spam_io::ScanOutcome, String> {
+    let email = my_email()?;
+    spam_io::scan(&app, &spam, &state, &email, 5, false).await
+}
+
+#[tauri::command]
+pub async fn spam_train(
+    app: AppHandle,
+    spam: State<'_, SpamState>,
+    items: Vec<spam_io::TrainItem>,
+    is_spam: bool,
+) -> Result<usize, String> {
+    Ok(spam_io::train_items(&app, &spam, &items, is_spam))
+}
+
+#[tauri::command]
+pub async fn spam_bootstrap(app: AppHandle, state: State<'_, AppState>, spam: State<'_, SpamState>) -> Result<spam_io::BootstrapResult, String> {
+    let email = my_email()?;
+    spam_io::bootstrap(&app, &spam, &state, &email).await
+}
+
+#[tauri::command]
+pub async fn spam_refresh_lists(app: AppHandle, state: State<'_, AppState>, spam: State<'_, SpamState>) -> Result<usize, String> {
+    let cfg = spam_io::load_config(&app);
+    let set = spam_io::ensure_list(&app, &spam, &state.http, &cfg.provider, true).await?;
+    Ok(set.len())
+}
+
+#[tauri::command]
+pub async fn spam_restore(app: AppHandle, state: State<'_, AppState>, spam: State<'_, SpamState>, item: spam_io::TrainItem) -> Result<(), String> {
+    spam_io::restore(&app, &spam, &state, &item).await
+}
+
+#[tauri::command]
+pub async fn spam_move(app: AppHandle, state: State<'_, AppState>, spam: State<'_, SpamState>, item: spam_io::TrainItem) -> Result<(), String> {
+    spam_io::move_to_spam(&app, &spam, &state, &item).await
 }

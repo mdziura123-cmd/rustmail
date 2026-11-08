@@ -13,6 +13,7 @@ import { RiskBanner } from "./RiskBanner";
 import { splitQuoted } from "./quoteTrim";
 import { SenderLists } from "./SenderLists";
 import { SignatureDialog } from "./SignatureDialog";
+import { SpamDialog } from "./SpamDialog";
 import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
@@ -108,6 +109,8 @@ export default function App() {
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [spamOpen, setSpamOpen] = useState(false);
+  const [flags, setFlags] = useState<Record<string, string>>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
@@ -277,6 +280,17 @@ export default function App() {
     if (init) startCompose(init);
   };
 
+  // Filtr spamu uczy się z decyzji użytkownika (Spam / To nie spam). Błędy ignorujemy.
+  const trainFrom = (ids: string[], action: ThreadAction) => {
+    if (action !== "spam" && action !== "notspam") return;
+    const items = ids.flatMap((id) => {
+      const t = threads.find((x) => x.id === id);
+      return t ? [{ id, subject: t.subject, snippet: t.snippet, participants: t.participants }] : [];
+    });
+    if (items.length > 0) api.spamTrain(items, action === "spam").catch(() => {});
+    setFlags((f) => { const n = { ...f }; for (const id of ids) delete n[id]; return n; });
+  };
+
   const runAction = async (action: ThreadAction) => {
     if (!detail) return;
     const id = detail.id;
@@ -286,6 +300,7 @@ export default function App() {
       showToast(errText(e));
       return;
     }
+    trainFrom([id], action);
     const inverse = INVERSE[action];
     if (inverse) {
       setThreads((prev) => prev.filter((t) => t.id !== id));
@@ -348,6 +363,7 @@ export default function App() {
       try { await api.threadAction(id, action); done.push(id); }
       catch (e) { failed += 1; lastError = errText(e); }
     }
+    trainFrom(done, action);
     const inverse = INVERSE[action];
     const gone = new Set(done);
     if (inverse) {
@@ -380,7 +396,7 @@ export default function App() {
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
-      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen) return;
+      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen) return;
       e.preventDefault();
       setSelected(new Set(threads.map((t) => t.id)));
       return;
@@ -388,7 +404,7 @@ export default function App() {
     const cmd = commandFor(e);
     if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
     if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
-    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen) {
+    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen) {
       if (cmd === "escape" && helpOpen) setHelpOpen(false);
       return;
     }
@@ -576,10 +592,19 @@ export default function App() {
   folderRef.current = folder;
   const settingsRef = useRef({ notify: notifyOn, content: notifyContent });
   settingsRef.current = { notify: notifyOn, content: notifyContent };
+  const reloadRef = useRef<() => void>(() => {});
+  reloadRef.current = () => void loadList(folderRef.current, null, false);
   const pollOnce = useCallback(async () => {
     try {
       const r = await api.pollMail(settingsRef.current.notify, settingsRef.current.content);
       setStats({ inbox: r.inboxUnread, spam: r.spamUnread, labels: r.labels });
+      if (r.spamFlagged.length > 0) {
+        setFlags((f) => { const n = { ...f }; for (const x of r.spamFlagged) n[x.id] = x.reason; return n; });
+      }
+      if (r.spamMoved > 0) {
+        showToast(r.spamMoved === 1 ? "Filtr przeniósł 1 wiadomość do Spamu." : `Filtr przeniósł wiadomości do Spamu: ${r.spamMoved}.`);
+        if (folderRef.current === "inbox") reloadRef.current();
+      }
       document.title = r.inboxUnread > 0 ? `(${r.inboxUnread}) RustMail` : "RustMail";
       await flushQueue(false);
     } catch { /* brak sieci – spróbujemy za minutę */ }
@@ -765,6 +790,9 @@ export default function App() {
                         {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
                       </span>
                       <span className="subj">
+                        {flags[t.id] && (
+                          <span className="risk-chip warn" title={flags[t.id]}>Możliwy spam</span>
+                        )}
                         {!t.dismissed && t.risk.level !== "none" && (
                           <span className={"risk-chip " + t.risk.level} title={t.risk.reasons.join("\n")}>
                             {t.risk.level === "high" ? "Podejrzane" : "Uwaga"}
@@ -912,6 +940,7 @@ export default function App() {
           <button className="linklike plain" onClick={() => setOutboxOpen(true)}>Do wysłania ({outbox.length})</button>
         )}
         {email && <button className="linklike plain" onClick={() => setHelpOpen(true)}>Skróty</button>}
+        {email && <button className="linklike plain" onClick={() => setSpamOpen(true)}>Filtr spamu</button>}
         {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
         <label className="check">
@@ -939,6 +968,10 @@ export default function App() {
       )}
       {senderDlg && (
         <SenderLists email={senderDlg.email} onClose={() => setSenderDlg(null)} onChanged={(s) => void senderChanged(s)} />
+      )}
+      {spamOpen && (
+        <SpamDialog onClose={() => setSpamOpen(false)} onToast={(t) => showToast(t)}
+          onChanged={() => { reloadRef.current(); void pollOnce(); }} />
       )}
       {helpOpen && (
         <div className="modal-back" role="dialog" aria-modal="true" aria-label="Skróty klawiszowe">
