@@ -11,7 +11,7 @@ jobs:
     # Ubuntu 22.04 = starsze glibc, dzięki czemu AppImage działa też na nowszych systemach (np. Bazzite).
     runs-on: ubuntu-22.04
     permissions:
-      contents: write # potrzebne tylko do publikacji wydania po otagowaniu (v*)
+      contents: write # potrzebne do dołączenia plików do wydania (tagi v*)
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +30,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential curl wget file pkg-config \
             libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev \
-            librsvg2-dev libgtk-3-dev patchelf desktop-file-utils
+            librsvg2-dev libgtk-3-dev libdbus-1-dev patchelf desktop-file-utils
+
+      - name: Ustaw wersję z tagu (tylko dla wydań)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          sed -i "0,/^version = \".*\"/s//version = \"$V\"/" src-tauri/Cargo.toml
+          sed -i "s/\"version\": \".*\"/\"version\": \"$V\"/" src-tauri/tauri.conf.json package.json
+          echo "Wersja: $V"
 
       - name: Zależności frontendu i kontrola typów
         run: |
@@ -45,7 +53,26 @@ jobs:
         env:
           NO_STRIP: "true"
           APPIMAGE_EXTRACT_AND_RUN: "1"
-        run: npm run tauri build -- --bundles appimage
+          RUSTMAIL_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          RUSTMAIL_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        # GitHub czasem zwraca 504 przy pobieraniu narzędzi do bundlowania – ponawiamy kilka razy.
+        # Narzędzia pobrane w poprzedniej próbie zostają w pamięci podręcznej Tauri.
+        run: |
+          mkdir -p "$HOME/.cache/tauri"
+          if [ ! -s "$HOME/.cache/tauri/AppRun-x86_64" ]; then
+            curl -fsSL --retry 6 --retry-delay 10 --retry-all-errors \
+              -o "$HOME/.cache/tauri/AppRun-x86_64" \
+              https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 \
+              && chmod +x "$HOME/.cache/tauri/AppRun-x86_64" \
+              || rm -f "$HOME/.cache/tauri/AppRun-x86_64"
+          fi
+          for attempt in 1 2 3 4 5; do
+            echo "Próba budowania $attempt/5"
+            if npm run tauri build -- --bundles appimage; then exit 0; fi
+            sleep $((attempt * 20))
+          done
+          echo "Budowanie nie powiodło się po 5 próbach"
+          exit 1
 
       - name: Nazwa pliku i suma SHA-256
         run: |
@@ -60,7 +87,7 @@ jobs:
           path: dist-release/*
           if-no-files-found: error
 
-      - name: Publikacja wydania (tylko dla tagów v*)
+      - name: Dołącz pliki do wydania (tylko dla tagów v*)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:

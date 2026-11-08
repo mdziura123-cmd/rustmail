@@ -306,7 +306,12 @@ async fn page_summaries(
     let mut first_err: Option<String> = None;
     for (_, r) in results {
         match r {
-            Ok(raw) => threads.push(summarize(&raw, my_email, f)),
+            Ok(raw) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| summarize(&raw, my_email, f))) {
+                Ok(s) => threads.push(s),
+                Err(_) => {
+                    first_err.get_or_insert("Nie udało się przetworzyć jednej z wiadomości.".to_string());
+                }
+            },
             Err(e) => {
                 first_err.get_or_insert(e);
             }
@@ -646,7 +651,7 @@ pub async fn mail_stats(state: &AppState) -> Result<MailStats, String> {
         let http = state.http.clone();
         let tok = token.clone();
         set.spawn(async move {
-            let r: Result<RawLabel, String> = get_json(&http, &tok, &format!("labels/{id}"), &[]).await;
+            let r: Result<RawLabel, String> = get_json(&http, &tok, &format!("labels/{}", crate::labels::path_encode(&id)), &[]).await;
             (id, r)
         });
     }
