@@ -1,3 +1,4 @@
+import { stripEmoji } from "./util";
 // Oczyszczanie HTML tworzonego w edytorze (oraz wczytywanego z wersji roboczej).
 // Zasada: dozwolona jest tylko niewielka lista znaczników; obrazy, style, skrypty, ramki
 // i wszelkie atrybuty poza href w linkach są usuwane. DOMParser nie uruchamia skryptów.
@@ -63,5 +64,5 @@ export function sanitizeHtml(html: string): string {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const box = parsed.createElement("div");
   clean(parsed.body, box, parsed);
-  return box.innerHTML;
+  return stripEmoji(box.innerHTML);
 }

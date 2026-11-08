@@ -30,9 +30,20 @@ export function fmtSize(bytes: number): string {
  * myli lub psuje wyświetlanie: sterujące, niewidoczne, zmieniające kierunek tekstu (podszywanie się)
  * oraz długie ciągi znaków łączących ("zalgo"), i przycina długość.
  */
+/**
+ * Wycina kolorowe emoji. Silnik WebKit w niektórych systemach (np. Bazzite) wysypuje się przy rysowaniu
+ * kolorowych glifów COLRv1 (błąd w bibliotece Skia), co zawieszało foldery Spam i Nieprzeczytane.
+ */
+export function stripEmoji(s: string): string {
+  return s.replace(
+    /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{231A}-\u{231B}\u{23E9}-\u{23F3}\u{23F8}-\u{23FA}\u{FE0E}\u{FE0F}\u{20E3}\u{E0020}-\u{E007F}]/gu,
+    "",
+  );
+}
+
 export function cleanDisplay(s: string | null | undefined, max = 200): string {
   if (!s) return "";
-  let t = s
+  let t = stripEmoji(s)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .replace(/[­؜᠎​-‏‪-‮⁠-⁯﻿￹-￻]/g, "")
     .replace(/(\p{M}{2})\p{M}+/gu, "$1")

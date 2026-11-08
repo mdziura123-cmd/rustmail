@@ -81,3 +81,9 @@ Wybierasz je w lewym panelu, na dole („Motyw”): Systemowy, Jasny, Ciemny, Pr
 Błękit i biel, Solarized jasny, Solarized ciemny. Wszystkie kolory są jednolite – bez rozmycia i przezroczystości.
 Kolory każdego motywu są w jednym miejscu: `src/themes.css` (zmienne `--bg`, `--accent` itd.). Nowy motyw = nowy blok
 `:root[data-theme="nazwa"]` plus wpis w `src/themes.ts`.
+
+## Emoji
+
+Kolorowe emoji są wycinane z wyświetlanego tekstu (tematy, nadawcy, treść wiadomości, etykiety). Powód: silnik WebKit
+w niektórych systemach (np. Bazzite) wysypuje się przy rysowaniu kolorowych czcionek COLRv1 (błąd biblioteki Skia),
+co zawieszało foldery Spam i Nieprzeczytane. Wiadomości w Gmailu nie są zmieniane – to tylko sposób wyświetlania.
