@@ -1,6 +1,6 @@
 [package]
 name = "rustmail"
-version = "0.2.0"
+version = "0.3.0"
 description = "Bezpieczny klient poczty Gmail dla Linuksa"
 edition = "2021"
 

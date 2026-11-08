@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanDisplay } from "./util";
 import type {
-  AppInfo, AuthStatus, CacheStatus, DraftContent, LabelInfo, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
+  AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
 } from "./types";
 
@@ -54,6 +54,11 @@ export const api = {
   searchThreads: (query: string, pageToken: string | null) =>
     invoke<ThreadPage>("search_threads", { query, pageToken }).then(cleanPage),
   syncNow: () => invoke<SyncResult>("sync_now"),
+  queueMessage: (msg: OutgoingMessage) => invoke<number>("queue_message", { msg }),
+  listOutbox: () => invoke<OutboxItem[]>("list_outbox"),
+  retryOutbox: (id: number) => invoke<void>("retry_outbox", { id }),
+  deleteOutbox: (id: number) => invoke<void>("delete_outbox", { id }),
+  flushOutbox: () => invoke<FlushResult>("flush_outbox"),
   pollMail: (notifyEnabled: boolean, showContent: boolean) =>
     invoke<PollResult>("poll_mail", { notifyEnabled, showContent }),
   createLabel: (name: string) => invoke<LabelInfo>("create_label", { name }),

@@ -24,10 +24,10 @@ chmod +x dist-release/RustMail-x86_64.AppImage
 
 Jeśli okno jest puste, spróbuj `WEBKIT_DISABLE_DMABUF_RENDERER=0` lub `GDK_BACKEND=x11`.
 
-## Stan projektu (wersja 0.8.0, etap 8)
+## Stan projektu (wersja 0.9.0, etap 9)
 
 Działa (do potwierdzenia na Twoim komputerze): logowanie przez Google, odczyt, redagowanie i wysyłanie (etap 3), bezpieczny HTML,
-linki i załączniki (etap 4), ocena ryzyka phishingu z folderem „Podejrzane” (etap 5), skanowanie załączników i listy nadawców (etap 6) oraz etap 7 (wyszukiwanie, tryb offline). Nowe w etapie 8:
+linki i załączniki (etap 4), ocena ryzyka phishingu z folderem „Podejrzane” (etap 5), skanowanie załączników i listy nadawców (etap 6) oraz etap 7 (wyszukiwanie, tryb offline). Nowe w etapie 9: **kolejka wysyłania.** Gdy przy wysyłaniu nie ma sieci, okno pisania proponuje „Zapisz w kolejce do wysłania”. Wiadomość (gotowy MIME, razem z załącznikami) czeka w lokalnej bazie **bez szyfrowania** i wychodzi sama po powrocie połączenia (sprawdzanie co minutę, tylko przy uruchomionej aplikacji). Przycisk „Do wysłania” na dole pokazuje kolejkę. Błąd inny niż brak sieci oznacza wiadomość jako nieudaną – nie jest ponawiana sama. Jeśli aplikacja zamknie się w trakcie wysyłania, wiadomość dostaje stan „nie wiadomo, czy wyszła” i czeka na Twoją decyzję. Rzadki przypadek graniczny: zerwanie sieci tuż po przyjęciu wiadomości przez Gmail może dać duplikat. Kolejka jest przypisana do konta i nie jest czyszczona przy wylogowaniu ani czyszczeniu pamięci offline. Limity: 50 wiadomości, 30 MB każda. Etap 8:
 
 - **Liczniki nieprzeczytanych** przy „Odebrane”, „Spam” i własnych etykietach oraz w tytule okna (odświeżane co minutę).
 - **Powiadomienia pulpitowe** (Ustawienia, domyślnie wyłączone) przez systemowe `notify-send`. Domyślnie bez treści; opcjonalnie
@@ -68,7 +68,7 @@ ostrożności: antywirus nie wykrywa każdego złośliwego pliku. Archiwa z has�
 
 ## Niezweryfikowane
 
-Etap 8: `poll_mail`, `notify-send`, wywołania etykiet Gmaila i interfejs nie były kompilowane ani uruchamiane (logika `labels.rs` i `notify.rs` jest testowana osobno). Etap 7: `store.rs` (rusqlite), synchronizacja History API, wyszukiwanie i polecenia Tauri nie były kompilowane. Zapytania SQL sprawdzono osobno na prawdziwym SQLite (schemat, filtry folderów, upsert, przycinanie), ale połączenie Rust–SQLite i wywołania Gmail History API zostaną sprawdzone dopiero przez CI i na Twoim koncie.
+Etap 9: `store.rs` (kolejka), `flush_outbox` i interfejs kolejki nie były kompilowane (zapytania SQL sprawdzono na SQLite). Etap 8: `poll_mail`, `notify-send`, wywołania etykiet Gmaila i interfejs nie były kompilowane ani uruchamiane (logika `labels.rs` i `notify.rs` jest testowana osobno). Etap 7: `store.rs` (rusqlite), synchronizacja History API, wyszukiwanie i polecenia Tauri nie były kompilowane. Zapytania SQL sprawdzono osobno na prawdziwym SQLite (schemat, filtry folderów, upsert, przycinanie), ale połączenie Rust–SQLite i wywołania Gmail History API zostaną sprawdzone dopiero przez CI i na Twoim koncie.
 
 Kod Rust i interfejs nie były kompilowane w środowisku, w którym powstały (brak sieci). Moduły `offline.rs`, `labels.rs`, `notify.rs` (logika), a także `compose.rs`, `signature.rs`, `safety.rs`, `phishing.rs`, `dismissed.rs`, `filetype.rs`, `scan.rs` i `blocklist.rs`, logika odpowiedzi (`replyLogic.ts`) i analiza linków (`linkCheck.ts`)
 zostały uruchomione i przetestowane osobno, a czyszczenie HTML (`mailHtml.ts`) sprawdzone w prawdziwej przeglądarce Chromium na

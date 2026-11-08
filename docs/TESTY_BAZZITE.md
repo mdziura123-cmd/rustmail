@@ -48,6 +48,14 @@ Nie wklejaj do czatu haseł, tokenów ani treści prywatnych maili – wystarczy
 - [ ] „+ Nowa etykieta” tworzy etykietę (widać ją też w Gmailu w przeglądarce); duplikat daje czytelny błąd.
 - [ ] W wątku „Etykiety” → zaznacz/odznacz: zmiana widoczna w Gmailu; kliknięcie etykiety w panelu pokazuje jej wątki.
 
+## 5b. Kolejka wysyłania
+- [ ] Odłącz sieć, napisz wiadomość do siebie, kliknij „Wyślij”: pojawia się błąd „Brak połączenia” i propozycja zapisu w kolejce z ostrzeżeniem o braku szyfrowania.
+- [ ] „Zapisz w kolejce do wysłania”: okno się zamyka, na dole widać „Do wysłania (1)”.
+- [ ] Przywróć sieć: w ciągu ~minuty (lub „Wyślij teraz”) wiadomość wychodzi i jest w „Wysłane”, kolejka się opróżnia. Sprawdź, że przyszła tylko JEDNA kopia.
+- [ ] Wiadomość z załącznikiem w kolejce wychodzi z załącznikiem.
+- [ ] „Usuń” w oknie kolejki usuwa wiadomość bez wysyłania.
+- [ ] Zamknij aplikację z wiadomością w kolejce, uruchom ponownie z siecią: wiadomość wychodzi.
+
 ## 6. Aktualizacje
 - [ ] „Sprawdź teraz” w stopce; po wydaniu nowej wersji: instalacja i „Przywróć poprzednią wersję”.
 

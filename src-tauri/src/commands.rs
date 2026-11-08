@@ -673,3 +673,96 @@ pub async fn set_thread_label(state: State<'_, AppState>, id: String, label: Str
 pub fn test_notification() -> Result<(), String> {
     notify::send("RustMail", "Powiadomienia działają.")
 }
+
+// ---------- Etap 9: kolejka wysyłania ----------
+
+/// Podsumowanie odbiorców do listy kolejki (adresy z pól Do/DW/UDW, najwyżej 3 + liczba pozostałych).
+fn recipients_summary(dto: &OutgoingDto) -> String {
+    let all: Vec<String> = [&dto.to, &dto.cc, &dto.bcc]
+        .iter()
+        .flat_map(|f| f.split([',', ';']).map(|s| s.trim().to_string()).collect::<Vec<_>>())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let mut shown: Vec<String> = all.iter().take(3).map(|s| compose::clean_header_value(s)).collect();
+    if all.len() > 3 {
+        shown.push(format!("i {} więcej", all.len() - 3));
+    }
+    shown.join(", ")
+}
+
+/// Zapisuje wiadomość w kolejce, gdy nie ma sieci. Wywoływane dopiero po zgodzie użytkownika:
+/// wiadomość trafia na dysk w postaci niezaszyfrowanej (jak cała lokalna baza).
+#[tauri::command]
+pub fn queue_message(store: State<'_, Store>, msg: OutgoingDto) -> Result<i64, String> {
+    let from = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    let raw = prepare(&msg, &from, true)?;
+    let subject: String = compose::clean_header_value(&msg.subject).chars().take(200).collect();
+    store.enqueue(
+        &from,
+        &recipients_summary(&msg),
+        &subject,
+        msg.thread_id.as_deref().filter(|t| !t.is_empty()),
+        msg.draft_id.as_deref().filter(|d| !d.is_empty()),
+        &raw,
+    )
+}
+
+#[tauri::command]
+pub fn list_outbox(store: State<'_, Store>) -> Result<Vec<crate::store::OutboxItem>, String> {
+    let from = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    store.list_outbox(&from)
+}
+
+#[tauri::command]
+pub fn retry_outbox(store: State<'_, Store>, id: i64) -> Result<(), String> {
+    let from = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    store.retry_outbox(&from, id)
+}
+
+#[tauri::command]
+pub fn delete_outbox(store: State<'_, Store>, id: i64) -> Result<(), String> {
+    let from = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    store.delete_outbox(&from, id)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlushResult {
+    pub sent: usize,
+    pub failed: usize,
+}
+
+/// Wysyła czekające wiadomości, od najstarszej. Brak sieci przerywa pętlę (wiadomość wraca do kolejki);
+/// inny błąd oznacza wiadomość jako nieudaną i NIE jest ponawiany automatycznie.
+#[tauri::command]
+pub async fn flush_outbox(state: State<'_, AppState>, store: State<'_, Store>) -> Result<FlushResult, String> {
+    let from = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
+    let mut out = FlushResult { sent: 0, failed: 0 };
+    // Górny limit przebiegu chroni przed pętlą, gdyby coś nieoczekiwanie wracało do kolejki.
+    for _ in 0..60 {
+        let Some(m) = store.claim_next(&from)? else { break };
+        let thread = m.thread_id.as_deref();
+        let res = match m.draft_id.as_deref() {
+            Some(d) => match gmail::save_draft(&state, Some(d), &m.raw, thread).await {
+                Ok(_) => gmail::send_draft(&state, d).await.map(|_| ()),
+                Err(e) => Err(e),
+            },
+            None => gmail::send_raw(&state, &m.raw, thread).await.map(|_| ()),
+        };
+        match res {
+            Ok(()) => {
+                store.delete_outbox(&from, m.id)?;
+                out.sent += 1;
+            }
+            Err(e) if offline::is_network_error(&e) => {
+                store.set_outbox_state(&from, m.id, "queued", None)?;
+                break;
+            }
+            Err(e) => {
+                store.set_outbox_state(&from, m.id, "failed", Some(&e))?;
+                out.failed += 1;
+            }
+        }
+    }
+    Ok(out)
+}

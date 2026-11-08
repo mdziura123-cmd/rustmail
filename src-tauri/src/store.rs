@@ -22,7 +22,35 @@ CREATE TABLE IF NOT EXISTS threads (
     updated_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS threads_date ON threads (last_date_ms DESC);
+CREATE TABLE IF NOT EXISTS outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_ms INTEGER NOT NULL,
+    account TEXT NOT NULL,
+    to_summary TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    thread_id TEXT,
+    draft_id TEXT,
+    raw BLOB NOT NULL,
+    state TEXT NOT NULL DEFAULT 'queued',
+    error TEXT
+);
 "#;
+
+/// Po awarii w trakcie wysyłania nie wiadomo, czy wiadomość wyszła – nie wysyłamy jej drugi raz sami.
+pub const RECOVER_OUTBOX: &str = "UPDATE outbox SET state = 'uncertain' WHERE state = 'sending'";
+pub const ENQUEUE: &str = r#"
+INSERT INTO outbox (created_ms, account, to_summary, subject, thread_id, draft_id, raw, state)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued')
+"#;
+pub const COUNT_OUTBOX: &str = "SELECT COUNT(*) FROM outbox";
+pub const LIST_OUTBOX: &str =
+    "SELECT id, created_ms, to_summary, subject, state, error FROM outbox WHERE account = ?1 ORDER BY id";
+pub const NEXT_OUTBOX: &str =
+    "SELECT id, raw, thread_id, draft_id FROM outbox WHERE account = ?1 AND state = 'queued' ORDER BY id LIMIT 1";
+pub const SET_OUTBOX_STATE: &str = "UPDATE outbox SET state = ?2, error = ?3 WHERE id = ?1 AND account = ?4";
+pub const RETRY_OUTBOX: &str =
+    "UPDATE outbox SET state = 'queued', error = NULL WHERE id = ?1 AND account = ?2 AND state IN ('failed', 'uncertain')";
+pub const DELETE_OUTBOX: &str = "DELETE FROM outbox WHERE id = ?1 AND account = ?2";
 
 /// Podsumowanie z listy. Zapisany szczegół wątku zostaje tylko wtedy, gdy data ostatniej wiadomości się nie zmieniła.
 pub const UPSERT_SUMMARY: &str = r#"
@@ -70,6 +98,8 @@ pub const GET_META: &str = "SELECT value FROM meta WHERE key = ?1";
 pub const DELETE_META: &str = "DELETE FROM meta WHERE key = ?1";
 pub const CLEAR_THREADS: &str = "DELETE FROM threads";
 
+const MAX_OUTBOX: i64 = 50;
+const MAX_OUTBOX_BYTES: usize = 30 * 1024 * 1024;
 const MAX_THREADS: i64 = 2000;
 const MAX_DETAILS: i64 = 200;
 const KEY_ENABLED: &str = "offline_enabled";
@@ -87,6 +117,25 @@ fn now_ms() -> i64 {
 #[derive(Clone)]
 pub struct Store {
     conn: Arc<Mutex<Option<Connection>>>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboxItem {
+    pub id: i64,
+    pub created_ms: i64,
+    pub to: String,
+    pub subject: String,
+    /// queued | sending | failed | uncertain
+    pub state: String,
+    pub error: Option<String>,
+}
+
+pub struct QueuedMail {
+    pub id: i64,
+    pub raw: Vec<u8>,
+    pub thread_id: Option<String>,
+    pub draft_id: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -128,6 +177,7 @@ impl Store {
         }
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;").map_err(|e| e.to_string())?;
         conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+        conn.execute(RECOVER_OUTBOX, []).map_err(|e| e.to_string())?;
         Ok(conn)
     }
 
@@ -354,5 +404,78 @@ impl Store {
             limit.min(100)
         );
         self.query_summaries(&sql, args)
+    }
+
+    // ---------- Kolejka wysyłania (działa niezależnie od trybu offline) ----------
+
+    /// Zapisuje przygotowaną wiadomość (gotowy MIME) do późniejszego wysłania. Zwraca jej numer w kolejce.
+    pub fn enqueue(
+        &self,
+        account: &str,
+        to: &str,
+        subject: &str,
+        thread_id: Option<&str>,
+        draft_id: Option<&str>,
+        raw: &[u8],
+    ) -> Result<i64, String> {
+        if raw.len() > MAX_OUTBOX_BYTES {
+            return Err("Wiadomość jest za duża, aby czekać w kolejce.".to_string());
+        }
+        let account = account.to_string();
+        self.with(|c| {
+            let n: i64 = c.query_row(COUNT_OUTBOX, [], |r| r.get(0))?;
+            if n >= MAX_OUTBOX {
+                return Err(rusqlite::Error::InvalidParameterName("kolejka pełna".to_string()));
+            }
+            c.execute(ENQUEUE, params![now_ms(), account, to, subject, thread_id, draft_id, raw])?;
+            Ok(c.last_insert_rowid())
+        })
+        .map_err(|e| if e.contains("kolejka pełna") { "Kolejka wysyłania jest pełna (50 wiadomości).".to_string() } else { e })
+    }
+
+    pub fn list_outbox(&self, account: &str) -> Result<Vec<OutboxItem>, String> {
+        self.with(|c| {
+            let mut st = c.prepare(LIST_OUTBOX)?;
+            let rows = st.query_map([account], |r| {
+                Ok(OutboxItem {
+                    id: r.get(0)?,
+                    created_ms: r.get(1)?,
+                    to: r.get(2)?,
+                    subject: r.get(3)?,
+                    state: r.get(4)?,
+                    error: r.get(5)?,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    /// Bierze najstarszą wiadomość czekającą na wysłanie i od razu oznacza ją jako „wysyłana” (jedno wywołanie = jeden odbiorca).
+    pub fn claim_next(&self, account: &str) -> Result<Option<QueuedMail>, String> {
+        self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            let item = tx
+                .query_row(NEXT_OUTBOX, [account], |r| {
+                    Ok(QueuedMail { id: r.get(0)?, raw: r.get(1)?, thread_id: r.get(2)?, draft_id: r.get(3)? })
+                })
+                .optional()?;
+            if let Some(m) = &item {
+                tx.execute(SET_OUTBOX_STATE, params![m.id, "sending", Option::<String>::None, account])?;
+            }
+            tx.commit()?;
+            Ok(item)
+        })
+    }
+
+    pub fn set_outbox_state(&self, account: &str, id: i64, state: &str, error: Option<&str>) -> Result<(), String> {
+        self.with(|c| c.execute(SET_OUTBOX_STATE, params![id, state, error, account]).map(|_| ()))
+    }
+
+    pub fn retry_outbox(&self, account: &str, id: i64) -> Result<(), String> {
+        self.with(|c| c.execute(RETRY_OUTBOX, params![id, account]).map(|_| ()))
+    }
+
+    pub fn delete_outbox(&self, account: &str, id: i64) -> Result<(), String> {
+        self.with(|c| c.execute(DELETE_OUTBOX, params![id, account]).map(|_| ()))
     }
 }

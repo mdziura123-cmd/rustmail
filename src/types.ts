@@ -47,6 +47,21 @@ export interface CacheStatus {
   dbPath: string;
 }
 
+export interface OutboxItem {
+  id: number;
+  createdMs: number;
+  to: string;
+  subject: string;
+  /** queued | sending | failed | uncertain */
+  state: string;
+  error: string | null;
+}
+
+export interface FlushResult {
+  sent: number;
+  failed: number;
+}
+
 export interface LabelInfo {
   id: string;
   name: string;

@@ -13,6 +13,7 @@ const AUTOSAVE_MS = 20000;
 interface Props {
   init: ComposeInit;
   onSent: (info: { threadId: string }) => void;
+  onQueued: () => void;
   onClose: (draftSaved: boolean) => void;
 }
 
@@ -43,7 +44,7 @@ function backup(value: unknown | null) {
   } catch { /* brak dostępu do pamięci – kopia lokalna jest dodatkiem */ }
 }
 
-export function Compose({ init, onSent, onClose }: Props) {
+export function Compose({ init, onSent, onQueued, onClose }: Props) {
   const [to, setTo] = useState(init.to);
   const [cc, setCc] = useState(init.cc);
   const [bcc, setBcc] = useState(init.bcc);
@@ -53,6 +54,7 @@ export function Compose({ init, onSent, onClose }: Props) {
   const [draftId, setDraftId] = useState<string | null>(init.draftId);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [canQueue, setCanQueue] = useState(false);
   const [sending, setSending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const html = useRef(init.html);
@@ -115,6 +117,22 @@ export function Compose({ init, onSent, onClose }: Props) {
       dirty.current = false;
       backup(null);
       onSent({ threadId: info.threadId || init.threadId || "" });
+    } catch (e) {
+      const m = errText(e);
+      setError(m);
+      setCanQueue(m.startsWith("Brak połączenia"));
+      setSending(false);
+    }
+  };
+
+  const queue = async () => {
+    setError(null);
+    setSending(true);
+    try {
+      await api.queueMessage(build());
+      dirty.current = false;
+      backup(null);
+      onQueued();
     } catch (e) {
       setError(errText(e));
       setSending(false);
@@ -218,6 +236,15 @@ export function Compose({ init, onSent, onClose }: Props) {
       )}
 
       {error && <p className="error pad" role="alert">{error}</p>}
+      {canQueue && !sending && (
+        <div className="queue-offer" role="status">
+          <p>
+            Nie ma połączenia z Gmail. Możesz zapisać wiadomość w kolejce – wyśle się sama, gdy wróci sieć (aplikacja
+            musi być wtedy uruchomiona). Do tego czasu wiadomość leży na dysku <strong>bez szyfrowania</strong>.
+          </p>
+          <button onClick={() => void queue()}>Zapisz w kolejce do wysłania</button>
+        </div>
+      )}
 
       <footer className="compose-foot">
         <button className="primary" disabled={sending} onClick={() => void send()}>{sending ? "Wysyłanie…" : "Wyślij"}</button>

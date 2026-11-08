@@ -4,6 +4,7 @@ import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
 import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { OutboxDialog } from "./OutboxDialog";
 import { BACKUP_KEY, Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
@@ -15,7 +16,7 @@ import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
-import type { AppInfo, AuthStatus, LabelInfo, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import type { AppInfo, AuthStatus, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import "./styles.css";
 import "./compose.css";
 
@@ -99,6 +100,8 @@ export default function App() {
   const [listOffline, setListOffline] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [outbox, setOutbox] = useState<OutboxItem[]>([]);
+  const [outboxOpen, setOutboxOpen] = useState(false);
   const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
   const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "0") === "1");
   const [stats, setStats] = useState<{ inbox: number; spam: number; labels: LabelInfo[] }>({ inbox: 0, spam: 0, labels: [] });
@@ -321,6 +324,11 @@ export default function App() {
     void loadList(folder, null, false);
     if (info.threadId && info.threadId === openId) void loadDetail(info.threadId);
   };
+  const onQueued = () => {
+    setCompose(null);
+    showToast("Zapisano w kolejce – wiadomość wyśle się, gdy wróci połączenie.");
+    void flushQueue(false);
+  };
   const onComposeClosed = (draftSaved: boolean) => {
     setCompose(null);
     if (draftSaved) showToast("Wersja robocza zapisana.");
@@ -421,8 +429,24 @@ export default function App() {
       const r = await api.pollMail(settingsRef.current.notify, settingsRef.current.content);
       setStats({ inbox: r.inboxUnread, spam: r.spamUnread, labels: r.labels });
       document.title = r.inboxUnread > 0 ? `(${r.inboxUnread}) RustMail` : "RustMail";
+      await flushQueue(false);
     } catch { /* brak sieci – spróbujemy za minutę */ }
   }, []);
+  const flushQueue = async (manual: boolean) => {
+    try {
+      let items = await api.listOutbox();
+      setOutbox(items);
+      if (items.some((i) => i.state === "queued")) {
+        const r = await api.flushOutbox();
+        if (r.sent > 0) showToast(r.sent === 1 ? "Wysłano wiadomość z kolejki." : `Wysłano wiadomości z kolejki: ${r.sent}.`);
+        if (r.failed > 0) showToast("Nie udało się wysłać części wiadomości z kolejki – zobacz „Do wysłania”.");
+        items = await api.listOutbox();
+        setOutbox(items);
+      } else if (manual) {
+        showToast("Kolejka jest pusta albo wymaga Twojej decyzji.");
+      }
+    } catch (e) { if (manual) showToast(errText(e)); }
+  };
   useEffect(() => {
     if (!email) return;
     void pollOnce();
@@ -612,7 +636,7 @@ export default function App() {
           )}
           {authError && email && <p className="error pad" role="alert">{authError}</p>}
           {email && compose ? (
-            <Compose key={compose.key} init={compose.init} onSent={onSent} onClose={onComposeClosed} />
+            <Compose key={compose.key} init={compose.init} onSent={onSent} onQueued={onQueued} onClose={onComposeClosed} />
           ) : !auth ? (
             <div className="empty"><p>Wczytywanie…</p></div>
           ) : !email ? (
@@ -706,6 +730,9 @@ export default function App() {
         <span>{info ? `${info.name} ${info.version}${info.appimage ? " · AppImage" : ""}` : "Tryb podglądu w przeglądarce"}</span>
         <span className="pill">{email ?? "brak konta"}</span>
         {email && <button className="linklike plain" onClick={() => void signOut()}>Wyloguj</button>}
+        {email && outbox.length > 0 && (
+          <button className="linklike plain" onClick={() => setOutboxOpen(true)}>Do wysłania ({outbox.length})</button>
+        )}
         {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
         <label className="check">
@@ -733,6 +760,11 @@ export default function App() {
       )}
       {senderDlg && (
         <SenderLists email={senderDlg.email} onClose={() => setSenderDlg(null)} onChanged={(s) => void senderChanged(s)} />
+      )}
+      {outboxOpen && (
+        <OutboxDialog items={outbox} onClose={() => setOutboxOpen(false)} onSendNow={() => void flushQueue(true)}
+          onRetry={async (id) => { try { await api.retryOutbox(id); } catch (e) { showToast(errText(e)); } await flushQueue(true); }}
+          onDelete={async (id) => { try { await api.deleteOutbox(id); } catch (e) { showToast(errText(e)); } await flushQueue(false); }} />
       )}
       {settingsOpen && (
         <SettingsDialog notify={notifyOn} content={notifyContent}
