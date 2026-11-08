@@ -134,3 +134,13 @@
 .outbox-state { font-size: 12px; font-weight: 600; }
 .outbox-state.failed, .outbox-state.uncertain { color: #b3261e; }
 .outbox-actions { display: flex; gap: 6px; }
+
+li { position: relative; }
+.rowcheck { position: absolute; left: 6px; top: 12px; z-index: 1; width: 15px; height: 15px; cursor: pointer; }
+li:has(.rowcheck) .row { padding-left: 28px; }
+li.picked .row { background: var(--sel); }
+.bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 13px; }
+.keys { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.keys th { text-align: left; padding: 4px 12px 4px 0; white-space: nowrap; font-weight: 400; }
+.keys td { padding: 4px 0; }
+kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); font: 12px ui-monospace, monospace; }

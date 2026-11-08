@@ -56,6 +56,14 @@ Nie wklejaj do czatu haseł, tokenów ani treści prywatnych maili – wystarczy
 - [ ] „Usuń” w oknie kolejki usuwa wiadomość bez wysyłania.
 - [ ] Zamknij aplikację z wiadomością w kolejce, uruchom ponownie z siecią: wiadomość wychodzi.
 
+## 5c. Skróty i zaznaczanie
+- [ ] `?` otwiera listę skrótów; `Esc`/Zamknij ją zamyka.
+- [ ] `j` / `k` przechodzą po liście i otwierają kolejne konwersacje; lista przewija się za zaznaczonym wierszem.
+- [ ] `e` archiwizuje otwartą konwersację (z cofnięciem), `#` przenosi do kosza, `!` do spamu, `s` ustawia gwiazdkę, `r`/`a`/`f` otwierają odpowiedź/przekazanie, `c` nową wiadomość.
+- [ ] W polu wyszukiwania i w edytorze wiadomości skróty NIE działają (pisanie liter nic nie uruchamia).
+- [ ] Pole przy wątku zaznacza go; pojawia się pasek „Zaznaczono: N”. „Archiwizuj”, „Usuń”, „Spam”, „Przeczytane” działają na wszystkie zaznaczone; „Cofnij” w komunikacie przywraca je.
+- [ ] `x` zaznacza/odznacza, `e` przy zaznaczeniu archiwizuje wszystkie zaznaczone, `Esc` odznacza.
+
 ## 6. Aktualizacje
 - [ ] „Sprawdź teraz” w stopce; po wydaniu nowej wersji: instalacja i „Przywróć poprzednią wersję”.
 

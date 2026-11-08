@@ -5,6 +5,7 @@ import { AuthPanel } from "./AuthPanel";
 import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { OutboxDialog } from "./OutboxDialog";
+import { commandFor, isTypingTarget, SHORTCUT_HELP } from "./shortcuts";
 import { BACKUP_KEY, Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
@@ -102,6 +103,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
   const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "0") === "1");
   const [stats, setStats] = useState<{ inbox: number; spam: number; labels: LabelInfo[] }>({ inbox: 0, spam: 0, labels: [] });
@@ -147,6 +150,7 @@ export default function App() {
       const page = q ? await api.searchThreads(q, token) : await api.listThreads(f, token);
       if (my !== listReq.current) return;
       setThreads((prev) => (append ? [...prev, ...page.threads] : page.threads));
+      if (!append) setSelected(new Set());
       setNextToken(page.nextPageToken);
       setListOffline(Boolean(page.offline));
     } catch (e) {
@@ -292,6 +296,95 @@ export default function App() {
       ...t, unread: patch.unread ?? t.unread, starred: patch.starred ?? t.starred,
     } : t)));
   };
+
+  // ---------- Zaznaczanie wielu konwersacji i akcje hurtowe ----------
+  const toggleSelected = (id: string) =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  const bulkRun = async (action: ThreadAction) => {
+    const ids = [...selected].slice(0, 50);
+    if (ids.length === 0) return;
+    const done: string[] = [];
+    let failed = 0;
+    let lastError = "";
+    for (const id of ids) {
+      try { await api.threadAction(id, action); done.push(id); }
+      catch (e) { failed += 1; lastError = errText(e); }
+    }
+    const inverse = INVERSE[action];
+    const gone = new Set(done);
+    if (inverse) {
+      setThreads((prev) => prev.filter((t) => !gone.has(t.id)));
+      if (openId && gone.has(openId)) { setOpenId(null); setDetail(null); }
+    } else {
+      const unread = action === "unread" ? true : action === "read" ? false : undefined;
+      setThreads((prev) => prev.map((t) => (gone.has(t.id) && unread !== undefined ? { ...t, unread } : t)));
+      setDetail((d) => (d && gone.has(d.id) && unread !== undefined ? { ...d, unread } : d));
+    }
+    setSelected(new Set());
+    const msg = `${ACTION_DONE[action] ?? "Gotowe."} (${done.length})` + (failed ? ` Błędy: ${failed} – ${lastError}` : "");
+    if (inverse && done.length > 0) {
+      showToast(msg, () => {
+        void (async () => {
+          for (const id of done) { try { await api.threadAction(id, inverse); } catch { /* pomijamy */ } }
+          setToast(null);
+          void loadList(folder, null, false);
+        })();
+      });
+    } else {
+      showToast(msg);
+    }
+    void pollOnce();
+  };
+
+  // ---------- Skróty klawiszowe ----------
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    const cmd = commandFor(e);
+    if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
+    if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
+    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen) {
+      if (cmd === "escape" && helpOpen) setHelpOpen(false);
+      return;
+    }
+    const idx = threads.findIndex((t) => t.id === openId);
+    const go = (i: number) => {
+      const t = threads[i];
+      if (!t) return;
+      void openThread(t);
+      document.querySelector(`[data-thread="${t.id}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+    const act = (a: ThreadAction) => {
+      if (needsReauth) return;
+      if (selected.size > 0) void bulkRun(a); else void runAction(a);
+    };
+    e.preventDefault();
+    switch (cmd) {
+      case "next": go(idx < 0 ? 0 : Math.min(idx + 1, threads.length - 1)); break;
+      case "prev": go(idx <= 0 ? 0 : idx - 1); break;
+      case "select": { const id = openId ?? threads[0]?.id; if (id) toggleSelected(id); break; }
+      case "archive": if (selected.size > 0 || detail?.inInbox) act("archive"); break;
+      case "trash": if (selected.size > 0 || detail) act(detail?.inTrash && selected.size === 0 ? "untrash" : "trash"); break;
+      case "spam": if (selected.size > 0 || detail) act(detail?.inSpam && selected.size === 0 ? "notspam" : "spam"); break;
+      case "read": act("read"); break;
+      case "unread": act("unread"); break;
+      case "star": if (detail && !needsReauth) void runAction(detail.starred ? "unstar" : "star"); break;
+      case "reply": reply(false); break;
+      case "replyAll": reply(true); break;
+      case "forward": forward(); break;
+      case "compose": startCompose(buildNew(signature)); break;
+      case "search": (document.querySelector('input[type="search"]') as HTMLInputElement | null)?.focus(); break;
+      case "escape": setSelected(new Set()); break;
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   const setSafe = async (safe: boolean) => {
     if (!detail) return;
@@ -576,10 +669,31 @@ export default function App() {
                   {folder === "suspicious" && <p>Wśród ostatnich 100 wątków skrzynki odbiorczej nie znaleziono wiadomości z ostrzeżeniem.</p>}
                 </div>
               )}
+              {selected.size > 0 && (
+                <div className="bulkbar" role="toolbar" aria-label="Akcje na zaznaczonych">
+                  <strong>Zaznaczono: {selected.size}</strong>
+                  <button className="small" onClick={() => setSelected(new Set(threads.map((t) => t.id)))}>Wszystkie</button>
+                  {folder !== "archive" && folder !== "trash" && folder !== "spam" && (
+                    <button className="small" disabled={needsReauth} onClick={() => void bulkRun("archive")}>Archiwizuj</button>
+                  )}
+                  {folder === "trash"
+                    ? <button className="small" disabled={needsReauth} onClick={() => void bulkRun("untrash")}>Przywróć</button>
+                    : <button className="small" disabled={needsReauth} onClick={() => void bulkRun("trash")}>Usuń</button>}
+                  {folder === "spam"
+                    ? <button className="small" disabled={needsReauth} onClick={() => void bulkRun("notspam")}>To nie spam</button>
+                    : <button className="small" disabled={needsReauth} onClick={() => void bulkRun("spam")}>Spam</button>}
+                  <button className="small" disabled={needsReauth} onClick={() => void bulkRun("read")}>Przeczytane</button>
+                  <button className="small" disabled={needsReauth} onClick={() => void bulkRun("unread")}>Nieprzeczytane</button>
+                  <button className="small" onClick={() => setSelected(new Set())}>Odznacz</button>
+                </div>
+              )}
               <ul>
                 {threads.map((t) => (
-                  <li key={t.id}>
-                    <button className={"row" + (t.id === openId ? " active" : "") + (t.unread ? " unread" : "")}
+                  <li key={t.id} className={selected.has(t.id) ? "picked" : ""}>
+                    <input type="checkbox" className="rowcheck" checked={selected.has(t.id)}
+                      aria-label={`Zaznacz: ${t.subject}`} onChange={() => toggleSelected(t.id)} />
+                    <button data-thread={t.id}
+                      className={"row" + (t.id === openId ? " active" : "") + (t.unread ? " unread" : "")}
                       onClick={() => void openThread(t)}>
                       <span className="who">{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
                       <span className="when">
@@ -733,6 +847,7 @@ export default function App() {
         {email && outbox.length > 0 && (
           <button className="linklike plain" onClick={() => setOutboxOpen(true)}>Do wysłania ({outbox.length})</button>
         )}
+        {email && <button className="linklike plain" onClick={() => setHelpOpen(true)}>Skróty</button>}
         {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
         <label className="check">
@@ -760,6 +875,22 @@ export default function App() {
       )}
       {senderDlg && (
         <SenderLists email={senderDlg.email} onClose={() => setSenderDlg(null)} onChanged={(s) => void senderChanged(s)} />
+      )}
+      {helpOpen && (
+        <div className="modal-back" role="dialog" aria-modal="true" aria-label="Skróty klawiszowe">
+          <div className="modal">
+            <h3>Skróty klawiszowe</h3>
+            <table className="keys">
+              <tbody>
+                {SHORTCUT_HELP.map((k) => (
+                  <tr key={k.keys}><th scope="row"><kbd>{k.keys}</kbd></th><td>{k.what}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="hint">Skróty nie działają podczas pisania w polu tekstowym ani w otwartym oknie.</p>
+            <div className="modal-actions"><button className="primary" onClick={() => setHelpOpen(false)}>Zamknij</button></div>
+          </div>
+        </div>
       )}
       {outboxOpen && (
         <OutboxDialog items={outbox} onClose={() => setOutboxOpen(false)} onSendNow={() => void flushQueue(true)}
