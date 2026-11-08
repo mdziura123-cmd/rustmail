@@ -95,3 +95,7 @@ Stopka → „Filtr spamu”. Cztery silniki (nagłówki, reguły, Bayes uczący
 ## Import poczty
 
 Stopka → „Import poczty”. Wczytuje pliki `.mbox` i `.eml` wyeksportowane z Outlooka, Yahoo, Thunderbirda itp. do Gmaila (z oryginalnymi datami; każdy plik → osobna etykieta, bez Odebranych i bez statusu nieprzeczytane). Nie wymaga haseł do innych kont. Kontakty importuje sam Google (contacts.google.com → Importuj).
+
+## Poczta IMAP (WP, O2 i inne)
+
+Stopka → „Poczta IMAP (WP)”. Osobne okno do czytania i porządkowania poczty z serwerów IMAP (szyfrowane połączenie, port 993). Hasło trafia do systemowego sejfu. Na razie bez wysyłania i bez pobierania załączników. W WP trzeba włączyć dostęp przez IMAP w ustawieniach poczty i użyć hasła do aplikacji zewnętrznych.

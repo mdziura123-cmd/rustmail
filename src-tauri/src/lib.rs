@@ -16,6 +16,8 @@ mod safety;
 mod scan;
 mod secrets;
 mod signature;
+mod imap_io;
+mod imap_proto;
 mod spam;
 mod spam_io;
 mod store;
@@ -82,6 +84,13 @@ pub fn run() {
             commands::spam_restore,
             commands::spam_move,
             commands::create_label,
+            imap_io::imap_status,
+            imap_io::imap_login,
+            imap_io::imap_logout,
+            imap_io::imap_folders,
+            imap_io::imap_list,
+            imap_io::imap_get,
+            imap_io::imap_act,
             commands::import_label,
             commands::import_message,
             commands::test_notification,

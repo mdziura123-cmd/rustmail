@@ -245,3 +245,13 @@ export interface UpdateState {
   appimage: boolean;
   hasPrevious: boolean;
 }
+
+// ---------- Poczta IMAP (WP i inne serwery) ----------
+export interface ImapAccount { email: string; host: string }
+export interface ImapFolder { name: string; label: string; role: string }
+export interface ImapRow { uid: number; from: string; subject: string; dateMs: number; unread: boolean; starred: boolean }
+export interface ImapPage { rows: ImapRow[]; next: number | null; total: number }
+export interface ImapMsg {
+  uid: number; from: string; to: string; cc: string; subject: string; dateMs: number;
+  text: string; html: string; attachments: Attachment[]; unread: boolean; starred: boolean;
+}

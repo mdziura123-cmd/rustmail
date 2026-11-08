@@ -153,3 +153,16 @@ kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; backg
 .spam-opt { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; }
 .spam-opt textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
 .modal-actions.wrap { flex-wrap: wrap; }
+
+/* Poczta IMAP */
+.imap-modal { width: min(1100px, 96vw); height: min(780px, 92vh); display: flex; flex-direction: column; }
+.imap-head { display: flex; align-items: center; gap: 8px; }
+.imap-head h3 { margin: 0; }
+.imap-login { display: grid; gap: 10px; max-width: 460px; }
+.imap-login label { display: grid; gap: 4px; }
+.imap-cols { display: grid; grid-template-columns: 150px minmax(240px, 320px) 1fr; gap: 10px; min-height: 0; flex: 1; }
+.imap-folders { display: flex; flex-direction: column; gap: 4px; overflow: auto; align-items: flex-start; }
+.imap-folders .active { font-weight: 700; }
+.imap-list, .imap-reader { overflow: auto; min-height: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.imap-list ul { list-style: none; margin: 0; padding: 0; }
+.imap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
