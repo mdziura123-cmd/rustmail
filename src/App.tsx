@@ -96,7 +96,6 @@ export default function App() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [autoUpdate, setAutoUpdate] = useState(() => load(LS.auto, "1") === "1");
-  const [confirmRollback, setConfirmRollback] = useState(false);
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [signature, setSignature] = useState("");
   const [sigOpen, setSigOpen] = useState(false);
@@ -947,25 +946,10 @@ export default function App() {
         {email && outbox.length > 0 && (
           <button className="linklike plain" onClick={() => setOutboxOpen(true)}>Do wysłania ({outbox.length})</button>
         )}
-        {email && <button className="linklike plain" onClick={() => setHelpOpen(true)}>Skróty</button>}
-        {email && <button className="linklike plain" onClick={() => setSpamOpen(true)}>Filtr spamu</button>}
         {email && <button className="linklike plain" onClick={() => setImportOpen(true)}>Import poczty</button>}
         {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
-        <label className="check">
-          <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} />
-          Sprawdzaj aktualizacje
-        </label>
-        <button className="linklike" onClick={() => void updater.check(true)}>Sprawdź teraz</button>
-        {updater.state?.hasPrevious && (
-          confirmRollback ? (
-            <button className="linklike warn" onClick={() => { setConfirmRollback(false); void updater.rollback(); }}>
-              Na pewno? Kliknij ponownie
-            </button>
-          ) : (
-            <button className="linklike" onClick={() => setConfirmRollback(true)}>Przywróć poprzednią wersję</button>
-          )
-        )}
+        <button className="linklike" onClick={() => void updater.check(true)}>Sprawdź aktualizację</button>
       </footer>
 
       {toast && (
@@ -1009,9 +993,11 @@ export default function App() {
       )}
       {settingsOpen && (
         <SettingsDialog notify={notifyOn} content={notifyContent}
+          autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}
+          onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}
           onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}
           onContent={(on) => { setNotifyContent(on); save(LS.content, on ? "1" : "0"); }}
-          onOpen={(w) => { setSettingsOpen(false); if (w === "signature") setSigOpen(true); else if (w === "senders") setSenderDlg({ email: null }); else setCacheOpen(true); }}
+          onOpen={(w) => { setSettingsOpen(false); if (w === "signature") setSigOpen(true); else if (w === "senders") setSenderDlg({ email: null }); else if (w === "spam") setSpamOpen(true); else if (w === "import") setImportOpen(true); else setCacheOpen(true); }}
           onClose={() => setSettingsOpen(false)} />
       )}
       {cacheOpen && <CacheDialog onClose={() => setCacheOpen(false)} onChanged={() => void syncOnce()} />}
