@@ -114,6 +114,10 @@ export default function App() {
   const [spamOpen, setSpamOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [imapOpen, setImapOpen] = useState(false);
+  const [imapAcc, setImapAcc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imapOpen) api.imapStatus().then((a) => setImapAcc(a?.email ?? null)).catch(() => setImapAcc(null));
+  }, [imapOpen]);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -673,7 +677,7 @@ export default function App() {
           {email && (
             <AccountSwitcher accounts={accounts.length ? accounts : [{ email, active: true }]} current={email}
               busy={signingIn} onSwitch={(a) => void switchAccount(a)} onAdd={() => void signIn()}
-              onSignOut={() => void signOut()} />
+              onSignOut={() => void signOut()} imap={imapAcc} onOpenImap={() => setImapOpen(true)} />
           )}
           <nav>
             {FOLDERS.map((f) => (
@@ -946,7 +950,6 @@ export default function App() {
         {email && <button className="linklike plain" onClick={() => setHelpOpen(true)}>Skróty</button>}
         {email && <button className="linklike plain" onClick={() => setSpamOpen(true)}>Filtr spamu</button>}
         {email && <button className="linklike plain" onClick={() => setImportOpen(true)}>Import poczty</button>}
-        {email && <button className="linklike plain" onClick={() => setImapOpen(true)}>Poczta IMAP (WP)</button>}
         {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
         <label className="check">

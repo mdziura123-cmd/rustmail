@@ -7,10 +7,13 @@ interface Props {
   onSwitch: (email: string) => void;
   onAdd: () => void;
   onSignOut: () => void;
+  /** Konto IMAP (np. WP) zapisane w aplikacji – jego poczta otwiera się w osobnym oknie. */
+  imap: string | null;
+  onOpenImap: () => void;
 }
 
 /** Przełącznik kont w panelu bocznym: bieżący adres, lista kont, dodawanie i wylogowanie bieżącego konta. */
-export function AccountSwitcher({ accounts, current, busy, onSwitch, onAdd, onSignOut }: Props) {
+export function AccountSwitcher({ accounts, current, busy, onSwitch, onAdd, onSignOut, imap, onOpenImap }: Props) {
   const close = (e: React.MouseEvent<HTMLElement>) => {
     const d = e.currentTarget.closest("details");
     if (d) d.removeAttribute("open");
@@ -29,9 +32,19 @@ export function AccountSwitcher({ accounts, current, busy, onSwitch, onAdd, onSi
             {a.active ? "✓ " : ""}{a.email}
           </button>
         ))}
+        {imap && (
+          <button role="menuitem" className="acc-item" onClick={(e) => { close(e); onOpenImap(); }}>
+            {imap} (IMAP)
+          </button>
+        )}
         <button role="menuitem" disabled={busy} className="acc-item" onClick={(e) => { close(e); onAdd(); }}>
           + Dodaj konto Gmail
         </button>
+        {!imap && (
+          <button role="menuitem" className="acc-item" onClick={(e) => { close(e); onOpenImap(); }}>
+            + Dodaj konto WP (IMAP)
+          </button>
+        )}
         <button role="menuitem" disabled={busy} className="acc-item danger" onClick={(e) => { close(e); onSignOut(); }}>
           Wyloguj to konto
         </button>
