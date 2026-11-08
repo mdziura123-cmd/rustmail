@@ -74,3 +74,10 @@ zostały uruchomione i przetestowane osobno, a czyszczenie HTML (`mailHtml.ts`) 
 złośliwych przykładach; pozostały kod
 (komunikacja z Gmailem, polecenia Tauri, komponenty React) zweryfikowano tylko składniowo i typowo, więc pierwszy build
 na GitHubie może wymagać drobnych poprawek. Wysyłanie i zapis wersji roboczych nie były testowane na prawdziwym koncie.
+
+## Motywy kolorystyczne
+
+Wybierasz je w lewym panelu, na dole („Motyw”): Systemowy, Jasny, Ciemny, Proton (fiolet i biel), Proton ciemny,
+Błękit i biel, Solarized jasny, Solarized ciemny. Wszystkie kolory są jednolite – bez rozmycia i przezroczystości.
+Kolory każdego motywu są w jednym miejscu: `src/themes.css` (zmienne `--bg`, `--accent` itd.). Nowy motyw = nowy blok
+`:root[data-theme="nazwa"]` plus wpis w `src/themes.ts`.

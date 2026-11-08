@@ -1,37 +1,16 @@
-:root {
-  --bg: #eef2f5; --panel: #ffffff; --panel-2: #f6f8fa; --line: #d9e0e6;
-  --ink: #14212e; --muted: #5d6b79; --accent: #1f6f8b; --accent-ink: #ffffff;
-  --sel: #dcebf2; --sent: #d6e8f0; --recv: #ffffff; --warn: #8a5a00;
-  --shadow: 0 1px 2px rgba(20, 33, 46, .08), 0 4px 14px rgba(20, 33, 46, .06);
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0f1822; --panel: #162330; --panel-2: #1b2a39; --line: #263646;
-    --ink: #e6edf3; --muted: #93a3b3; --accent: #5db4d1; --accent-ink: #0b1620;
-    --sel: #1f3a4b; --sent: #1d4256; --recv: #1b2a39; --warn: #e8b64f;
-    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3); color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0f1822; --panel: #162330; --panel-2: #1b2a39; --line: #263646;
-  --ink: #e6edf3; --muted: #93a3b3; --accent: #5db4d1; --accent-ink: #0b1620;
-  --sel: #1f3a4b; --sent: #1d4256; --recv: #1b2a39; --warn: #e8b64f;
-  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3); color-scheme: dark;
-}
-
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { font: 14px/1.5 "Inter", "Noto Sans", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; text-align: left; }
-button:disabled { cursor: not-allowed; opacity: .55; }
+button:disabled { cursor: not-allowed; color: var(--muted); }
+.primary:disabled { background: var(--line); color: var(--muted); box-shadow: none; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 h2, h3, p { margin: 0; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
 .panes { flex: 1; display: grid; min-height: 0; }
 .handle { cursor: col-resize; background: var(--bg); position: relative; }
-.handle:hover::after, .handle:active::after { content: ""; position: absolute; inset: 0 2px; background: var(--accent); opacity: .5; border-radius: 2px; }
+.handle:hover::after, .handle:active::after { content: ""; position: absolute; inset: 0 2px; background: var(--accent); border-radius: 2px; }
 
 .sidebar { background: var(--panel-2); padding: 14px 10px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; border-right: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 6px; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
@@ -43,9 +22,8 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .folder.active { background: var(--sel); color: var(--ink); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .spacer { flex: 1; }
-.theme { display: flex; background: var(--bg); border-radius: 8px; padding: 3px; gap: 2px; }
-.theme button { flex: 1; text-align: center; padding: 4px 2px; border-radius: 6px; font-size: 12px; color: var(--muted); }
-.theme button.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+.theme { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.theme select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 
 .list, .reader { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; }
 .list > header, .reader-head { padding: 14px 18px; border-bottom: 1px solid var(--line); }
@@ -95,8 +73,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .when .icon { width: 12px; height: 12px; fill: #d19a1d; stroke: #d19a1d; vertical-align: -1px; }
 .more { margin: 12px 18px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; text-align: center; }
 .error { color: #b3261e; }
-:root[data-theme="dark"] .error { color: #f2b8b5; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .error { color: #f2b8b5; } }
+:root[data-mode="dark"] .error { color: #f2b8b5; }
 .pad { padding: 14px 18px; }
 .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
 .note { font-size: 12px; color: var(--warn); margin-bottom: 6px; }

@@ -19,10 +19,12 @@ import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
 import type { Account, AppInfo, AuthStatus, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import { THEMES, isThemeId, resolveTheme, type ThemeId } from "./themes";
+import "./themes.css";
 import "./styles.css";
 import "./compose.css";
 
-type Theme = "auto" | "light" | "dark";
+type Theme = ThemeId;
 const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent" };
 const STAR = "M12 3l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.8 6.1 21l1.2-6.5L2.5 9.9 9.1 9z";
 
@@ -74,7 +76,7 @@ function useResizer(key: string, initial: number, lo: number, hi: number) {
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<Theme>(() => load(LS.theme, "auto") as Theme);
+  const [theme, setTheme] = useState<Theme>(() => { const v = load(LS.theme, "auto"); return isThemeId(v) ? v : "auto"; });
   const [folder, setFolder] = useState<FolderId>("inbox");
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [auth, setAuth] = useState<AuthStatus | null>(null);
@@ -123,10 +125,18 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "auto") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", theme);
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const r = resolveTheme(theme, mq.matches);
+      root.setAttribute("data-theme", r.id);
+      root.setAttribute("data-mode", r.mode);
+    };
+    apply();
     if (mounted.current) save(LS.theme, theme);
     mounted.current = true;
+    if (theme !== "auto") return;
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, [theme]);
 
   useEffect(() => {
@@ -668,13 +678,14 @@ export default function App() {
             )}
           </nav>
           <div className="spacer" />
-          <div className="theme" role="group" aria-label="Motyw">
-            {(["auto", "light", "dark"] as Theme[]).map((t) => (
-              <button key={t} className={theme === t ? "on" : ""} onClick={() => setTheme(t)}>
-                {t === "auto" ? "Systemowy" : t === "light" ? "Jasny" : "Ciemny"}
-              </button>
-            ))}
-          </div>
+          <label className="theme">
+            <span>Motyw</span>
+            <select value={theme} onChange={(e) => setTheme(isThemeId(e.target.value) ? e.target.value : "auto")}>
+              {THEMES.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </label>
         </aside>
 
         <div className="handle" onPointerDown={left.onPointerDown} role="separator" aria-orientation="vertical" />

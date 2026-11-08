@@ -22,7 +22,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
       <div role="alert" style={{ padding: 24, font: "14px system-ui, sans-serif" }}>
         <h2>Coś poszło nie tak przy wyświetlaniu</h2>
         <p>Poczta jest bezpieczna – to błąd tylko w interfejsie. Możesz wrócić do aplikacji.</p>
-        <pre style={{ whiteSpace: "pre-wrap", opacity: 0.8 }}>{String(this.state.error.message).slice(0, 500)}</pre>
+        <pre style={{ whiteSpace: "pre-wrap" }}>{String(this.state.error.message).slice(0, 500)}</pre>
         <button onClick={() => this.setState({ error: null })}>Wróć do aplikacji</button>{" "}
         <button onClick={() => window.location.reload()}>Uruchom interfejs ponownie</button>
       </div>

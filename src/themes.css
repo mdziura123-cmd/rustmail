@@ -1,0 +1,44 @@
+/* Motywy: jednolite kolory, bez przezroczystości i rozmycia. Źródła palet: Proton (fiolet #6D4AFF, jasny fiolet #E3D9FF,
+   granat #1B1340), Solarized (Ethan Schoonover), Tailwind (niebieski/slate). Pochodne odcienie tła są dobrane ręcznie. */
+:root, :root[data-theme="light"] {
+  --bg: #eef2f5; --panel: #ffffff; --panel-2: #f6f8fa; --line: #d9e0e6;
+  --ink: #14212e; --muted: #5d6b79; --accent: #1f6f8b; --accent-ink: #ffffff;
+  --sel: #dcebf2; --sent: #d6e8f0; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #cfd8df; color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1822; --panel: #162330; --panel-2: #1b2a39; --line: #263646;
+  --ink: #e6edf3; --muted: #93a3b3; --accent: #5db4d1; --accent-ink: #0b1620;
+  --sel: #1f3a4b; --sent: #1d4256; --recv: #1b2a39; --warn: #e8b64f;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #0a1119; color-scheme: dark;
+}
+:root[data-theme="proton"] {
+  --bg: #f3f0ff; --panel: #ffffff; --panel-2: #f9f7ff; --line: #ddd2fb;
+  --ink: #1b1340; --muted: #5f5880; --accent: #6d4aff; --accent-ink: #ffffff;
+  --sel: #e3d9ff; --sent: #e3d9ff; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #d9d0f5; color-scheme: light;
+}
+:root[data-theme="proton-dark"] {
+  --bg: #140e33; --panel: #1b1340; --panel-2: #211855; --line: #322677;
+  --ink: #efeaff; --muted: #a79fcf; --accent: #8e72ff; --accent-ink: #140e33;
+  --sel: #2c2268; --sent: #33287a; --recv: #211855; --warn: #e8b64f;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #0e0926; color-scheme: dark;
+}
+:root[data-theme="blue"] {
+  --bg: #f1f5f9; --panel: #ffffff; --panel-2: #f8fafc; --line: #e2e8f0;
+  --ink: #0f172a; --muted: #475569; --accent: #2563eb; --accent-ink: #ffffff;
+  --sel: #dbeafe; --sent: #dbeafe; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #cbd5e1; color-scheme: light;
+}
+:root[data-theme="solarized-light"] {
+  --bg: #eee8d5; --panel: #fdf6e3; --panel-2: #f5efdc; --line: #d9d2bd;
+  --ink: #073642; --muted: #4d646b; --accent: #1c6ea4; --accent-ink: #fdf6e3;
+  --sel: #e4dcc3; --sent: #e4dcc3; --recv: #fdf6e3; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #d6cfb8; color-scheme: light;
+}
+:root[data-theme="solarized-dark"] {
+  --bg: #002b36; --panel: #073642; --panel-2: #04313c; --line: #1d4a56;
+  --ink: #eee8d5; --muted: #93a1a1; --accent: #52a9ee; --accent-ink: #002b36;
+  --sel: #0d4452; --sent: #0f4d5e; --recv: #04313c; --warn: #e0b43a;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #001f27; color-scheme: dark;
+}

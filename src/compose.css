@@ -37,7 +37,7 @@
 .toast .small { border-color: color-mix(in srgb, var(--bg) 40%, transparent); color: var(--bg); }
 .toast .small:hover { background: color-mix(in srgb, var(--bg) 20%, transparent); }
 
-.modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 30; padding: 16px; }
+.modal-back { position: fixed; inset: 0; background: var(--backdrop); display: grid; place-items: center; z-index: 30; padding: 16px; }
 .modal { background: var(--panel); border-radius: 12px; padding: 20px; width: min(520px, 100%); display: grid; gap: 12px; box-shadow: var(--shadow); }
 .modal h3 { font-size: 16px; }
 .modal .hint { font-size: 12px; color: var(--muted); }
@@ -62,15 +62,13 @@
 .link-bar .url { overflow-wrap: anywhere; }
 .link-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .warn-line { color: #b3261e; font-size: 12px; }
-:root[data-theme="dark"] .warn-line { color: #f2b8b5; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .warn-line { color: #f2b8b5; } }
+:root[data-mode="dark"] .warn-line { color: #f2b8b5; }
 .link-bar .solid, .attach .solid { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 .attachments { display: grid; gap: 6px; margin-top: 8px; }
 .attach { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .attach.risky { border-color: #b3261e; }
 .badge-danger { color: #b3261e; font-size: 11px; font-weight: 600; }
-:root[data-theme="dark"] .badge-danger { color: #f2b8b5; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge-danger { color: #f2b8b5; } }
+:root[data-mode="dark"] .badge-danger { color: #f2b8b5; }
 .ok-line { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .quote-toggle { font-size: 12px; margin-top: 4px; display: block; }
 
@@ -79,14 +77,10 @@
 .risk-banner.high { background: #fdecea; border-color: #b3261e; color: #5c0f0a; }
 .risk-banner.warn { background: #fff4d6; border-color: #b58105; color: #4a3500; }
 .risk-banner ul { margin: 0; padding-left: 20px; }
-.risk-banner .hint { font-size: 12px; opacity: .85; }
+.risk-banner .hint { font-size: 12px; }
 .risk-banner .small { justify-self: start; background: #ffffff; color: #1a1a1a; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .risk-banner.high { background: #3a1512; color: #f9d7d3; border-color: #e0534a; }
-  :root:not([data-theme="light"]) .risk-banner.warn { background: #382b08; color: #f6e2a8; border-color: #c9951a; }
-}
-:root[data-theme="dark"] .risk-banner.high { background: #3a1512; color: #f9d7d3; border-color: #e0534a; }
-:root[data-theme="dark"] .risk-banner.warn { background: #382b08; color: #f6e2a8; border-color: #c9951a; }
+:root[data-mode="dark"] .risk-banner.high { background: #3a1512; color: #f9d7d3; border-color: #e0534a; }
+:root[data-mode="dark"] .risk-banner.warn { background: #382b08; color: #f6e2a8; border-color: #c9951a; }
 .risk-note { margin: 10px 18px 0; font-size: 12px; color: var(--muted); }
 .bubble.risk-high { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
 .bubble.risk-warn { border-color: #b58105; }
@@ -112,8 +106,7 @@
 .search input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); font: inherit; font-size: 13px; }
 .offline-note { margin: 0 18px 8px; padding: 8px 10px; border-radius: 8px; background: #fff4d6; color: #4a3500; border: 1px solid #b58105; font-size: 12px; }
 .modal .warn-text { color: #8a5a00; }
-:root[data-theme="dark"] .modal .warn-text { color: #f0c36d; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .modal .warn-text { color: #f0c36d; } }
+:root[data-mode="dark"] .modal .warn-text { color: #f0c36d; }
 .modal code { font-size: 11px; word-break: break-all; }
 
 .badge { margin-left: auto; min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 600; text-align: center; line-height: 18px; }

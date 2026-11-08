@@ -83,3 +83,9 @@ Nie wklejaj do czatu haseł, tokenów ani treści prywatnych maili – wystarczy
 
 ## Co zgłosić
 Numer wersji (stopka), punkt z listy, co się stało, tekst komunikatu błędu. Dla problemów z oknem: uruchom z terminala i wklej ostatnie linie.
+
+## 7. Motywy
+- [ ] Przełącz każdy z 8 motywów: lista, otwarty wątek, okno pisania, Ustawienia – nic nie jest nieczytelne (biały tekst na białym itp.).
+- [ ] „Systemowy” zmienia się razem z ustawieniem jasny/ciemny w KDE (bez restartu).
+- [ ] Wybrany motyw zostaje po zamknięciu i otwarciu aplikacji.
+- [ ] Ostrzeżenia o ryzyku (czerwony/żółty pasek) i błędy są czytelne w motywach ciemnych.
