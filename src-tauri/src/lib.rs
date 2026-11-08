@@ -1,6 +1,7 @@
 mod auth;
 mod blocklist;
 mod commands;
+mod dbkey;
 mod compose;
 mod dismissed;
 mod filetype;
@@ -31,9 +32,18 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             // Baza lokalna: jeśli nie da się jej otworzyć, aplikacja działa dalej tylko online.
-            let store = match app.path().app_data_dir() {
-                Ok(dir) => store::Store::open(&dir.join("cache")),
-                Err(_) => store::Store::disabled(),
+            // Klucz szyfrowania bazy leży w pęku kluczy systemu (jak tokeny), nigdy na dysku obok bazy.
+            let key = match secrets::get("db_key") {
+                Ok(Some(k)) => Some(k),
+                Ok(None) => {
+                    let k = auth::random_urlsafe(32);
+                    secrets::set("db_key", &k).ok().map(|_| k)
+                }
+                Err(_) => None,
+            };
+            let store = match (app.path().app_data_dir(), key) {
+                (Ok(dir), Some(k)) => store::Store::open(&dir.join("cache"), &k),
+                _ => store::Store::disabled(),
             };
             app.manage(store);
             Ok(())

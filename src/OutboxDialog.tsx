@@ -47,7 +47,7 @@ export function OutboxDialog({ items, onSendNow, onRetry, onDelete, onClose }: P
           </ul>
         )}
         <p className="hint">
-          Wiadomości w kolejce leżą na dysku bez szyfrowania do czasu wysłania. Wysyłają się automatycznie co minutę,
+          Wiadomości w kolejce leżą na dysku w szyfrowanej bazie lokalnej do czasu wysłania. Wysyłają się automatycznie co minutę,
           gdy aplikacja jest uruchomiona i jest połączenie. Wiadomość z błędem nie jest wysyłana ponownie sama.
         </p>
         <div className="modal-actions">

@@ -240,7 +240,7 @@ export function Compose({ init, onSent, onQueued, onClose }: Props) {
         <div className="queue-offer" role="status">
           <p>
             Nie ma połączenia z Gmail. Możesz zapisać wiadomość w kolejce – wyśle się sama, gdy wróci sieć (aplikacja
-            musi być wtedy uruchomiona). Do tego czasu wiadomość leży na dysku <strong>bez szyfrowania</strong>.
+            musi być wtedy uruchomiona). Do tego czasu wiadomość leży na dysku w szyfrowanej bazie lokalnej.
           </p>
           <button onClick={() => void queue()}>Zapisz w kolejce do wysłania</button>
         </div>

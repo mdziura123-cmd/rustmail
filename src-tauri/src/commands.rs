@@ -306,7 +306,7 @@ fn cache_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 
 #[tauri::command]
 pub fn cache_status(app: AppHandle, store: State<'_, Store>) -> Result<CacheStatus, String> {
-    let path = cache_dir(&app)?.join("rustmail.db");
+    let path = cache_dir(&app)?.join("rustmail.enc.db");
     Ok(store.status(path.to_string_lossy().to_string()))
 }
 

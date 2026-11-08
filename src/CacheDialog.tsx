@@ -46,7 +46,7 @@ export function CacheDialog({ onClose, onChanged }: Props) {
         {!st ? (
           <p className="hint">Wczytywanie…</p>
         ) : !st.available ? (
-          <p className="error" role="alert">Nie udało się otworzyć lokalnej bazy danych. Aplikacja działa tylko online.</p>
+          <p className="error" role="alert">Nie udało się otworzyć lokalnej bazy danych (sprawdź, czy działa portfel kluczy systemu). Aplikacja działa tylko online.</p>
         ) : (
           <>
             <p className="hint">
@@ -55,8 +55,9 @@ export function CacheDialog({ onClose, onChanged }: Props) {
               połączenia. Zmiany w Gmailu są dociągane co minutę (tylko to, co się zmieniło).
             </p>
             <p className="hint warn-text">
-              Uwaga: baza <strong>nie jest szyfrowana</strong>. Chronią ją wyłącznie uprawnienia plików (dostęp tylko dla
-              Twojego konta) i ewentualne szyfrowanie dysku. Włącz tylko na komputerze, któremu ufasz. Wyłączenie lub
+              Baza jest <strong>szyfrowana</strong> (SQLCipher), a klucz leży w pęku kluczy systemu (portfel KDE), nie obok
+              pliku. Chroni to przed skopiowaniem samego pliku z dysku; nie chroni przed programem uruchomionym na Twoim
+              koncie, który może poprosić portfel o klucz. Włącz tylko na komputerze, któremu ufasz. Wyłączenie lub
               wyczyszczenie usuwa wszystkie zapisane wiadomości. Wysyłanie i akcje na poczcie nadal wymagają sieci.
             </p>
             <p className="hint">

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
 use crate::gmail::{ThreadDetail, ThreadSummary};
-use crate::offline;
+use crate::{dbkey, offline};
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -98,12 +98,34 @@ pub const GET_META: &str = "SELECT value FROM meta WHERE key = ?1";
 pub const DELETE_META: &str = "DELETE FROM meta WHERE key = ?1";
 pub const CLEAR_THREADS: &str = "DELETE FROM threads";
 
+const DB_FILE: &str = "rustmail.enc.db";
+const LEGACY_FILE: &str = "rustmail.db";
 const MAX_OUTBOX: i64 = 50;
 const MAX_OUTBOX_BYTES: usize = 30 * 1024 * 1024;
 const MAX_THREADS: i64 = 2000;
 const MAX_DETAILS: i64 = 200;
 const KEY_ENABLED: &str = "offline_enabled";
 const KEY_HISTORY: &str = "history_id";
+
+/// Nadpisuje plik zerami i usuwa go (na dyskach SSD nie daje to gwarancji fizycznego wymazania).
+fn wipe_and_remove(p: &Path) {
+    use std::io::Write;
+    if let Ok(meta) = std::fs::metadata(p) {
+        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(p) {
+            let zeros = vec![0u8; 64 * 1024];
+            let mut left = meta.len();
+            while left > 0 {
+                let n = left.min(zeros.len() as u64) as usize;
+                if f.write_all(&zeros[..n]).is_err() {
+                    break;
+                }
+                left -= n as u64;
+            }
+            let _ = f.sync_all();
+        }
+    }
+    let _ = std::fs::remove_file(p);
+}
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -153,32 +175,90 @@ impl Store {
         Store { conn: Arc::new(Mutex::new(None)) }
     }
 
-    /// Otwiera (lub tworzy) bazę w podanym katalogu. Przy błędzie zwraca wyłączony Store.
-    pub fn open(dir: &Path) -> Store {
-        match Self::try_open(dir) {
+    /// Otwiera (lub tworzy) zaszyfrowaną bazę w podanym katalogu. Przy błędzie zwraca wyłączony Store.
+    pub fn open(dir: &Path, key: &str) -> Store {
+        match Self::try_open(dir, key) {
             Ok(c) => Store { conn: Arc::new(Mutex::new(Some(c))) },
             Err(_) => Store::disabled(),
         }
     }
 
-    fn try_open(dir: &Path) -> Result<Connection, String> {
+    fn open_encrypted(path: &Path, key: &str) -> Result<Connection, String> {
+        let conn = Connection::open(path).map_err(|e| e.to_string())?;
+        conn.execute_batch(&format!("PRAGMA key = {};", dbkey::sql_literal(key))).map_err(|e| e.to_string())?;
+        // Złe hasło lub uszkodzony plik wychodzą dopiero przy pierwszym odczycie.
+        conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;").map_err(|e| e.to_string())?;
+        conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+        Ok(conn)
+    }
+
+    fn try_open(dir: &Path, key: &str) -> Result<Connection, String> {
+        if !dbkey::valid_key(key) {
+            return Err("Niepoprawny klucz bazy.".to_string());
+        }
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
-        let path = dir.join("rustmail.db");
-        let conn = Connection::open(&path).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;").map_err(|e| e.to_string())?;
-        conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+        let path = dir.join(DB_FILE);
+        let conn = match Self::open_encrypted(&path, key) {
+            Ok(c) => c,
+            Err(_) if std::fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) => {
+                // Klucz nie pasuje (np. wyczyszczony portfel kluczy) lub plik jest uszkodzony.
+                // Niczego nie kasujemy: plik odkładamy na bok i zaczynamy od czystej bazy.
+                for ext in ["", "-wal", "-shm"] {
+                    let from = dir.join(format!("{DB_FILE}{ext}"));
+                    let _ = std::fs::rename(&from, dir.join(format!("{DB_FILE}.unreadable{ext}")));
+                }
+                Self::open_encrypted(&path, key)?
+            }
+            Err(e) => return Err(e),
+        };
+        Self::migrate_legacy(dir, &conn);
         conn.execute(RECOVER_OUTBOX, []).map_err(|e| e.to_string())?;
         Ok(conn)
+    }
+
+    /// Starsze wersje (etapy 7–11) trzymały bazę bez szyfrowania w `rustmail.db`. Przenosimy z niej kolejkę wysyłania
+    /// i ustawienie trybu offline (zapisane wątki zbudują się od nowa), a stary plik nadpisujemy zerami i usuwamy.
+    fn migrate_legacy(dir: &Path, conn: &Connection) {
+        use std::io::Read;
+        let old = dir.join(LEGACY_FILE);
+        let mut head = [0u8; 16];
+        let plain = std::fs::File::open(&old).and_then(|mut f| f.read(&mut head)).map(|n| n == 16).unwrap_or(false)
+            && dbkey::is_plain_sqlite(&head);
+        if !plain {
+            return;
+        }
+        let attach = format!("ATTACH DATABASE {} AS old KEY '';", dbkey::sql_literal(&old.to_string_lossy()));
+        if conn.execute_batch(&attach).is_err() {
+            return;
+        }
+        let missing = |r: &Result<(), rusqlite::Error>| match r {
+            Ok(()) => true,
+            Err(e) => e.to_string().contains("no such table"),
+        };
+        let r1 = conn.execute_batch(
+            "INSERT OR IGNORE INTO outbox (id, created_ms, account, to_summary, subject, thread_id, draft_id, raw, state, error) \
+             SELECT id, created_ms, account, to_summary, subject, thread_id, draft_id, raw, state, error FROM old.outbox;",
+        );
+        let r2 = conn.execute_batch(
+            "INSERT OR IGNORE INTO meta (key, value) SELECT key, value FROM old.meta WHERE key = 'offline_enabled';",
+        );
+        let _ = conn.execute_batch("DETACH DATABASE old;");
+        if missing(&r1) && missing(&r2) {
+            for ext in ["", "-wal", "-shm"] {
+                wipe_and_remove(&dir.join(format!("{LEGACY_FILE}{ext}")));
+            }
+        }
     }
 
     fn with<R>(&self, f: impl FnOnce(&Connection) -> Result<R, rusqlite::Error>) -> Result<R, String> {
