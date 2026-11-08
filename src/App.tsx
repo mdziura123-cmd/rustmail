@@ -20,6 +20,7 @@ import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
 import type { Account, AppInfo, AuthStatus, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import { THEMES, isThemeId, resolveTheme, type ThemeId } from "./themes";
+import Titlebar from "./Titlebar";
 import "./themes.css";
 import "./styles.css";
 import "./compose.css";
@@ -626,6 +627,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <Titlebar />
       <UpdateBanner u={updater} />
       <div className="panes" style={{ gridTemplateColumns: `${left.width}px 6px ${mid.width}px 6px 1fr` }}>
         <aside className="sidebar" aria-label="Foldery">

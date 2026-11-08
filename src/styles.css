@@ -91,3 +91,11 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .auth .solid { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 .auth .hint { font-size: 12px; color: var(--muted); }
 .auth code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+
+/* Własny pasek tytułu */
+.titlebar { flex: none; display: flex; align-items: center; justify-content: space-between; height: 32px; padding-left: 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); user-select: none; }
+.tb-title { font-size: 12px; font-weight: 600; color: var(--muted); }
+.tb-btns { display: flex; height: 100%; }
+.tb-btn { width: 44px; height: 100%; display: grid; place-items: center; color: var(--muted); border-radius: 0; }
+.tb-btn:hover { background: var(--sel); color: var(--ink); }
+.tb-close:hover { background: #d92d20; color: #ffffff; }
