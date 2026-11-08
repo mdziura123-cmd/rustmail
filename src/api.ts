@@ -89,6 +89,8 @@ export const api = {
   spamRestore: (item: TrainItem) => invoke<void>("spam_restore", { item }),
   spamMove: (item: TrainItem) => invoke<void>("spam_move", { item }),
   createLabel: (name: string) => invoke<LabelInfo>("create_label", { name }),
+  importLabel: (name: string) => invoke<string>("import_label", { name }),
+  importMessage: (dataBase64: string, labelId: string) => invoke<string>("import_message", { dataBase64, labelId }),
   setThreadLabel: (id: string, label: string, add: boolean) =>
     invoke<void>("set_thread_label", { id, label, add }),
   testNotification: () => invoke<void>("test_notification"),

@@ -770,6 +770,21 @@ pub async fn poll_mail(
 }
 
 #[tauri::command]
+pub async fn import_label(state: State<'_, AppState>, name: String) -> Result<String, String> {
+    gmail::ensure_label(&state, &name).await
+}
+
+#[tauri::command]
+pub async fn import_message(
+    state: State<'_, AppState>,
+    data_base64: String,
+    label_id: String,
+) -> Result<String, String> {
+    let raw = STANDARD.decode(data_base64.trim()).map_err(|_| "Niepoprawne dane wiadomości.".to_string())?;
+    gmail::import_raw(&state, &raw, &label_id).await
+}
+
+#[tauri::command]
 pub async fn create_label(state: State<'_, AppState>, name: String) -> Result<gmail::LabelInfo, String> {
     gmail::create_label(&state, &name).await
 }

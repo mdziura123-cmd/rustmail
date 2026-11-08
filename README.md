@@ -91,3 +91,7 @@ co zawieszało foldery Spam i Nieprzeczytane. Wiadomości w Gmailu nie są zmien
 ## Filtr spamu
 
 Stopka → „Filtr spamu”. Cztery silniki (nagłówki, reguły, Bayes uczący się z Twoich decyzji, otwarte listy złośliwych domen) i cztery tryby: wyłączony / tylko oznaczaj / przenoś tylko pewne / przenoś wszystko. Domyślnie wyłączony. Wiadomości z gwiazdką, z Twoimi etykietami i z Twoim udziałem nie są ruszane; każde przeniesienie można cofnąć w oknie filtra. Listy pobierane są z `malware-filter.gitlab.io` i `phish.co.za` (raz na dobę).
+
+## Import poczty
+
+Stopka → „Import poczty”. Wczytuje pliki `.mbox` i `.eml` wyeksportowane z Outlooka, Yahoo, Thunderbirda itp. do Gmaila (z oryginalnymi datami; każdy plik → osobna etykieta, bez Odebranych i bez statusu nieprzeczytane). Nie wymaga haseł do innych kont. Kontakty importuje sam Google (contacts.google.com → Importuj).

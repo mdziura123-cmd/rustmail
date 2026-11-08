@@ -693,6 +693,51 @@ pub async fn create_label(state: &AppState, name: &str) -> Result<LabelInfo, Str
     Ok(LabelInfo { id: raw.id, name: raw.name, unread: 0 })
 }
 
+/// Zwraca identyfikator etykiety o danej nazwie – tworzy ją, jeśli jeszcze nie istnieje.
+pub async fn ensure_label(state: &AppState, name: &str) -> Result<String, String> {
+    let name = crate::labels::clean_label_name(name)?;
+    match create_label(state, &name).await {
+        Ok(l) => return Ok(l.id),
+        Err(e) if e.contains("już istnieje") => {}
+        Err(e) => return Err(e),
+    }
+    #[derive(Deserialize)]
+    struct L {
+        id: String,
+        name: String,
+    }
+    #[derive(Deserialize)]
+    struct LL {
+        #[serde(default)]
+        labels: Vec<L>,
+    }
+    let token = access_token(state).await?;
+    let list: LL = get_json(&state.http, &token, "labels", &[]).await?;
+    let found = list.labels.into_iter().find(|l| l.name.eq_ignore_ascii_case(&name)).ok_or("Nie znaleziono etykiety.")?;
+    crate::labels::check_user_label_id(&found.id)?;
+    Ok(found.id)
+}
+
+/// Importuje gotową wiadomość (RFC 822) do skrzynki z zachowaniem daty z nagłówka. Wiadomość dostaje
+/// tylko podaną etykietę – nie trafia do Odebranych i nie jest oznaczona jako nieprzeczytana.
+pub async fn import_raw(state: &AppState, rfc822: &[u8], label_id: &str) -> Result<String, String> {
+    crate::labels::check_user_label_id(label_id)?;
+    if rfc822.len() < 20 || rfc822.len() > 30 * 1024 * 1024 {
+        return Err("Wiadomość jest pusta albo za duża (limit 30 MB).".to_string());
+    }
+    let meta = serde_json::json!({ "labelIds": [label_id] }).to_string();
+    let text = upload(
+        state,
+        reqwest::Method::POST,
+        "messages/import?internalDateSource=dateHeader&neverMarkSpam=true",
+        &meta,
+        rfc822,
+    )
+    .await?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("Nieoczekiwana odpowiedź Gmail: {e}"))?;
+    Ok(v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string())
+}
+
 /// Dodaje lub zdejmuje własną etykietę z wątku (etykiety systemowe są tu niedozwolone).
 pub async fn set_thread_label(state: &AppState, id: &str, label: &str, add: bool) -> Result<(), String> {
     check_id(id)?;
@@ -760,7 +805,7 @@ async fn upload(
     let body = multipart_related(&boundary, metadata_json, rfc822);
     let resp = state
         .http
-        .request(method, format!("{UPLOAD}/{path}?uploadType=multipart"))
+        .request(method, format!("{UPLOAD}/{path}{}uploadType=multipart", if path.contains('?') { '&' } else { '?' }))
         .bearer_auth(token)
         .header("Content-Type", format!("multipart/related; boundary={boundary}"))
         .body(body)

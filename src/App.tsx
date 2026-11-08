@@ -14,6 +14,7 @@ import { splitQuoted } from "./quoteTrim";
 import { SenderLists } from "./SenderLists";
 import { SignatureDialog } from "./SignatureDialog";
 import { SpamDialog } from "./SpamDialog";
+import { ImportDialog } from "./ImportDialog";
 import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
@@ -110,6 +111,7 @@ export default function App() {
   const [outboxOpen, setOutboxOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [spamOpen, setSpamOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -396,7 +398,7 @@ export default function App() {
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
-      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen) return;
+      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen || importOpen) return;
       e.preventDefault();
       setSelected(new Set(threads.map((t) => t.id)));
       return;
@@ -404,7 +406,7 @@ export default function App() {
     const cmd = commandFor(e);
     if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
     if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
-    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen) {
+    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen || importOpen) {
       if (cmd === "escape" && helpOpen) setHelpOpen(false);
       return;
     }
@@ -941,6 +943,7 @@ export default function App() {
         )}
         {email && <button className="linklike plain" onClick={() => setHelpOpen(true)}>Skróty</button>}
         {email && <button className="linklike plain" onClick={() => setSpamOpen(true)}>Filtr spamu</button>}
+        {email && <button className="linklike plain" onClick={() => setImportOpen(true)}>Import poczty</button>}
         {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
         <span className="grow" />
         <label className="check">
@@ -968,6 +971,9 @@ export default function App() {
       )}
       {senderDlg && (
         <SenderLists email={senderDlg.email} onClose={() => setSenderDlg(null)} onChanged={(s) => void senderChanged(s)} />
+      )}
+      {importOpen && (
+        <ImportDialog onClose={() => setImportOpen(false)} onChanged={() => void pollOnce()} />
       )}
       {spamOpen && (
         <SpamDialog onClose={() => setSpamOpen(false)} onToast={(t) => showToast(t)}

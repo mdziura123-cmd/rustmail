@@ -82,6 +82,8 @@ pub fn run() {
             commands::spam_restore,
             commands::spam_move,
             commands::create_label,
+            commands::import_label,
+            commands::import_message,
             commands::test_notification,
             commands::set_thread_label,
             commands::cache_status,
