@@ -84,7 +84,7 @@ pub fn run() {
             commands::spam_restore,
             commands::spam_move,
             commands::create_label,
-            imap_io::imap_status,
+            imap_io::imap_accounts,
             imap_io::imap_login,
             imap_io::imap_logout,
             imap_io::imap_folders,

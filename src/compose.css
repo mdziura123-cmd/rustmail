@@ -174,3 +174,5 @@ kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; backg
 .settings-tabs .active { font-weight: 700; }
 .settings-body { display: grid; gap: 10px; align-content: start; }
 .settings-list { display: grid; gap: 8px; justify-items: start; }
+.acc-title { padding: 6px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .65; border-top: 1px solid var(--line); }
+.acc-title:first-child { border-top: 0; }

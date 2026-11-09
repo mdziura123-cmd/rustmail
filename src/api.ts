@@ -90,23 +90,23 @@ export const api = {
   spamRestore: (item: TrainItem) => invoke<void>("spam_restore", { item }),
   spamMove: (item: TrainItem) => invoke<void>("spam_move", { item }),
   createLabel: (name: string) => invoke<LabelInfo>("create_label", { name }),
-  imapStatus: () => invoke<ImapAccount | null>("imap_status"),
+  imapAccounts: () => invoke<ImapAccount[]>("imap_accounts"),
   imapLogin: (email: string, password: string, host: string) => invoke<ImapAccount>("imap_login", { email, password, host }),
-  imapLogout: () => invoke<void>("imap_logout"),
-  imapFolders: async () => (await invoke<ImapFolder[]>("imap_folders")).map((f) => ({ ...f, label: cleanDisplay(f.label, 80) })),
-  imapList: async (folder: string, offset: number) => {
-    const p = await invoke<ImapPage>("imap_list", { folder, offset });
+  imapLogout: (account: string) => invoke<void>("imap_logout", { account }),
+  imapFolders: async (account: string) => (await invoke<ImapFolder[]>("imap_folders", { account })).map((f) => ({ ...f, label: cleanDisplay(f.label, 80) })),
+  imapList: async (account: string, folder: string, offset: number) => {
+    const p = await invoke<ImapPage>("imap_list", { account, folder, offset });
     return { ...p, rows: p.rows.map((r) => ({ ...r, from: cleanDisplay(r.from, 120), subject: cleanDisplay(r.subject, 200) })) };
   },
-  imapGet: async (folder: string, uid: number) => {
-    const m = await invoke<ImapMsg>("imap_get", { folder, uid });
+  imapGet: async (account: string, folder: string, uid: number) => {
+    const m = await invoke<ImapMsg>("imap_get", { account, folder, uid });
     return {
       ...m, from: cleanDisplay(m.from, 200), to: cleanDisplay(m.to, 500), cc: cleanDisplay(m.cc, 500),
       subject: cleanDisplay(m.subject, 300), text: stripEmoji(m.text), html: stripEmoji(m.html),
       attachments: m.attachments.map((x) => ({ ...x, name: cleanDisplay(x.name, 150) })),
     } as ImapMsg;
   },
-  imapAct: (folder: string, uid: number, action: string) => invoke<void>("imap_act", { folder, uid, action }),
+  imapAct: (account: string, folder: string, uid: number, action: string) => invoke<void>("imap_act", { account, folder, uid, action }),
   importLabel: (name: string) => invoke<string>("import_label", { name }),
   importMessage: (dataBase64: string, labelId: string) => invoke<string>("import_message", { dataBase64, labelId }),
   setThreadLabel: (id: string, label: string, add: boolean) =>

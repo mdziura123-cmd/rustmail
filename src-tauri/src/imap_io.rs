@@ -17,7 +17,8 @@ use tokio_rustls::TlsConnector;
 use crate::imap_proto::{self as p, LIT};
 use crate::secrets;
 
-const KEY: &str = "imap_account";
+const KEY: &str = "imap_accounts";
+const OLD_KEY: &str = "imap_account";
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_LITERAL: usize = 40 * 1024 * 1024;
 const PAGE: u32 = 25;
@@ -29,9 +30,35 @@ struct Creds {
     host: String,
 }
 
-fn load() -> Result<Creds, String> {
-    let j = secrets::get(KEY)?.ok_or("Nie zalogowano do poczty IMAP.")?;
-    serde_json::from_str(&j).map_err(|_| "Zapisane dane konta IMAP są uszkodzone – zaloguj się ponownie.".to_string())
+fn save_all(v: &[Creds]) -> Result<(), String> {
+    if v.is_empty() {
+        secrets::delete(KEY)
+    } else {
+        secrets::set(KEY, &serde_json::to_string(v).map_err(|e| e.to_string())?)
+    }
+}
+
+/// Wszystkie zapisane konta IMAP (z jednorazową migracją z dawnego pojedynczego konta).
+fn all() -> Result<Vec<Creds>, String> {
+    if let Some(j) = secrets::get(KEY)? {
+        return Ok(serde_json::from_str(&j).unwrap_or_default());
+    }
+    if let Some(j) = secrets::get(OLD_KEY)? {
+        if let Ok(c) = serde_json::from_str::<Creds>(&j) {
+            let v = vec![c];
+            save_all(&v)?;
+            let _ = secrets::delete(OLD_KEY);
+            return Ok(v);
+        }
+    }
+    Ok(Vec::new())
+}
+
+fn load(account: &str) -> Result<Creds, String> {
+    all()?
+        .into_iter()
+        .find(|c| c.email.eq_ignore_ascii_case(account))
+        .ok_or_else(|| "Nie znaleziono tego konta IMAP – zaloguj się ponownie.".to_string())
 }
 
 fn short(s: &str) -> String {
@@ -190,11 +217,8 @@ pub struct ImapAccount {
 }
 
 #[tauri::command]
-pub fn imap_status() -> Result<Option<ImapAccount>, String> {
-    match secrets::get(KEY)? {
-        Some(j) => Ok(serde_json::from_str::<Creds>(&j).ok().map(|c| ImapAccount { email: c.email, host: c.host })),
-        None => Ok(None),
-    }
+pub fn imap_accounts() -> Result<Vec<ImapAccount>, String> {
+    Ok(all()?.into_iter().map(|c| ImapAccount { email: c.email, host: c.host }).collect())
 }
 
 #[tauri::command]
@@ -217,14 +241,18 @@ pub async fn imap_login(email: String, password: String, host: String) -> Result
     let creds = Creds { email: email.clone(), password, host: host.clone() };
     let conn = open(&creds).await?;
     conn.bye().await;
-    let json = serde_json::to_string(&creds).map_err(|e| e.to_string())?;
-    secrets::set(KEY, &json)?;
+    let mut list = all()?;
+    list.retain(|c| !c.email.eq_ignore_ascii_case(&creds.email));
+    list.push(creds);
+    save_all(&list)?;
     Ok(ImapAccount { email, host })
 }
 
 #[tauri::command]
-pub fn imap_logout() -> Result<(), String> {
-    secrets::delete(KEY)
+pub fn imap_logout(account: String) -> Result<(), String> {
+    let mut list = all()?;
+    list.retain(|c| !c.email.eq_ignore_ascii_case(&account));
+    save_all(&list)
 }
 
 #[derive(Serialize)]
@@ -263,8 +291,8 @@ async fn list_folders(conn: &mut Conn) -> Result<Vec<Folder>, String> {
 }
 
 #[tauri::command]
-pub async fn imap_folders() -> Result<Vec<Folder>, String> {
-    let creds = load()?;
+pub async fn imap_folders(account: String) -> Result<Vec<Folder>, String> {
+    let creds = load(&account)?;
     let mut conn = open(&creds).await?;
     let res = list_folders(&mut conn).await;
     conn.bye().await;
@@ -299,8 +327,8 @@ fn date_ms(v: Option<String>) -> i64 {
 }
 
 #[tauri::command]
-pub async fn imap_list(folder: String, offset: u32) -> Result<Page, String> {
-    let creds = load()?;
+pub async fn imap_list(account: String, folder: String, offset: u32) -> Result<Page, String> {
+    let creds = load(&account)?;
     let mut conn = open(&creds).await?;
     let res = list_inner(&mut conn, &folder, offset).await;
     conn.bye().await;
@@ -391,11 +419,11 @@ fn walk(part: &ParsedMail, text: &mut String, html: &mut String, atts: &mut Vec<
 }
 
 #[tauri::command]
-pub async fn imap_get(folder: String, uid: u32) -> Result<Msg, String> {
+pub async fn imap_get(account: String, folder: String, uid: u32) -> Result<Msg, String> {
     if uid == 0 {
         return Err("Niepoprawny numer wiadomości.".to_string());
     }
-    let creds = load()?;
+    let creds = load(&account)?;
     let mut conn = open(&creds).await?;
     let res = get_inner(&mut conn, &folder, uid).await;
     conn.bye().await;
@@ -438,11 +466,11 @@ async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, Strin
 }
 
 #[tauri::command]
-pub async fn imap_act(folder: String, uid: u32, action: String) -> Result<(), String> {
+pub async fn imap_act(account: String, folder: String, uid: u32, action: String) -> Result<(), String> {
     if uid == 0 {
         return Err("Niepoprawny numer wiadomości.".to_string());
     }
-    let creds = load()?;
+    let creds = load(&account)?;
     let mut conn = open(&creds).await?;
     let res = act_inner(&mut conn, &folder, uid, &action).await;
     conn.bye().await;
