@@ -7,7 +7,7 @@ import { fmtSize } from "./util";
 function ScanResult({ r }: { r: SavedFile }) {
   const scan =
     r.scan === "clean" ? "Sprawdzono antywirusem ClamAV: nie wykryto zagrożeń."
-    : r.scan === "unavailable" ? "Nie sprawdzono antywirusem – ClamAV nie jest zainstalowany na tym komputerze."
+    : r.scan === "unavailable" ? "" // bez ClamAV nic nie pokazujemy – użytkownik nie korzysta ze skanowania
     : r.scan === "failed" ? `Skanowanie antywirusowe nie powiodło się (${r.scanDetail}). Plik nie został sprawdzony.`
     : "";
   return (
@@ -19,7 +19,7 @@ function ScanResult({ r }: { r: SavedFile }) {
       ) : (
         <>
           <span className="ok-line">Zapisano: {r.path}</span>
-          <span className={r.scan === "clean" ? "ok-line" : "warn-line"}>{scan}</span>
+          {scan && <span className={r.scan === "clean" ? "ok-line" : "warn-line"}>{scan}</span>}
         </>
       )}
       {r.typeWarning && <span className="warn-line">⚠ {r.typeWarning}</span>}
