@@ -484,6 +484,7 @@ async fn counts_inner(conn: &mut Conn) -> Result<Vec<Count>, String> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Att {
+    pub id: String,
     pub name: String,
     pub mime: String,
     pub size: usize,
@@ -508,6 +509,72 @@ pub struct Msg {
     pub starred: bool,
 }
 
+/// Nazwa załącznika, jeśli ta część wiadomości jest załącznikiem.
+fn att_name(part: &ParsedMail) -> Option<String> {
+    let cd = part.get_content_disposition();
+    let fname = cd.params.get("filename").or_else(|| part.ctype.params.get("name")).cloned();
+    if cd.disposition == DispositionType::Attachment || fname.is_some() {
+        Some(fname.unwrap_or_else(|| "załącznik".to_string()))
+    } else {
+        None
+    }
+}
+
+/// Zawartość załącznika o danym numerze (w kolejności, w jakiej `walk` je wylicza).
+fn find_att(part: &ParsedMail, counter: &mut usize, want: usize) -> Option<Vec<u8>> {
+    if !part.subparts.is_empty() {
+        for s in &part.subparts {
+            if let Some(b) = find_att(s, counter, want) {
+                return Some(b);
+            }
+        }
+        return None;
+    }
+    if att_name(part).is_some() {
+        if *counter == want {
+            return part.get_body_raw().ok();
+        }
+        *counter += 1;
+    }
+    None
+}
+
+#[tauri::command]
+pub async fn imap_download(
+    app: tauri::AppHandle,
+    account: String,
+    folder: String,
+    uid: u32,
+    index: u32,
+    name: String,
+) -> Result<crate::commands::SavedFile, String> {
+    if uid == 0 {
+        return Err("Niepoprawny numer wiadomości.".to_string());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = fetch_raw(&mut conn, &folder, uid).await;
+    conn.bye().await;
+    let raw = res?;
+    let mail = mailparse::parse_mail(&raw).map_err(|e| format!("Nie udało się odczytać wiadomości: {e}"))?;
+    let mut counter = 0usize;
+    let bytes = find_att(&mail, &mut counter, index as usize).ok_or("Nie znaleziono załącznika w tej wiadomości.")?;
+    crate::commands::save_scanned(&app, &name, &bytes).await
+}
+
+async fn fetch_raw(conn: &mut Conn, folder: &str, uid: u32) -> Result<Vec<u8>, String> {
+    conn.select(folder).await?;
+    let r = conn.ok(&format!("UID FETCH {uid} (BODY.PEEK[])")).await?;
+    for u in &r.untagged {
+        if p::parse_fetch(&u.head).is_some() {
+            if let Some(raw) = u.lits.first() {
+                return Ok(raw.clone());
+            }
+        }
+    }
+    Err("Nie znaleziono wiadomości (mogła zostać usunięta).".to_string())
+}
+
 fn walk(part: &ParsedMail, text: &mut String, html: &mut String, atts: &mut Vec<Att>) {
     if !part.subparts.is_empty() {
         for s in &part.subparts {
@@ -516,12 +583,9 @@ fn walk(part: &ParsedMail, text: &mut String, html: &mut String, atts: &mut Vec<
         return;
     }
     let mime = part.ctype.mimetype.to_ascii_lowercase();
-    let cd = part.get_content_disposition();
-    let fname = cd.params.get("filename").or_else(|| part.ctype.params.get("name")).cloned();
-    let is_att = cd.disposition == DispositionType::Attachment || fname.is_some();
-    if is_att {
+    if let Some(fname) = att_name(part) {
         let size = part.get_body_raw().map(|b| b.len()).unwrap_or(0);
-        atts.push(Att { name: clip(fname.unwrap_or_else(|| "załącznik".to_string()), 150), mime, size });
+        atts.push(Att { id: atts.len().to_string(), name: clip(fname, 150), mime, size });
     } else if mime == "text/plain" {
         if text.is_empty() {
             *text = part.get_body().unwrap_or_default();

@@ -27,7 +27,9 @@ function ScanResult({ r }: { r: SavedFile }) {
   );
 }
 
-function Row({ m, a, strict }: { m: MessageView; a: Attachment; strict: boolean }) {
+type Downloader = (a: Attachment) => Promise<SavedFile>;
+
+function Row({ m, a, strict, dl }: { m: MessageView; a: Attachment; strict: boolean; dl?: Downloader }) {
   const risky = riskyFile(a.name);
   const needsConfirm = risky || strict;
   const [confirm, setConfirm] = useState(false);
@@ -41,7 +43,7 @@ function Row({ m, a, strict }: { m: MessageView; a: Attachment; strict: boolean 
     setError(null);
     setConfirm(false);
     try {
-      setResult(await api.downloadAttachment(m.id, a.id, a.name));
+      setResult(await (dl ? dl(a) : api.downloadAttachment(m.id, a.id, a.name)));
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -74,11 +76,11 @@ function Row({ m, a, strict }: { m: MessageView; a: Attachment; strict: boolean 
   );
 }
 
-export function Attachments({ m, strict }: { m: MessageView; strict: boolean }) {
+export function Attachments({ m, strict, dl }: { m: MessageView; strict: boolean; dl?: Downloader }) {
   if (m.attachments.length === 0) return null;
   return (
     <div className="attachments" aria-label="Załączniki">
-      {m.attachments.map((a, i) => <Row key={a.name + i} m={m} a={a} strict={strict} />)}
+      {m.attachments.map((a, i) => <Row key={a.name + i} m={m} a={a} strict={strict} dl={dl} />)}
     </div>
   );
 }

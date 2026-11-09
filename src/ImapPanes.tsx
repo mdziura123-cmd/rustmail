@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
+import { Attachments } from "./Attachments";
 import { MessageBody } from "./MessageBody";
 import type { ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { fmtDate, fmtFull } from "./util";
@@ -266,9 +267,11 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose }:
               </div>
               <p className="hint">Do: {msg.to}{msg.cc ? ` · Kopia: ${msg.cc}` : ""}</p>
               <MessageBody key={msg.uid} m={toView(msg)} strict={false} />
-              {msg.attachments.length > 0 && (
-                <p className="hint">Załączniki (pobieranie jeszcze niedostępne): {msg.attachments.map((a) => a.name).join(", ")}</p>
-              )}
+              <Attachments
+                m={{ ...toView(msg), attachments: msg.attachments }}
+                strict={false}
+                dl={(a) => api.imapDownload(account, folder, msg.uid, Number(a.id), a.name)}
+              />
             </article>
           </div>
         </>

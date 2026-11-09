@@ -592,6 +592,12 @@ pub async fn download_attachment(
     name: String,
 ) -> Result<SavedFile, String> {
     let bytes = gmail::download_attachment(&state, &message_id, &attachment_id).await?;
+    save_scanned(&app, &name, &bytes).await
+}
+
+/// Wspólna część pobierania: typ po zawartości, skan ClamAV, zapis w Pobranych.
+pub(crate) async fn save_scanned(app: &AppHandle, name: &str, bytes: &[u8]) -> Result<SavedFile, String> {
+    let (name, bytes) = (name.to_string(), bytes.to_vec());
     let risky = safety::risky_extension(&name);
     let type_warning = filetype::mismatch(&name, &bytes);
 

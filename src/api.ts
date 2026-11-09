@@ -134,6 +134,8 @@ export const api = {
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   downloadAttachment: (messageId: string, attachmentId: string, name: string) =>
     invoke<SavedFile>("download_attachment", { messageId, attachmentId, name }),
+  imapDownload: (account: string, folder: string, uid: number, index: number, name: string) =>
+    invoke<SavedFile>("imap_download", { account, folder, uid, index, name }),
   getSignature: () => invoke<string>("get_signature"),
   setSignature: (text: string) => invoke<void>("set_signature", { text }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
