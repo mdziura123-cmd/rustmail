@@ -9,6 +9,8 @@ interface Props {
   gmail: Account[];
   imap: ImapAccount[];
   busy: boolean;
+  onSignOut: () => void;
+  onSignOutImap: (email: string) => void;
   notify: boolean;
   content: boolean;
   onNotify: (on: boolean) => void;
@@ -36,6 +38,7 @@ export function SettingsDialog(p: Props) {
   const [tab, setTab] = useState<Tab>("general");
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmRollback, setConfirmRollback] = useState(false);
+  const [confirmOut, setConfirmOut] = useState<string | null>(null);
   const test = async () => {
     setMsg(null);
     try {
@@ -45,6 +48,15 @@ export function SettingsDialog(p: Props) {
       setMsg(errText(e));
     }
   };
+  const out = (key: string, run: () => void) =>
+    confirmOut === key ? (
+      <>
+        <button className="small warn" onClick={() => { setConfirmOut(null); run(); }}>Na pewno? Kliknij ponownie</button>
+        <button className="small" onClick={() => setConfirmOut(null)}>Anuluj</button>
+      </>
+    ) : (
+      <button className="small" onClick={() => setConfirmOut(key)}>Wyloguj</button>
+    );
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-label="Ustawienia">
       <div className="modal settings-modal">
@@ -81,15 +93,25 @@ export function SettingsDialog(p: Props) {
               <>
                 <p className="hint">Zalogowane konta:</p>
                 <ul className="acc-list">
-                  {p.gmail.map((a) => <li key={"g" + a.email}>{a.email} <span className="hint">(Gmail)</span></li>)}
-                  {p.imap.map((a) => <li key={"i" + a.email}>{a.email} <span className="hint">(WP / IMAP)</span></li>)}
+                  {p.gmail.map((a) => (
+                    <li key={"g" + a.email}>
+                      {a.email} <span className="hint">(Gmail)</span>{" "}
+                      {a.active ? out("g" + a.email, p.onSignOut) : <span className="hint">– aby wylogować, przełącz się na to konto</span>}
+                    </li>
+                  ))}
+                  {p.imap.map((a) => (
+                    <li key={"i" + a.email}>
+                      {a.email} <span className="hint">(WP / IMAP)</span>{" "}
+                      {out("i" + a.email, () => p.onSignOutImap(a.email))}
+                    </li>
+                  ))}
                   {p.gmail.length + p.imap.length === 0 && <li className="hint">Brak zalogowanych kont.</li>}
                 </ul>
                 <div className="settings-list">
                   <button disabled={p.busy} onClick={() => p.onOpen("addGmail")}>+ Dodaj konto Gmail…</button>
                   <button onClick={() => p.onOpen("addImap")}>+ Dodaj konto WP / inne IMAP…</button>
                 </div>
-                <p className="hint">Wylogowanie: wybierz konto w przełączniku u góry po lewej i kliknij „Wyloguj”.</p>
+                <p className="hint">Wylogowanie usuwa z tego komputera zapisane dane logowania do konta. Wiadomości na serwerze zostają.</p>
               </>
             )}
             {tab === "mail" && (

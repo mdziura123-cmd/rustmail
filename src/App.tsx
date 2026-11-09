@@ -16,7 +16,8 @@ import { SignatureDialog } from "./SignatureDialog";
 import { SpamDialog } from "./SpamDialog";
 import { ImportDialog } from "./ImportDialog";
 import { ImapLogin } from "./ImapLogin";
-import { ImapListPane, ImapReader, ImapSidebarNav, toView, useImapInboxes, useImapView } from "./ImapPanes";
+import { ImapListPane, ImapReader, ImapSidebarNav, toView, useImapView } from "./ImapPanes";
+import { ReceiveButton } from "./ReceiveButton";
 import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { StatusBar } from "./StatusBar";
@@ -117,14 +118,14 @@ export default function App() {
   const [imapAccs, setImapAccs] = useState<ImapAccount[]>([]);
   const [imapTick, setImapTick] = useState(0);
   const [imapLoaded, setImapLoaded] = useState(false);
-  const [view, setView] = useState<string>(() => load(LS.view, "gmail"));
+  const [view, setView] = useState<string>(() => { const v = load(LS.view, "gmail"); return v.startsWith("imap:") ? v : "gmail"; });
   const [imapUid, setImapUid] = useState<number | null>(null);
-  const [imapOpenItem, setImapOpenItem] = useState<{ account: string; uid: number } | null>(null);
+  const [imapSel, setImapSel] = useState<Set<number>>(new Set());
+  const imapAnchor = useRef<number | null>(null);
   const imapAccount = view.startsWith("imap:") ? view.slice(5) : null;
   const imap = useImapView(imapAccount);
-  const inboxes = useImapInboxes(imapAccs.map((a) => a.email), view === "all");
   const changeView = (v: string) => {
-    setView(v); save(LS.view, v); setImapUid(null); setImapOpenItem(null);
+    setView(v); save(LS.view, v); setImapUid(null); setImapSel(new Set());
     // Nic z poprzedniego konta nie może zostać „otwarte” ani zaznaczone – skróty i przyciski działałyby na złym koncie.
     setOpenId(null); setDetail(null); setSelected(new Set());
   };
@@ -134,16 +135,10 @@ export default function App() {
   useEffect(() => {
     if (!imapLoaded) return;
     const okAcc = imapAccount === null || imapAccs.some((a) => a.email === imapAccount);
-    const okAll = view !== "all" || imapAccs.length > 0;
-    if (!okAcc || !okAll) changeView("gmail");
+    if (!okAcc) changeView("gmail");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imapLoaded, imapAccs]);
-  useEffect(() => { setImapUid(null); }, [imap.folder]);
-  useEffect(() => {
-    if (view !== "all") return;
-    const id = window.setInterval(() => void inboxes.refresh(), 60000);
-    return () => window.clearInterval(id);
-  }, [view, inboxes.refresh]);
+  useEffect(() => { setImapUid(null); setImapSel(new Set()); }, [imap.folder]);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -438,16 +433,42 @@ export default function App() {
     // Skróty tej funkcji dotyczą wiadomości Gmaila. Na koncie IMAP (lub gdy w widoku wspólnym otwarta jest wiadomość IMAP)
     // nie robią nic, żeby nie zmienić wiadomości na innym koncie.
     if (view.startsWith("imap:")) {
-      // j / k na liście konta IMAP; resztą (usuń, spam, odpowiedz…) zajmuje się otwarta wiadomość.
+      // Konto IMAP: nawigacja i zaznaczanie na liście; akcje na jednej wiadomości obsługuje otwarta wiadomość.
+      if (isTypingTarget(e.target as HTMLElement | null) || compose || document.querySelector(".modal-back")) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setImapSel(new Set(imap.rows.map((r) => r.uid)));
+        return;
+      }
       const c = commandFor(e);
-      if ((c === "next" || c === "prev") && !isTypingTarget(e.target as HTMLElement | null) && !compose && !document.querySelector(".modal-back")) {
-        const i = imap.rows.findIndex((r) => r.uid === imapUid);
-        const n = imap.rows[c === "next" ? (i < 0 ? 0 : Math.min(i + 1, imap.rows.length - 1)) : (i <= 0 ? 0 : i - 1)];
-        if (n) { e.preventDefault(); setImapUid(n.uid); }
+      if (!c) return;
+      const sel = imapSel.size > 0;
+      const bulk = (a: string) => { e.preventDefault(); void imapBulk(a); };
+      switch (c) {
+        case "next":
+        case "prev": {
+          const i = imap.rows.findIndex((r) => r.uid === imapUid);
+          const n = imap.rows[c === "next" ? (i < 0 ? 0 : Math.min(i + 1, imap.rows.length - 1)) : (i <= 0 ? 0 : i - 1)];
+          if (n) { e.preventDefault(); setImapUid(n.uid); }
+          break;
+        }
+        case "select": {
+          const u = imapUid ?? imap.rows[0]?.uid;
+          if (u !== undefined) { e.preventDefault(); setImapSel((p) => { const n = new Set(p); if (n.has(u)) n.delete(u); else n.add(u); return n; }); }
+          break;
+        }
+        case "escape": setImapSel(new Set()); break;
+        case "help": e.preventDefault(); setHelpOpen((v) => !v); break;
+        case "search": e.preventDefault(); (document.querySelector('input[type="search"]') as HTMLInputElement | null)?.focus(); break;
+        case "compose": e.preventDefault(); startCompose(buildNew(signature), "imap:" + imapAccount); break;
+        case "trash": if (sel) bulk(imapRole === "trash" ? "inbox" : "trash"); break;
+        case "spam": if (sel) bulk(imapRole === "spam" ? "inbox" : "spam"); break;
+        case "archive": if (sel && imapRole === "inbox") bulk("archive"); break;
+        case "read": if (sel) bulk("read"); break;
+        case "unread": if (sel) bulk("unread"); break;
       }
       return;
     }
-    if (view === "all" && imapOpenItem) return;
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
@@ -633,7 +654,6 @@ export default function App() {
     if (imapAccount === a) changeView("gmail");
     showToast(`Wylogowano konto ${a}.`);
   };
-  useEffect(() => { if (view === "all") pickFolder("inbox"); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -716,7 +736,7 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [imapKey, imapPollOnce]);
   useEffect(() => {
-    if (imapTick > 0 && view !== "gmail") { void imap.refresh(); if (view === "all") void inboxes.refresh(); }
+    if (imapTick > 0 && view !== "gmail") void imap.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imapTick]);
   const syncing = useRef(false);
@@ -739,17 +759,51 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [email, syncOnce]);
 
+  // ---------- Konto IMAP: zaznaczanie wielu wiadomości i akcje hurtowe ----------
+  const imapRole = imap.folders.find((f) => f.name === imap.folder)?.role ?? "other";
+  const imapRowClick = (e: React.MouseEvent, r: ImapRow) => {
+    const toggle = (uid: number) => setImapSel((prev) => { const n = new Set(prev); if (n.has(uid)) n.delete(uid); else n.add(uid); return n; });
+    if (e.ctrlKey || e.metaKey) { toggle(r.uid); imapAnchor.current = r.uid; return; }
+    if (e.shiftKey && imapAnchor.current !== null) {
+      const a = imap.rows.findIndex((x) => x.uid === imapAnchor.current);
+      const b = imap.rows.findIndex((x) => x.uid === r.uid);
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        setImapSel(new Set(imap.rows.slice(lo, hi + 1).map((x) => x.uid)));
+        return;
+      }
+    }
+    setImapSel(new Set());
+    imapAnchor.current = r.uid;
+    setImapUid(r.uid);
+  };
+  const imapBulk = async (action: string) => {
+    if (!imapAccount) return;
+    const account = imapAccount;
+    const folderName = imap.folder;
+    const uids = [...imapSel].slice(0, 50);
+    if (uids.length === 0) return;
+    const done: number[] = [];
+    let failed = 0;
+    let lastError = "";
+    for (const uid of uids) {
+      try { await api.imapAct(account, folderName, uid, action); done.push(uid); }
+      catch (e) { failed += 1; lastError = errText(e); }
+    }
+    if (["trash", "spam", "archive", "inbox"].includes(action)) {
+      for (const uid of done) imap.remove(uid);
+      if (imapUid !== null && done.includes(imapUid)) setImapUid(null);
+    } else {
+      for (const uid of done) imap.patch(uid, { unread: action === "unread" });
+    }
+    setImapSel(new Set());
+    showToast(`Gotowe (${done.length}).` + (failed ? ` Błędy: ${failed} – ${lastError}` : ""));
+  };
+
   const composeNode = compose ? (
     <Compose key={compose.key} init={compose.init} from={compose.from} onSent={onSent} onQueued={onQueued} onClose={onComposeClosed}
       senders={email ? [{ id: "gmail", label: email }, ...imapAccs.map((a) => ({ id: "imap:" + a.email, label: a.email }))] : undefined} />
   ) : null;
-  const unified = view === "all" && folder === "inbox" && !searchTerm;
-  type Item = { k: "g"; ts: number; t: ThreadSummary } | { k: "i"; ts: number; i: { account: string; row: ImapRow } };
-  const merged: Item[] = [
-    ...threads.map((t): Item => ({ k: "g", ts: t.lastDateMs, t })),
-    ...(unified ? inboxes.items.map((i): Item => ({ k: "i", ts: i.row.dateMs, i })) : []),
-  ];
-  if (unified) merged.sort((a, b) => b.ts - a.ts);
 
   return (
     <div className="app">
@@ -768,11 +822,9 @@ export default function App() {
             onClick={() => startCompose(buildNew(signature))}>Nowa wiadomość</button>
           {email && (
             <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
-              label={imapAccount ?? (view === "all" ? "Wszystkie skrzynki" : email)} busy={signingIn}
+              label={imapAccount ?? email} busy={signingIn}
               onGmail={(a) => { changeView("gmail"); if (a !== email) void switchAccount(a); }}
-              onImap={(a) => changeView("imap:" + a)} onAll={() => changeView("all")}
-              onAddGmail={() => void signIn()} onAddImap={() => setImapLoginOpen(true)}
-              onSignOut={() => void signOut()} onSignOutImap={(a) => void signOutImap(a)} />
+              onImap={(a) => changeView("imap:" + a)} />
           )}
           <nav>
             {imapAccount ? <ImapSidebarNav imap={imap} /> : FOLDERS.map((f) => (
@@ -822,9 +874,11 @@ export default function App() {
 
         {imapAccount ? (
           <>
-            <ImapListPane imap={imap} openUid={imapUid} onOpen={(row) => setImapUid(row.uid)} />
+            <ImapListPane imap={imap} role={imapRole} openUid={imapUid} selected={imapSel} onRowClick={imapRowClick}
+              onSelectAll={() => setImapSel(new Set(imap.rows.map((r) => r.uid)))} onClear={() => setImapSel(new Set())}
+              onBulk={(a) => void imapBulk(a)} />
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
-            {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imap.folders.find((f) => f.name === imap.folder)?.role ?? "other"} uid={imapUid}
+            {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0}
               onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
               onChanged={(uid, p) => { if (p === "removed") { imap.remove(uid); setImapUid(null); } else imap.patch(uid, p); }} />}
           </>
@@ -832,11 +886,9 @@ export default function App() {
         <>
         <section className="list" aria-label="Lista konwersacji">
           <header className="list-head">
-            <h2>{searchTerm ? `Wyniki: „${searchTerm}”` : unified ? "Wszystkie skrzynki" : folderLabel}</h2>
+            <h2>{searchTerm ? `Wyniki: „${searchTerm}”` : folderLabel}</h2>
             {email && (
-              <button className="small" disabled={loadingList} onClick={() => { void loadList(folder, null, false); if (view === "all") void inboxes.refresh(); }}>
-                {loadingList ? "Wczytywanie…" : "Odśwież"}
-              </button>
+              <ReceiveButton busy={loadingList} onClick={() => void loadList(folder, null, false)} />
             )}
           </header>
           {email && (
@@ -867,7 +919,6 @@ export default function App() {
                 </p>
               )}
               {listError && <p className="error pad" role="alert">{listError}</p>}
-              {unified && inboxes.error && <p className="error pad" role="alert">{inboxes.error}</p>}
               {!loadingList && !listError && threads.length === 0 && (
                 <div className="empty">
                   <h3>Ten folder jest pusty</h3>
@@ -893,28 +944,13 @@ export default function App() {
                 </div>
               )}
               <ul>
-                {merged.map((m) => {
-                  if (m.k === "i") {
-                    const it = m.i;
-                    const act = imapOpenItem?.account === it.account && imapOpenItem.uid === it.row.uid;
-                    return (
-                      <li key={"i" + it.account + it.row.uid}>
-                        <button className={"row" + (act ? " active" : "") + (it.row.unread ? " unread" : "")}
-                          onClick={() => { setImapOpenItem({ account: it.account, uid: it.row.uid }); }}>
-                          <span className="who">{it.row.from}</span>
-                          <span className="when">{it.row.starred ? "★ " : ""}{fmtDate(it.row.dateMs)}</span>
-                          <span className="subj"><span className="label-chip">{it.account}</span>{it.row.subject || "(bez tematu)"}</span>
-                        </button>
-                      </li>
-                    );
-                  }
-                  const t = m.t;
+                {threads.map((t) => {
                   return (
                   <li key={t.id} className={selected.has(t.id) ? "picked" : ""}>
                     <button data-thread={t.id}
-                      className={"row" + (t.id === openId && !imapOpenItem ? " active" : "") + (t.unread ? " unread" : "")}
+                      className={"row" + (t.id === openId ? " active" : "") + (t.unread ? " unread" : "")}
                       aria-pressed={selected.has(t.id)}
-                      onClick={(e) => { setImapOpenItem(null); onRowClick(e, t); }}>
+                      onClick={(e) => onRowClick(e, t)}>
                       <span className="who">{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
                       <span className="when">
                         {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
@@ -951,11 +987,6 @@ export default function App() {
 
         <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
 
-        {unified && imapOpenItem && !compose ? (
-          <ImapReader account={imapOpenItem.account} folder="INBOX" role="inbox" uid={imapOpenItem.uid}
-            onCompose={(k, m) => composeFromImap(imapOpenItem.account, k, m)}
-            onChanged={(uid, p) => { if (p === "removed") { inboxes.remove(imapOpenItem.account, uid); setImapOpenItem(null); } else inboxes.patch(imapOpenItem.account, uid, p); }} />
-        ) : (
         <main className="reader" aria-label="Konwersacja">
           {email && needsReauth && (
             <div className="banner warn" role="alert">
@@ -1067,7 +1098,6 @@ export default function App() {
             </>
           ) : null}
         </main>
-        )}
         </>
         )}
       </div>
@@ -1122,6 +1152,7 @@ export default function App() {
       )}
       {settingsOpen && (
         <SettingsDialog notify={notifyOn} content={notifyContent} gmail={accounts.length ? accounts : email ? [{ email, active: true }] : []} imap={imapAccs} busy={signingIn}
+          onSignOut={() => { setSettingsOpen(false); void signOut(); }} onSignOutImap={(a) => { setSettingsOpen(false); void signOutImap(a); }}
           autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}
           onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}
           onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}

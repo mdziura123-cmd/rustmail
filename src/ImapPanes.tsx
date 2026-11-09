@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
+import { ReceiveButton } from "./ReceiveButton";
 import { MessageBody } from "./MessageBody";
 import type { ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { commandFor, isTypingTarget } from "./shortcuts";
@@ -114,31 +115,6 @@ export function useImapView(account: string | null) {
 }
 export type ImapView = ReturnType<typeof useImapView>;
 
-/** Odebrane ze wszystkich kont IMAP naraz (do widoku „Wszystkie skrzynki”). */
-export function useImapInboxes(accounts: string[], enabled: boolean) {
-  const [items, setItems] = useState<{ account: string; row: ImapRow }[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const key = accounts.join("\n");
-  const refresh = useCallback(async () => {
-    if (!enabled || accounts.length === 0) { setItems([]); return; }
-    const errs: string[] = [];
-    const all = await Promise.all(accounts.map(async (account) => {
-      try { return (await api.imapList(account, "INBOX", 0)).rows.map((row) => ({ account, row })); }
-      catch (e) { errs.push(`${account}: ${errText(e)}`); return []; }
-    }));
-    setItems(all.flat());
-    setError(errs.length ? errs.join(" ") : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  return {
-    items, error, refresh,
-    patch: (account: string, uid: number, pt: Partial<ImapRow>) =>
-      setItems((prev) => prev.map((x) => (x.account === account && x.row.uid === uid ? { ...x, row: { ...x.row, ...pt } } : x))),
-    remove: (account: string, uid: number) => setItems((prev) => prev.filter((x) => !(x.account === account && x.row.uid === uid))),
-  };
-}
-
 export function ImapSidebarNav({ imap }: { imap: ImapView }) {
   return (
     <>
@@ -158,7 +134,10 @@ export function ImapSidebarNav({ imap }: { imap: ImapView }) {
   );
 }
 
-export function ImapListPane({ imap, openUid, onOpen }: { imap: ImapView; openUid: number | null; onOpen: (r: ImapRow) => void }) {
+export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSelectAll, onClear, onBulk }: {
+  imap: ImapView; role: string; openUid: number | null; selected: Set<number>;
+  onRowClick: (e: React.MouseEvent, r: ImapRow) => void; onSelectAll: () => void; onClear: () => void; onBulk: (action: string) => void;
+}) {
   const label = imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
   const [q, setQ] = useState("");
   useEffect(() => { setQ(""); }, [imap.account, imap.folder]);
@@ -166,7 +145,7 @@ export function ImapListPane({ imap, openUid, onOpen }: { imap: ImapView; openUi
     <section className="list" aria-label="Lista wiadomości">
       <header className="list-head">
         <h2>{label}{imap.account ? ` · ${imap.account}` : ""}</h2>
-        <button className="small" disabled={imap.loading} onClick={imap.refresh}>{imap.loading ? "Wczytywanie…" : "Odśwież"}</button>
+        <ReceiveButton busy={imap.loading} onClick={imap.refresh} />
       </header>
       <form className="search" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) imap.search(q); }}>
         <input type="search" value={q} maxLength={100} placeholder="Szukaj w tym folderze" aria-label="Szukaj w folderze"
@@ -175,11 +154,24 @@ export function ImapListPane({ imap, openUid, onOpen }: { imap: ImapView; openUi
         {imap.term && <button className="small" type="button" onClick={() => { setQ(""); imap.clearSearch(); }}>Wyczyść</button>}
       </form>
       {imap.err && <p className="error pad" role="alert">{imap.err}</p>}
+      {selected.size > 0 && (
+        <div className="bulkbar" role="toolbar" aria-label="Akcje na zaznaczonych">
+          <strong>Zaznaczono: {selected.size}</strong>
+          <button className="small" onClick={onSelectAll}>Wszystkie</button>
+          {role === "inbox" && <button className="small" onClick={() => onBulk("archive")}>Archiwizuj</button>}
+          <button className="small" onClick={() => onBulk(role === "trash" ? "inbox" : "trash")}>{role === "trash" ? "Przywróć" : "Usuń"}</button>
+          <button className="small" onClick={() => onBulk(role === "spam" ? "inbox" : "spam")}>{role === "spam" ? "To nie spam" : "Spam"}</button>
+          <button className="small" onClick={() => onBulk("read")}>Przeczytane</button>
+          <button className="small" onClick={() => onBulk("unread")}>Nieprzeczytane</button>
+          <button className="small" onClick={onClear}>Odznacz</button>
+        </div>
+      )}
       {!imap.loading && !imap.err && imap.rows.length === 0 && <div className="empty"><h3>Ten folder jest pusty</h3></div>}
       <ul>
         {imap.rows.map((r) => (
-          <li key={r.uid}>
-            <button className={"row" + (r.uid === openUid ? " active" : "") + (r.unread ? " unread" : "")} onClick={() => onOpen(r)}>
+          <li key={r.uid} className={selected.has(r.uid) ? "picked" : ""}>
+            <button className={"row" + (r.uid === openUid ? " active" : "") + (r.unread ? " unread" : "")}
+              aria-pressed={selected.has(r.uid)} onClick={(e) => onRowClick(e, r)}>
               <span className="who">{r.from}</span>
               <span className="when">{r.starred ? "★ " : ""}{fmtDate(r.dateMs)}</span>
               <span className="subj">{r.subject || "(bez tematu)"}</span>
@@ -199,11 +191,13 @@ interface ReaderProps {
   role: string;
   uid: number | null;
   onCompose: (kind: "reply" | "replyAll" | "forward", msg: ImapMsg) => void;
+  /** Czy skróty klawiszowe otwartej wiadomości są włączone (wyłączone, gdy na liście są zaznaczone wiadomości). */
+  keys?: boolean;
   /** Wywoływane po zmianie wiadomości (przeczytana, gwiazdka, usunięta…). */
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged, onCompose }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose, keys = true }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -241,7 +235,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose }:
   // Skróty klawiszowe dla otwartej wiadomości IMAP (działają tylko na tym koncie i tej wiadomości).
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
-    if (!msg || isTypingTarget(e.target as HTMLElement | null) || document.querySelector(".modal-back")) return;
+    if (!keys || !msg || isTypingTarget(e.target as HTMLElement | null) || document.querySelector(".modal-back")) return;
     const cmd = commandFor(e);
     if (!cmd) return;
     const run = (f: () => void) => { e.preventDefault(); f(); };

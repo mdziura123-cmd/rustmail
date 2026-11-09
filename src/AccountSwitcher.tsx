@@ -3,20 +3,15 @@ import type { Account, ImapAccount } from "./types";
 interface Props {
   gmail: Account[];
   imap: ImapAccount[];
-  /** "gmail" | "all" | "imap:adres" */
+  /** "gmail" | "imap:adres" */
   view: string;
   label: string;
   busy: boolean;
   onGmail: (email: string) => void;
   onImap: (email: string) => void;
-  onAll: () => void;
-  onAddGmail: () => void;
-  onAddImap: () => void;
-  onSignOut: () => void;
-  onSignOutImap: (email: string) => void;
 }
 
-/** Przełącznik kont: zalogowane konta, widok „wszystkie razem” i osobna sekcja dodawania kont. */
+/** Przełącznik kont. Dodawanie i wylogowanie kont jest w Ustawieniach (zakładka „Konta”). */
 export function AccountSwitcher(p: Props) {
   const close = (e: React.MouseEvent<HTMLElement>) => {
     const d = e.currentTarget.closest("details");
@@ -39,18 +34,6 @@ export function AccountSwitcher(p: Props) {
         <div className="acc-title">Zalogowane konta</div>
         {p.gmail.map((a) => item(p.view === "gmail" && a.active, `${a.email} (Gmail)`, () => p.onGmail(a.email), "g" + a.email, p.busy))}
         {p.imap.map((a) => item(p.view === "imap:" + a.email, `${a.email} (IMAP)`, () => p.onImap(a.email), "i" + a.email))}
-        {total > 1 && (
-          <>
-            <div className="acc-title">Widok</div>
-            {item(p.view === "all", "Wszystkie skrzynki razem (Odebrane)", p.onAll, "all")}
-          </>
-        )}
-        <div className="acc-title">Wylogowanie</div>
-        {p.view.startsWith("imap:") ? (
-          <button role="menuitem" className="acc-item danger" onClick={(e) => { close(e); p.onSignOutImap(p.view.slice(5)); }}>Wyloguj konto {p.view.slice(5)}</button>
-        ) : (
-          <button role="menuitem" disabled={p.busy} className="acc-item danger" onClick={(e) => { close(e); p.onSignOut(); }}>Wyloguj konto Gmail</button>
-        )}
       </div>
     </details>
   );

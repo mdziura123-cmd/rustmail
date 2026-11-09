@@ -112,3 +112,9 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .progress-text { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .acc-list { margin: 4px 0 12px; padding-left: 18px; }
 @media (prefers-reduced-motion: reduce) { .icon-btn.spin svg, .progress-fill.indeterminate { animation: none; } }
+.icon-btn.receive { width: 30px; height: 28px; color: var(--text, inherit); }
+.icon-btn.receive.busy { opacity: 1; color: var(--accent, #2b6cb0); }
+.icon-btn.receive.busy svg { animation: rm-fly .9s ease-in-out infinite; }
+@keyframes rm-fly { 0% { transform: translateX(-4px) rotate(-8deg); } 50% { transform: translateX(4px) translateY(-3px) rotate(8deg); } 100% { transform: translateX(-4px) rotate(-8deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-btn.receive.busy svg { animation: none; } }
+.bulkbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; }
