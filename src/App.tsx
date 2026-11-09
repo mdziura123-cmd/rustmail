@@ -123,7 +123,11 @@ export default function App() {
   const imapAccount = view.startsWith("imap:") ? view.slice(5) : null;
   const imap = useImapView(imapAccount);
   const inboxes = useImapInboxes(imapAccs.map((a) => a.email), view === "all");
-  const changeView = (v: string) => { setView(v); save(LS.view, v); setImapUid(null); setImapOpenItem(null); };
+  const changeView = (v: string) => {
+    setView(v); save(LS.view, v); setImapUid(null); setImapOpenItem(null);
+    // Nic z poprzedniego konta nie może zostać „otwarte” ani zaznaczone – skróty i przyciski działałyby na złym koncie.
+    setOpenId(null); setDetail(null); setSelected(new Set());
+  };
   useEffect(() => {
     api.imapAccounts().then(setImapAccs).catch(() => setImapAccs([])).finally(() => setImapLoaded(true));
   }, []);
@@ -431,6 +435,9 @@ export default function App() {
   // ---------- Skróty klawiszowe ----------
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
+    // Skróty dotyczą tylko wiadomości Gmaila. Na koncie IMAP (lub gdy w widoku wspólnym otwarta jest wiadomość IMAP)
+    // nie robią nic, żeby nie zmienić wiadomości na innym koncie.
+    if (view.startsWith("imap:") || (view === "all" && imapOpenItem)) return;
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
