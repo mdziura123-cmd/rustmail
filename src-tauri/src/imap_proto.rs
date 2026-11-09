@@ -266,6 +266,15 @@ pub fn bare_addr(s: &str) -> String {
     }
 }
 
+/// Numer UID z kodu odpowiedzi serwera: `[APPENDUID <v> <uid>]` albo `[COPYUID <v> <src> <dst>]` (ostatnia liczba).
+pub fn resp_uid(text: &str, code: &str) -> Option<u32> {
+    let up = text.to_ascii_uppercase();
+    let start = up.find(&format!("[{} ", code.to_ascii_uppercase()))?;
+    let rest = &text[start + code.len() + 2..];
+    let end = rest.find(']')?;
+    rest[..end].split_whitespace().last()?.parse().ok()
+}
+
 /// Data w formacie RFC 2822 (czas UTC), np. `Mon, 09 Nov 2026 18:30:00 +0000`.
 pub fn rfc2822_date(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
@@ -467,5 +476,14 @@ mod tests {
         assert_eq!(parse_smtp_line("250-AUTH PLAIN LOGIN"), Some((250, true, "AUTH PLAIN LOGIN".to_string())));
         assert_eq!(parse_smtp_line("250 OK"), Some((250, false, "OK".to_string())));
         assert_eq!(parse_smtp_line("zz"), None);
+    }
+
+    #[test]
+    fn reads_uid_from_response_codes() {
+        assert_eq!(resp_uid("[APPENDUID 1699 42] APPEND completed", "APPENDUID"), Some(42));
+        assert_eq!(resp_uid("[COPYUID 1699 7 31] Copy completed", "copyuid"), Some(31));
+        assert_eq!(resp_uid("[COPYUID 1 5:7 9:11] ok", "COPYUID"), None);
+        assert_eq!(resp_uid("Copy completed", "COPYUID"), None);
+        assert_eq!(resp_uid("[APPENDUID 1", "APPENDUID"), None);
     }
 }

@@ -251,6 +251,9 @@ export interface ImapAccount { email: string; host: string }
 export interface ImapFolder { name: string; label: string; role: string }
 export interface ImapRow { uid: number; from: string; subject: string; dateMs: number; unread: boolean; starred: boolean }
 export interface ImapPage { rows: ImapRow[]; next: number | null; total: number }
+/** Gdzie trafiła wiadomość po przeniesieniu (do cofnięcia). */
+export interface ImapActOut { folder?: string | null; uid?: number | null }
+
 export interface ImapMsg {
   uid: number; from: string; to: string; cc: string; subject: string; dateMs: number;
   messageId: string; references: string; replyTo: string;

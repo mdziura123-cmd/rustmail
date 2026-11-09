@@ -18,12 +18,13 @@ import { ImportDialog } from "./ImportDialog";
 import { ImapLogin } from "./ImapLogin";
 import { ImapListPane, ImapReader, ImapSidebarNav, toView, useImapView } from "./ImapPanes";
 import { ReceiveButton } from "./ReceiveButton";
-import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
+import { buildForward, buildNew, buildReply, escapeHtml, replyTarget, type ComposeInit } from "./replyLogic";
+import { sanitizeHtml } from "./sanitize";
 import { FOLDERS, type FolderId } from "./folders";
 import { StatusBar } from "./StatusBar";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
-import type { Account, AppInfo, AuthStatus, ImapAccount, ImapMsg, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import type { Account, AppInfo, AuthStatus, ImapAccount, ImapActOut, ImapMsg, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import { THEMES, isThemeId, resolveTheme, type ThemeId } from "./themes";
 import Titlebar from "./Titlebar";
 import "./themes.css";
@@ -560,6 +561,7 @@ export default function App() {
   const onComposeClosed = (draftSaved: boolean) => {
     setCompose(null);
     if (draftSaved) showToast("Wersja robocza zapisana.");
+    if (imapAccount) { if (draftSaved || imapRole === "drafts") imap.refresh(); return; }
     if (folder === "drafts" || draftSaved) void loadList(folder, null, false);
   };
 
@@ -777,27 +779,57 @@ export default function App() {
     imapAnchor.current = r.uid;
     setImapUid(r.uid);
   };
+  const imapAccountRef = useRef<string | null>(null);
+  imapAccountRef.current = imapAccount;
+  const MOVE_TEXT: Record<string, string> = {
+    trash: "Przeniesiono do kosza.", spam: "Przeniesiono do Spamu.", archive: "Zarchiwizowano.", inbox: "Przeniesiono do Odebranych.",
+  };
+  // Komunikat po przeniesieniu wiadomości; „Cofnij” jest dostępne, gdy serwer podał nowy numer wiadomości.
+  const imapMoved = (account: string, from: string, moved: { uid: number; out: ImapActOut }[], text: string) => {
+    const undoable = moved.filter((m) => m.out.folder && m.out.uid);
+    showToast(text, undoable.length === 0 ? undefined : () => {
+      void (async () => {
+        for (const m of undoable) {
+          try { await api.imapMove(account, m.out.folder as string, m.out.uid as number, from); } catch { /* pomijamy */ }
+        }
+        setToast(null);
+        if (imapAccountRef.current === account) void imap.refresh();
+      })();
+    });
+  };
+  const editImapDraft = (account: string, m: ImapMsg) => {
+    if (compose) { showToast("Najpierw zapisz lub zamknij redagowaną wiadomość."); return; }
+    const html = m.html ? sanitizeHtml(m.html) : escapeHtml(m.text).replace(/\r?\n/g, "<br>");
+    startCompose({
+      mode: "draft", to: m.to, cc: m.cc, bcc: "", subject: m.subject, html, threadId: null, inReplyTo: null,
+      references: m.references || null, draftId: String(m.uid),
+      note: m.attachments.length > 0 ? "Załączniki z tej wersji roboczej trzeba dodać ponownie." : undefined,
+    }, "imap:" + account);
+  };
   const imapBulk = async (action: string) => {
     if (!imapAccount) return;
     const account = imapAccount;
     const folderName = imap.folder;
     const uids = [...imapSel].slice(0, 50);
     if (uids.length === 0) return;
-    const done: number[] = [];
+    const done: { uid: number; out: ImapActOut }[] = [];
     let failed = 0;
     let lastError = "";
     for (const uid of uids) {
-      try { await api.imapAct(account, folderName, uid, action); done.push(uid); }
+      try { done.push({ uid, out: await api.imapAct(account, folderName, uid, action) }); }
       catch (e) { failed += 1; lastError = errText(e); }
     }
-    if (["trash", "spam", "archive", "inbox"].includes(action)) {
-      for (const uid of done) imap.remove(uid);
-      if (imapUid !== null && done.includes(imapUid)) setImapUid(null);
+    const isMove = ["trash", "spam", "archive", "inbox"].includes(action);
+    if (isMove) {
+      for (const d of done) imap.remove(d.uid);
+      if (imapUid !== null && done.some((d) => d.uid === imapUid)) setImapUid(null);
     } else {
-      for (const uid of done) imap.patch(uid, { unread: action === "unread" });
+      for (const d of done) imap.patch(d.uid, { unread: action === "unread" });
     }
     setImapSel(new Set());
-    showToast(`Gotowe (${done.length}).` + (failed ? ` Błędy: ${failed} – ${lastError}` : ""));
+    const text = `Gotowe (${done.length}).` + (failed ? ` Błędy: ${failed} – ${lastError}` : "");
+    if (isMove && done.length > 0) imapMoved(account, folderName, done, text);
+    else showToast(text);
   };
 
   const composeNode = compose ? (
@@ -880,6 +912,8 @@ export default function App() {
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
             {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0}
               onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
+              onEditDraft={(m) => editImapDraft(imapAccount, m)}
+              onMoved={(i) => imapMoved(imapAccount, i.folder, [{ uid: i.uid, out: i.out }], MOVE_TEXT[i.action] ?? "Gotowe.")}
               onChanged={(uid, p) => { if (p === "removed") { imap.remove(uid); setImapUid(null); } else imap.patch(uid, p); }} />}
           </>
         ) : (

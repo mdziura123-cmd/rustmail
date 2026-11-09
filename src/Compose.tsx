@@ -88,15 +88,17 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
   }, [to, cc, bcc, subject, init]);
 
   const saveDraft = useCallback(async (manual: boolean): Promise<boolean> => {
-    if (imapAcc) {
-      if (manual) setError("Wersje robocze nie są jeszcze dostępne dla kont IMAP.");
-      return false;
-    }
     if (saving.current) return false;
     saving.current = true;
     if (manual) setError(null);
     try {
-      const id = await api.saveDraft(build());
+      let id: string | null;
+      if (imapAcc) {
+        const uid = await api.imapSaveDraft(imapAcc, build(), draftRef.current ? Number(draftRef.current) : null);
+        id = uid > 0 ? String(uid) : null;
+      } else {
+        id = await api.saveDraft(build());
+      }
       draftRef.current = id;
       setDraftId(id);
       dirty.current = false;
@@ -124,6 +126,7 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
     try {
       if (imapAcc) {
         const res = await api.imapSend(imapAcc, build());
+        if (draftRef.current) api.imapDeleteDraft(imapAcc, Number(draftRef.current)).catch(() => {});
         dirty.current = false;
         backup(null);
         onSent({ threadId: "", warning: res.warning });
@@ -177,7 +180,10 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
   const discard = async () => {
     setError(null);
     try {
-      if (draftRef.current) await api.deleteDraft(draftRef.current);
+      if (draftRef.current) {
+        if (imapAcc) await api.imapDeleteDraft(imapAcc, Number(draftRef.current));
+        else await api.deleteDraft(draftRef.current);
+      }
       backup(null);
       onClose(false);
     } catch (e) {
@@ -201,14 +207,14 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
         <h2>{MODE_TITLE[init.mode]}</h2>
         <span className="status-text" aria-live="polite">{status}</span>
         <span className="grow" />
-        {!imapAcc && <button className="small" disabled={sending} onClick={() => void saveDraft(true)}>Zapisz wersję roboczą</button>}
+        <button className="small" disabled={sending} onClick={() => void saveDraft(true)}>Zapisz wersję roboczą</button>
         <button className="small" disabled={sending} onClick={() => void requestClose()}>Zamknij</button>
       </header>
 
       {confirmClose && (
         <div className="confirm" role="alertdialog">
           <span>Wiadomość ma niezapisane zmiany.</span>
-          {!imapAcc && <button className="small primary" onClick={() => void saveAndClose()}>Zapisz wersję roboczą</button>}
+          <button className="small primary" onClick={() => void saveAndClose()}>Zapisz wersję roboczą</button>
           <button className="small" onClick={() => { backup(null); onClose(Boolean(draftRef.current)); }}>Odrzuć zmiany</button>
           <button className="small" onClick={() => setConfirmClose(false)}>Wróć do edycji</button>
         </div>

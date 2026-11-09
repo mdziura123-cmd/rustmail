@@ -3,7 +3,7 @@ import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { ReceiveButton } from "./ReceiveButton";
 import { MessageBody } from "./MessageBody";
-import type { ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
+import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
 import { FOLDERS } from "./folders";
@@ -193,16 +193,22 @@ interface ReaderProps {
   onCompose: (kind: "reply" | "replyAll" | "forward", msg: ImapMsg) => void;
   /** Czy skróty klawiszowe otwartej wiadomości są włączone (wyłączone, gdy na liście są zaznaczone wiadomości). */
   keys?: boolean;
+  /** Po przeniesieniu wiadomości do innego folderu (kosz, spam, archiwum, skrzynka) – do komunikatu „Cofnij”. */
+  onMoved?: (info: { action: string; folder: string; uid: number; out: ImapActOut }) => void;
+  /** Otwarcie wersji roboczej do dalszej edycji. */
+  onEditDraft?: (msg: ImapMsg) => void;
   /** Wywoływane po zmianie wiadomości (przeczytana, gwiazdka, usunięta…). */
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged, onCompose, keys = true }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onMoved, onEditDraft, keys = true }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const changed = useRef(onChanged);
   changed.current = onChanged;
+  const onMovedRef = useRef(onMoved);
+  onMovedRef.current = onMoved;
 
   useEffect(() => {
     setMsg(null); setErr(null);
@@ -220,8 +226,13 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, k
     if (!msg) return;
     setErr(null);
     try {
-      await api.imapAct(account, folder, msg.uid, action);
-      if (["trash", "spam", "archive", "inbox"].includes(action)) { changed.current(msg.uid, "removed"); setMsg(null); return; }
+      const out = await api.imapAct(account, folder, msg.uid, action);
+      if (["trash", "spam", "archive", "inbox"].includes(action)) {
+        changed.current(msg.uid, "removed");
+        onMovedRef.current?.({ action, folder, uid: msg.uid, out });
+        setMsg(null);
+        return;
+      }
       const patch: Partial<ImapRow> = {};
       if (action === "read") patch.unread = false;
       if (action === "unread") patch.unread = true;
@@ -267,7 +278,8 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, k
           <header className="reader-head">
             <h2>{msg.subject || "(bez tematu)"}</h2>
             <div className="tools actions" role="toolbar" aria-label="Akcje na wiadomości">
-              <button className="primary" onClick={() => onCompose("reply", msg)}>Odpowiedz</button>
+              {role === "drafts" && onEditDraft && <button className="primary" onClick={() => onEditDraft(msg)}>Edytuj wersję roboczą</button>}
+              <button className={role === "drafts" ? "" : "primary"} onClick={() => onCompose("reply", msg)}>Odpowiedz</button>
               <button onClick={() => onCompose("replyAll", msg)}>Odpowiedz wszystkim</button>
               <button onClick={() => onCompose("forward", msg)}>Przekaż dalej</button>
               <span className="sep" />

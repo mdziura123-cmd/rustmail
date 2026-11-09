@@ -4,7 +4,7 @@ import type {
   Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
   SpamConfig, SpamLogEntry, SpamScanOutcome, SpamStatus, TrainItem,
-  ImapAccount, ImapFolder, ImapMsg, ImapPage,
+  ImapAccount, ImapActOut, ImapFolder, ImapMsg, ImapPage,
 } from "./types";
 
 /** Lista nie może wisieć w nieskończoność: po limicie czasu pokazujemy błąd zamiast pustego ekranu. */
@@ -112,7 +112,10 @@ export const api = {
       attachments: m.attachments.map((x) => ({ ...x, name: cleanDisplay(x.name, 150) })),
     } as ImapMsg;
   },
-  imapAct: (account: string, folder: string, uid: number, action: string) => invoke<void>("imap_act", { account, folder, uid, action }),
+  imapAct: (account: string, folder: string, uid: number, action: string) => invoke<ImapActOut>("imap_act", { account, folder, uid, action }),
+  imapMove: (account: string, folder: string, uid: number, target: string) => invoke<ImapActOut>("imap_move", { account, folder, uid, target }),
+  imapSaveDraft: (account: string, msg: OutgoingMessage, oldUid: number | null) => invoke<number>("imap_save_draft", { account, msg, oldUid }),
+  imapDeleteDraft: (account: string, uid: number) => invoke<void>("imap_delete_draft", { account, uid }),
   importLabel: (name: string) => invoke<string>("import_label", { name }),
   importMessage: (dataBase64: string, labelId: string) => invoke<string>("import_message", { dataBase64, labelId }),
   setThreadLabel: (id: string, label: string, add: boolean) =>

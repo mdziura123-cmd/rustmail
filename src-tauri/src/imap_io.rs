@@ -649,7 +649,7 @@ async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, Strin
 }
 
 #[tauri::command]
-pub async fn imap_act(account: String, folder: String, uid: u32, action: String) -> Result<(), String> {
+pub async fn imap_act(account: String, folder: String, uid: u32, action: String) -> Result<ActOut, String> {
     if uid == 0 {
         return Err("Niepoprawny numer wiadomości.".to_string());
     }
@@ -660,7 +660,42 @@ pub async fn imap_act(account: String, folder: String, uid: u32, action: String)
     res
 }
 
-async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Result<(), String> {
+/// Gdzie trafiła wiadomość po przeniesieniu (do cofnięcia). Pola puste, gdy serwer nie podał nowego numeru.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActOut {
+    pub folder: Option<String>,
+    pub uid: Option<u32>,
+}
+
+/// Przenosi wiadomość: najpierw kopia, dopiero po jej powodzeniu usunięcie oryginału – nic nie zginie po drodze.
+async fn move_msg(conn: &mut Conn, folder: &str, uid: u32, target: &str) -> Result<Option<u32>, String> {
+    conn.select(folder).await?;
+    let r = conn.ok(&format!("UID COPY {uid} {}", p::quote(target)?)).await?;
+    let new_uid = p::resp_uid(&r.text, "COPYUID");
+    conn.ok(&format!("UID STORE {uid} +FLAGS (\\Deleted)")).await?;
+    let _ = conn.cmd(&format!("UID EXPUNGE {uid}")).await;
+    Ok(new_uid)
+}
+
+/// Przenosi wiadomość do wskazanego folderu (np. cofnięcie usunięcia).
+#[tauri::command]
+pub async fn imap_move(account: String, folder: String, uid: u32, target: String) -> Result<ActOut, String> {
+    if uid == 0 {
+        return Err("Niepoprawny numer wiadomości.".to_string());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = async {
+        let new_uid = move_msg(&mut conn, &folder, uid, &target).await?;
+        Ok(ActOut { folder: Some(target.clone()), uid: new_uid })
+    }
+    .await;
+    conn.bye().await;
+    res
+}
+
+async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Result<ActOut, String> {
     let flag = |add: bool, f: &str| format!("UID STORE {uid} {}FLAGS ({f})", if add { "+" } else { "-" });
     match action {
         "read" | "unread" | "star" | "unstar" => {
@@ -672,7 +707,7 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
                 _ => flag(false, "\\Flagged"),
             };
             conn.ok(&cmd).await?;
-            Ok(())
+            Ok(ActOut::default())
         }
         "trash" | "spam" | "archive" | "inbox" => {
             let want = action;
@@ -693,12 +728,8 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
                 .ok_or_else(|| format!("Nie znaleziono folderu: {name_pl}."))?
                 .name
                 .clone();
-            conn.select(folder).await?;
-            // Najpierw kopia, dopiero po jej powodzeniu oznaczenie oryginału do usunięcia – nic nie zginie po drodze.
-            conn.ok(&format!("UID COPY {uid} {}", p::quote(&target)?)).await?;
-            conn.ok(&flag(true, "\\Deleted")).await?;
-            let _ = conn.cmd(&format!("UID EXPUNGE {uid}")).await;
-            Ok(())
+            let new_uid = move_msg(conn, folder, uid, &target).await?;
+            Ok(ActOut { folder: Some(target), uid: new_uid })
         }
         _ => Err("Nieznana akcja.".to_string()),
     }
@@ -873,9 +904,14 @@ async fn smtp_send(c: &Creds, rcpts: &[String], data: &[u8]) -> Result<(), Strin
 }
 
 async fn append_sent(conn: &mut Conn, folder: &str, raw: &[u8]) -> Result<(), String> {
+    append_msg(conn, folder, "\\Seen", raw).await.map(|_| ())
+}
+
+/// Dopisuje wiadomość do folderu. Zwraca jej numer UID, jeśli serwer go poda (rozszerzenie UIDPLUS).
+async fn append_msg(conn: &mut Conn, folder: &str, flags: &str, raw: &[u8]) -> Result<Option<u32>, String> {
     conn.n += 1;
     let tag = format!("A{:04}", conn.n);
-    conn.send(format!("{tag} APPEND {} (\\Seen) {{{}}}\r\n", p::quote(folder)?, raw.len()).as_bytes()).await?;
+    conn.send(format!("{tag} APPEND {} ({flags}) {{{}}}\r\n", p::quote(folder)?, raw.len()).as_bytes()).await?;
     let want = format!("{tag} ");
     loop {
         let r = conn.read_resp().await?;
@@ -891,10 +927,75 @@ async fn append_sent(conn: &mut Conn, folder: &str, raw: &[u8]) -> Result<(), St
     conn.send(&data).await?;
     let r = conn.collect(&tag).await?;
     if r.ok {
-        Ok(())
+        Ok(p::resp_uid(&r.text, "APPENDUID"))
     } else {
-        Err(format!("Serwer odrzucił zapis do Wysłanych: {}", short(&r.text)))
+        Err(format!("Serwer odrzucił zapis do folderu: {}", short(&r.text)))
     }
+}
+
+// ---------- Wersje robocze (folder „Wersje robocze” na serwerze) ----------
+
+async fn drafts_folder(conn: &mut Conn) -> Result<String, String> {
+    let folders = list_folders(conn).await?;
+    folders.iter().find(|f| f.role == "drafts").map(|f| f.name.clone()).ok_or_else(|| "Nie znaleziono folderu Wersje robocze na serwerze.".to_string())
+}
+
+async fn delete_uid(conn: &mut Conn, folder: &str, uid: u32) -> Result<(), String> {
+    conn.select(folder).await?;
+    conn.ok(&format!("UID STORE {uid} +FLAGS (\\Deleted)")).await?;
+    let _ = conn.cmd(&format!("UID EXPUNGE {uid}")).await;
+    Ok(())
+}
+
+/// Zapisuje wersję roboczą na serwerze (zastępując poprzednią, jeśli podano jej numer). Zwraca numer UID (0 = nieznany).
+#[tauri::command]
+pub async fn imap_save_draft(account: String, msg: crate::commands::OutgoingDto, old_uid: Option<u32>) -> Result<u32, String> {
+    let creds = load(&account)?;
+    let body = crate::commands::prepare(&msg, &creds.email, false)?;
+    let token = format!("{}-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0), std::process::id());
+    let mut raw = format!("X-RustMail-Draft: {token}\r\n").into_bytes();
+    raw.extend_from_slice(&body);
+    let mut conn = open(&creds).await?;
+    let res = async {
+        let folder = drafts_folder(&mut conn).await?;
+        let mut uid = append_msg(&mut conn, &folder, "\\Draft \\Seen", &raw).await?;
+        if uid.is_none() {
+            // Serwer nie podał numeru – znajdujemy zapisaną wersję po własnym nagłówku.
+            conn.select(&folder).await?;
+            let r = conn.ok(&format!("UID SEARCH HEADER X-RustMail-Draft {}", p::quote(&token)?)).await?;
+            for u in &r.untagged {
+                if let Some(rest) = u.head.strip_prefix("* SEARCH") {
+                    uid = rest.split_whitespace().filter_map(|x| x.parse::<u32>().ok()).max();
+                }
+            }
+        }
+        if let (Some(old), Some(new)) = (old_uid, uid) {
+            if old != new && old > 0 {
+                let _ = delete_uid(&mut conn, &folder, old).await;
+            }
+        }
+        Ok(uid.unwrap_or(0))
+    }
+    .await;
+    conn.bye().await;
+    res
+}
+
+/// Usuwa wersję roboczą z serwera (po wysłaniu albo odrzuceniu).
+#[tauri::command]
+pub async fn imap_delete_draft(account: String, uid: u32) -> Result<(), String> {
+    if uid == 0 {
+        return Ok(());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = async {
+        let folder = drafts_folder(&mut conn).await?;
+        delete_uid(&mut conn, &folder, uid).await
+    }
+    .await;
+    conn.bye().await;
+    res
 }
 
 #[derive(Serialize)]
