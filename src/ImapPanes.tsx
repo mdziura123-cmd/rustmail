@@ -3,6 +3,7 @@ import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { MessageBody } from "./MessageBody";
 import type { ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
+import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
 import { FOLDERS } from "./folders";
 
@@ -236,6 +237,31 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose }:
       changed.current(msg.uid, patch);
     } catch (e) { setErr(errText(e)); }
   };
+
+  // Skróty klawiszowe dla otwartej wiadomości IMAP (działają tylko na tym koncie i tej wiadomości).
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    if (!msg || isTypingTarget(e.target as HTMLElement | null) || document.querySelector(".modal-back")) return;
+    const cmd = commandFor(e);
+    if (!cmd) return;
+    const run = (f: () => void) => { e.preventDefault(); f(); };
+    switch (cmd) {
+      case "trash": run(() => void act(role === "trash" ? "inbox" : "trash")); break;
+      case "spam": run(() => void act(role === "spam" ? "inbox" : "spam")); break;
+      case "archive": if (role === "inbox") run(() => void act("archive")); break;
+      case "read": run(() => void act("read")); break;
+      case "unread": run(() => void act("unread")); break;
+      case "star": run(() => void act(msg.starred ? "unstar" : "star")); break;
+      case "reply": run(() => onCompose("reply", msg)); break;
+      case "replyAll": run(() => onCompose("replyAll", msg)); break;
+      case "forward": run(() => onCompose("forward", msg)); break;
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   return (
     <main className="reader" aria-label="Wiadomość">

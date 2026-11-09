@@ -435,9 +435,19 @@ export default function App() {
   // ---------- Skróty klawiszowe ----------
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e: KeyboardEvent) => {
-    // Skróty dotyczą tylko wiadomości Gmaila. Na koncie IMAP (lub gdy w widoku wspólnym otwarta jest wiadomość IMAP)
+    // Skróty tej funkcji dotyczą wiadomości Gmaila. Na koncie IMAP (lub gdy w widoku wspólnym otwarta jest wiadomość IMAP)
     // nie robią nic, żeby nie zmienić wiadomości na innym koncie.
-    if (view.startsWith("imap:") || (view === "all" && imapOpenItem)) return;
+    if (view.startsWith("imap:")) {
+      // j / k na liście konta IMAP; resztą (usuń, spam, odpowiedz…) zajmuje się otwarta wiadomość.
+      const c = commandFor(e);
+      if ((c === "next" || c === "prev") && !isTypingTarget(e.target as HTMLElement | null) && !compose && !document.querySelector(".modal-back")) {
+        const i = imap.rows.findIndex((r) => r.uid === imapUid);
+        const n = imap.rows[c === "next" ? (i < 0 ? 0 : Math.min(i + 1, imap.rows.length - 1)) : (i <= 0 ? 0 : i - 1)];
+        if (n) { e.preventDefault(); setImapUid(n.uid); }
+      }
+      return;
+    }
+    if (view === "all" && imapOpenItem) return;
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
