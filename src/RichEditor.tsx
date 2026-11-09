@@ -1,17 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import { FONTS, isSafeHref, SIZES, sanitizeHtml } from "./sanitize";
 
+/** Operacje na treści edytora potrzebne do sprawdzania pisowni. */
+export interface EditorApi {
+  /** Zamienia całe słowo `from` na `to` w tekście edytora. */
+  replaceWord: (from: string, to: string) => void;
+  /** Podkreśla podane słowa (jeśli przeglądarka obsługuje CSS Custom Highlight API). */
+  highlight: (words: string[]) => void;
+}
+
 interface Props {
   initialHtml: string;
   onChange: (html: string) => void;
   disabled?: boolean;
+  apiRef?: { current: EditorApi | null };
 }
+
+const WORD_CH = "\\p{L}\\p{M}\\p{N}_'’";
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const wordRe = (w: string) => new RegExp(`(?<![${WORD_CH}])${esc(w)}(?![${WORD_CH}])`, "gu");
+
+type HighlightApi = { highlights: Map<string, unknown> };
 
 /**
  * Prosty edytor tekstu sformatowanego (pogrubienie, kursywa, podkreślenie, listy, linki).
  * Wklejany tekst jest zawsze zwykłym tekstem, a upuszczanie plików/HTML jest blokowane.
  */
-export function RichEditor({ initialHtml, onChange, disabled }: Props) {
+export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -37,6 +52,55 @@ export function RichEditor({ initialHtml, onChange, disabled }: Props) {
   }, []);
 
   const emit = () => onChange(ref.current?.innerHTML ?? "");
+
+  useEffect(() => {
+    if (!apiRef) return;
+    const textNodes = () => {
+      const out: Text[] = [];
+      if (!ref.current) return out;
+      const tw = document.createTreeWalker(ref.current, NodeFilter.SHOW_TEXT);
+      for (let n = tw.nextNode(); n; n = tw.nextNode()) out.push(n as Text);
+      return out;
+    };
+    apiRef.current = {
+      replaceWord: (from, to) => {
+        const re = wordRe(from);
+        for (const t of textNodes()) {
+          if (t.parentElement?.closest("blockquote")) continue;
+          const v = t.nodeValue ?? "";
+          re.lastIndex = 0;
+          if (re.test(v)) { re.lastIndex = 0; t.nodeValue = v.replace(re, () => to); }
+        }
+        onChange(ref.current?.innerHTML ?? "");
+      },
+      highlight: (words) => {
+        const css = (typeof CSS !== "undefined" ? (CSS as unknown as HighlightApi) : null);
+        const H = (window as unknown as { Highlight?: new (...r: Range[]) => unknown }).Highlight;
+        if (!css || !css.highlights || !H) return;
+        if (words.length === 0) { css.highlights.delete("rm-spell"); return; }
+        const ranges: Range[] = [];
+        for (const w of words) {
+          const re = wordRe(w);
+          for (const t of textNodes()) {
+            if (t.parentElement?.closest("blockquote")) continue;
+            for (const m of (t.nodeValue ?? "").matchAll(re)) {
+              const r = document.createRange();
+              r.setStart(t, m.index ?? 0);
+              r.setEnd(t, (m.index ?? 0) + m[0].length);
+              ranges.push(r);
+            }
+          }
+        }
+        css.highlights.set("rm-spell", new H(...ranges));
+      },
+    };
+    return () => {
+      apiRef.current = null;
+      const css = (typeof CSS !== "undefined" ? (CSS as unknown as HighlightApi) : null);
+      css?.highlights?.delete("rm-spell");
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const cmd = (name: string, value?: string) => {
     ref.current?.focus();

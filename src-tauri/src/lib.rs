@@ -21,6 +21,7 @@ mod imap_proto;
 mod spam;
 mod spam_io;
 mod store;
+mod translate;
 mod update;
 
 pub fn run() {
@@ -96,6 +97,7 @@ pub fn run() {
             imap_io::imap_send,
             imap_io::imap_download,
             imap_io::imap_poll,
+            translate::translate_text,
             imap_io::imap_move,
             imap_io::imap_save_draft,
             imap_io::imap_delete_draft,

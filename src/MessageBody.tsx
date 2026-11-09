@@ -3,6 +3,7 @@ import { api, errText } from "./api";
 import { analyzeLink, type LinkAnalysis } from "./linkCheck";
 import { sanitizeMail } from "./mailHtml";
 import { splitQuoted } from "./quoteTrim";
+import { Translator } from "./Translator";
 import type { MessageView } from "./types";
 
 const TRUST_KEY = "rm.trusted";
@@ -23,6 +24,15 @@ interface Pending extends LinkAnalysis {
 
 /** Treść wiadomości: oczyszczony HTML (obrazy zablokowane do czasu zgody) albo zwykły tekst. */
 export function MessageBody({ m, strict }: { m: MessageView; strict: boolean }) {
+  return (
+    <>
+      <Translator key={m.id} m={m} />
+      <MessageContent m={m} strict={strict} />
+    </>
+  );
+}
+
+function MessageContent({ m, strict }: { m: MessageView; strict: boolean }) {
   const sender = m.fromEmail.toLowerCase();
   const [trusted, setTrusted] = useState<string[]>(loadTrusted);
   const isTrusted = !strict && !m.mine && trusted.includes(sender);

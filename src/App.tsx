@@ -32,7 +32,7 @@ import "./styles.css";
 import "./compose.css";
 
 type Theme = ThemeId;
-const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent", view: "rm.view" };
+const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent", view: "rm.view", active: "rm.activeonly" };
 const STAR = "M12 3l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.8 6.1 21l1.2-6.5L2.5 9.9 9.1 9z";
 
 function load(key: string, fallback: string): string {
@@ -144,6 +144,8 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
+  // Domyślnie poczta jest sprawdzana w tle tylko dla konta, na którym pracujesz.
+  const [activeOnly, setActiveOnly] = useState(() => load(LS.active, "1") === "1");
   const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "0") === "1");
   const [stats, setStats] = useState<{ inbox: number; spam: number; labels: LabelInfo[] }>({ inbox: 0, spam: 0, labels: [] });
   const [newLabel, setNewLabel] = useState<string | null>(null);
@@ -680,7 +682,14 @@ export default function App() {
   settingsRef.current = { notify: notifyOn, content: notifyContent };
   const reloadRef = useRef<() => void>(() => {});
   reloadRef.current = () => void loadList(folderRef.current, null, false);
+  const bgRef = useRef({ activeOnly, view });
+  bgRef.current = { activeOnly, view };
   const pollOnce = useCallback(async () => {
+    if (bgRef.current.activeOnly && bgRef.current.view !== "gmail") {
+      // Gmail jest nieaktywny: nie sprawdzamy poczty, tylko wysyłamy ewentualną kolejkę.
+      try { await flushQueue(false); } catch { /* ignorujemy */ }
+      return;
+    }
     try {
       const r = await api.pollMail(settingsRef.current.notify, settingsRef.current.content);
       setStats({ inbox: r.inboxUnread, spam: r.spamUnread, labels: r.labels });
@@ -715,12 +724,13 @@ export default function App() {
     void pollOnce();
     const t = window.setInterval(() => void pollOnce(), 60_000);
     return () => window.clearInterval(t);
-  }, [email, pollOnce]);
+  }, [email, pollOnce, view, activeOnly]);
   // Konta IMAP (np. WP): filtr spamu i powiadomienia, co minutę (niezależnie od Gmaila).
   const imapRef = useRef(imapAccs);
   imapRef.current = imapAccs;
   const imapPollOnce = useCallback(async () => {
     for (const a of imapRef.current) {
+      if (bgRef.current.activeOnly && bgRef.current.view !== "imap:" + a.email) continue;
       try {
         const r = await api.imapPoll(a.email, settingsRef.current.notify, settingsRef.current.content);
         if (r.moved > 0) {
@@ -736,7 +746,7 @@ export default function App() {
     void imapPollOnce();
     const t = window.setInterval(() => void imapPollOnce(), 60_000);
     return () => window.clearInterval(t);
-  }, [imapKey, imapPollOnce]);
+  }, [imapKey, imapPollOnce, view, activeOnly]);
   useEffect(() => {
     if (imapTick > 0 && view !== "gmail") void imap.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1186,6 +1196,7 @@ export default function App() {
       )}
       {settingsOpen && (
         <SettingsDialog notify={notifyOn} content={notifyContent} gmail={accounts.length ? accounts : email ? [{ email, active: true }] : []} imap={imapAccs} busy={signingIn}
+          activeOnly={activeOnly} onActiveOnly={(on) => { setActiveOnly(on); save(LS.active, on ? "1" : "0"); }}
           onSignOut={() => { setSettingsOpen(false); void signOut(); }} onSignOutImap={(a) => { setSettingsOpen(false); void signOutImap(a); }}
           autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}
           onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}

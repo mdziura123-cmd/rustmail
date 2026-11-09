@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
-import { RichEditor } from "./RichEditor";
+import { RichEditor, type EditorApi } from "./RichEditor";
+import { SpellBar } from "./SpellBar";
 import type { ComposeInit } from "./replyLogic";
 import { sanitizeHtml } from "./sanitize";
 import type { OutAttachment, OutgoingMessage } from "./types";
@@ -67,6 +68,8 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
   const saving = useRef(false);
   const draftRef = useRef<string | null>(init.draftId);
   const fileRef = useRef<HTMLInputElement>(null);
+  const editorApi = useRef<EditorApi | null>(null);
+  const [spellTick, setSpellTick] = useState(0);
 
   const build = useCallback((): OutgoingMessage => ({
     to, cc, bcc, subject,
@@ -250,7 +253,8 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
 
       {init.note && <p className="note">{init.note}</p>}
 
-      <RichEditor initialHtml={init.html} disabled={sending} onChange={(h) => { html.current = h; markDirty(); }} />
+      <RichEditor initialHtml={init.html} disabled={sending} apiRef={editorApi} onChange={(h) => { html.current = h; markDirty(); setSpellTick((t) => t + 1); }} />
+      <SpellBar getHtml={() => html.current} tick={spellTick} api={editorApi} />
 
       {atts.length > 0 && (
         <ul className="att-list" aria-label="Załączniki">

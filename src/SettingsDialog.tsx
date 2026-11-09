@@ -9,6 +9,8 @@ interface Props {
   gmail: Account[];
   imap: ImapAccount[];
   busy: boolean;
+  activeOnly: boolean;
+  onActiveOnly: (on: boolean) => void;
   onSignOut: () => void;
   onSignOutImap: (email: string) => void;
   notify: boolean;
@@ -78,6 +80,10 @@ export function SettingsDialog(p: Props) {
                 <label className="check">
                   <input type="checkbox" checked={p.content} disabled={!p.notify} onChange={(e) => p.onContent(e.target.checked)} />
                   Pokazuj w powiadomieniu nadawcę i temat
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={p.activeOnly} onChange={(e) => p.onActiveOnly(e.target.checked)} />
+                  Sprawdzaj pocztę w tle tylko na koncie, na którym pracuję
                 </label>
                 <p className="hint">
                   Domyślnie powiadomienie mówi tylko, że przyszła nowa poczta. Treść wiadomości z ostrzeżeniem nigdy nie jest pokazywana.
