@@ -3,6 +3,36 @@ import { api, errText } from "./api";
 import { MessageBody } from "./MessageBody";
 import type { ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { fmtDate, fmtFull } from "./util";
+import { FOLDERS } from "./folders";
+
+const FOLDER_ICON = Object.fromEntries(FOLDERS.map((f) => [f.id, f])) as Record<string, (typeof FOLDERS)[number]>;
+const OTHER_ICON = "M3 7h7l2 2h9v10H3z";
+
+function Icon({ d }: { d: string }) {
+  return (
+    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+/** Polskie nazwy i ikony jak w Gmailu. Pierwszy folder danej roli dostaje nazwę z Gmaila, kolejne zachowują własną. */
+export function folderDisplay(folders: ImapFolder[]): Record<string, { label: string; icon: string }> {
+  const out: Record<string, { label: string; icon: string }> = {};
+  const used = new Set<string>();
+  for (const f of folders) {
+    let role = f.role;
+    if (role === "other" && /(^|\/)(archive|archiwum)$/i.test(f.name)) role = "archive";
+    const std = FOLDER_ICON[role];
+    if (std && !used.has(role)) {
+      used.add(role);
+      out[f.name] = { label: std.label, icon: std.icon };
+    } else {
+      out[f.name] = { label: f.label.replace(/\//g, " › "), icon: std ? std.icon : OTHER_ICON };
+    }
+  }
+  return out;
+}
 
 const emailOf = (from: string) => (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
@@ -89,19 +119,23 @@ export function useImapInboxes(accounts: string[], enabled: boolean) {
 export function ImapSidebarNav({ imap }: { imap: ImapView }) {
   return (
     <>
-      {imap.folders.map((f) => (
-        <button key={f.name} className={"folder" + (f.name === imap.folder ? " active" : "")} onClick={() => imap.pick(f.name)}
-          aria-current={f.name === imap.folder}>
-          <span>{f.label}</span>
-        </button>
-      ))}
+      {imap.folders.map((f) => {
+        const d = folderDisplay(imap.folders)[f.name];
+        return (
+          <button key={f.name} className={"folder" + (f.name === imap.folder ? " active" : "")} onClick={() => imap.pick(f.name)}
+            aria-current={f.name === imap.folder}>
+            <Icon d={d.icon} />
+            <span>{d.label}</span>
+          </button>
+        );
+      })}
       {imap.folders.length === 0 && !imap.loading && !imap.err && <p className="hint pad">Brak folderów.</p>}
     </>
   );
 }
 
 export function ImapListPane({ imap, openUid, onOpen }: { imap: ImapView; openUid: number | null; onOpen: (r: ImapRow) => void }) {
-  const label = imap.folders.find((f) => f.name === imap.folder)?.label ?? "";
+  const label = folderDisplay(imap.folders)[imap.folder]?.label ?? "";
   return (
     <section className="list" aria-label="Lista wiadomości">
       <header className="list-head">
