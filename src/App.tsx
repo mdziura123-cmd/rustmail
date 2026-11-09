@@ -16,13 +16,13 @@ import { SignatureDialog } from "./SignatureDialog";
 import { SpamDialog } from "./SpamDialog";
 import { ImportDialog } from "./ImportDialog";
 import { ImapLogin } from "./ImapLogin";
-import { ImapListPane, ImapReader, ImapSidebarNav, useImapInboxes, useImapView } from "./ImapPanes";
+import { ImapListPane, ImapReader, ImapSidebarNav, toView, useImapInboxes, useImapView } from "./ImapPanes";
 import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
 import { UpdateBanner } from "./UpdateBanner";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
-import type { Account, AppInfo, AuthStatus, ImapAccount, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import type { Account, AppInfo, AuthStatus, ImapAccount, ImapMsg, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import { THEMES, isThemeId, resolveTheme, type ThemeId } from "./themes";
 import Titlebar from "./Titlebar";
 import "./themes.css";
@@ -47,7 +47,7 @@ const ACTION_DONE: Partial<Record<ThreadAction, string>> = {
   spam: "Oznaczono jako spam.", notspam: "Oznaczono jako niebędące spamem.",
   trash: "Przeniesiono do kosza.", untrash: "Przywrócono z kosza.",
 };
-interface ComposeState { key: number; init: ComposeInit }
+interface ComposeState { key: number; init: ComposeInit; from: string }
 interface Toast { key: number; text: string; undo?: () => void }
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -248,13 +248,13 @@ export default function App() {
     }
   }, [needsReauth]);
 
-  const startCompose = (init: ComposeInit) => {
+  const startCompose = (init: ComposeInit, from?: string) => {
     if (compose) {
       showToast("Najpierw zapisz lub zamknij redagowaną wiadomość.");
       return;
     }
     composeKey.current += 1;
-    setCompose({ key: composeKey.current, init });
+    setCompose({ key: composeKey.current, init, from: from ?? (imapAccount ? "imap:" + imapAccount : "gmail") });
   };
 
   const openThread = async (t: ThreadSummary) => {
@@ -302,6 +302,14 @@ export default function App() {
     if (!detail || !email) return;
     const init = buildReply(detail.messages, detail.subject, email, all, signature, detail.id);
     if (init) startCompose(init);
+  };
+  const composeFromImap = (account: string, kind: "reply" | "replyAll" | "forward", m: ImapMsg) => {
+    if (compose) { showToast("Najpierw zapisz lub zamknij redagowaną wiadomość."); return; }
+    const v = toView(m);
+    const init = kind === "forward"
+      ? buildForward([v], m.subject, account, signature, fmtFull)
+      : buildReply([v], m.subject, account, kind === "replyAll", signature, "");
+    if (init) startCompose(init, "imap:" + account);
   };
   const forward = () => {
     if (!detail || !email) return;
@@ -498,9 +506,10 @@ export default function App() {
     void loadList(folder, null, false);
   };
 
-  const onSent = (info: { threadId: string }) => {
+  const onSent = (info: { threadId: string; warning?: string | null }) => {
     setCompose(null);
-    showToast("Wiadomość wysłana.");
+    showToast(info.warning ? info.warning : "Wiadomość wysłana.");
+    if (imapAccount) imap.refresh();
     void loadList(folder, null, false);
     if (info.threadId && info.threadId === openId) void loadDetail(info.threadId);
   };
@@ -687,6 +696,10 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [email, syncOnce]);
 
+  const composeNode = compose ? (
+    <Compose key={compose.key} init={compose.init} from={compose.from} onSent={onSent} onQueued={onQueued} onClose={onComposeClosed}
+      senders={email ? [{ id: "gmail", label: email }, ...imapAccs.map((a) => ({ id: "imap:" + a.email, label: a.email }))] : undefined} />
+  ) : null;
   const unified = view === "all" && folder === "inbox" && !searchTerm;
   type Item = { k: "g"; ts: number; t: ThreadSummary } | { k: "i"; ts: number; i: { account: string; row: ImapRow } };
   const merged: Item[] = [
@@ -769,8 +782,9 @@ export default function App() {
           <>
             <ImapListPane imap={imap} openUid={imapUid} onOpen={(row) => setImapUid(row.uid)} />
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
-            <ImapReader account={imapAccount} folder={imap.folder} role={imap.folders.find((f) => f.name === imap.folder)?.role ?? "other"} uid={imapUid}
-              onChanged={(uid, p) => { if (p === "removed") { imap.remove(uid); setImapUid(null); } else imap.patch(uid, p); }} />
+            {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imap.folders.find((f) => f.name === imap.folder)?.role ?? "other"} uid={imapUid}
+              onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
+              onChanged={(uid, p) => { if (p === "removed") { imap.remove(uid); setImapUid(null); } else imap.patch(uid, p); }} />}
           </>
         ) : (
         <>
@@ -895,8 +909,9 @@ export default function App() {
 
         <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
 
-        {unified && imapOpenItem ? (
+        {unified && imapOpenItem && !compose ? (
           <ImapReader account={imapOpenItem.account} folder="INBOX" role="inbox" uid={imapOpenItem.uid}
+            onCompose={(k, m) => composeFromImap(imapOpenItem.account, k, m)}
             onChanged={(uid, p) => { if (p === "removed") { inboxes.remove(imapOpenItem.account, uid); setImapOpenItem(null); } else inboxes.patch(imapOpenItem.account, uid, p); }} />
         ) : (
         <main className="reader" aria-label="Konwersacja">
@@ -922,7 +937,7 @@ export default function App() {
           )}
           {authError && email && <p className="error pad" role="alert">{authError}</p>}
           {email && compose ? (
-            <Compose key={compose.key} init={compose.init} onSent={onSent} onQueued={onQueued} onClose={onComposeClosed} />
+            composeNode
           ) : !auth ? (
             <div className="empty"><p>Wczytywanie…</p></div>
           ) : !email ? (

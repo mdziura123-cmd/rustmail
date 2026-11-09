@@ -92,6 +92,7 @@ pub fn run() {
             imap_io::imap_get,
             imap_io::imap_act,
             imap_io::imap_search,
+            imap_io::imap_send,
             imap_io::imap_counts,
             commands::import_label,
             commands::import_message,

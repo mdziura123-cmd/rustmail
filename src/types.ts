@@ -253,5 +253,6 @@ export interface ImapRow { uid: number; from: string; subject: string; dateMs: n
 export interface ImapPage { rows: ImapRow[]; next: number | null; total: number }
 export interface ImapMsg {
   uid: number; from: string; to: string; cc: string; subject: string; dateMs: number;
+  messageId: string; references: string; replyTo: string;
   text: string; html: string; attachments: Attachment[]; unread: boolean; starred: boolean;
 }

@@ -12,7 +12,10 @@ const AUTOSAVE_MS = 20000;
 
 interface Props {
   init: ComposeInit;
-  onSent: (info: { threadId: string }) => void;
+  onSent: (info: { threadId: string; warning?: string | null }) => void;
+  /** Konto nadawcy: "gmail" albo "imap:adres". */
+  from?: string;
+  senders?: { id: string; label: string }[];
   onQueued: () => void;
   onClose: (draftSaved: boolean) => void;
 }
@@ -44,7 +47,9 @@ function backup(value: unknown | null) {
   } catch { /* brak dostępu do pamięci – kopia lokalna jest dodatkiem */ }
 }
 
-export function Compose({ init, onSent, onQueued, onClose }: Props) {
+export function Compose({ init, onSent, onQueued, onClose, from: fromProp, senders }: Props) {
+  const [from, setFrom] = useState(fromProp ?? "gmail");
+  const imapAcc = from.startsWith("imap:") ? from.slice(5) : null;
   const [to, setTo] = useState(init.to);
   const [cc, setCc] = useState(init.cc);
   const [bcc, setBcc] = useState(init.bcc);
@@ -83,6 +88,10 @@ export function Compose({ init, onSent, onQueued, onClose }: Props) {
   }, [to, cc, bcc, subject, init]);
 
   const saveDraft = useCallback(async (manual: boolean): Promise<boolean> => {
+    if (imapAcc) {
+      if (manual) setError("Wersje robocze nie są jeszcze dostępne dla kont IMAP.");
+      return false;
+    }
     if (saving.current) return false;
     saving.current = true;
     if (manual) setError(null);
@@ -101,7 +110,7 @@ export function Compose({ init, onSent, onQueued, onClose }: Props) {
     } finally {
       saving.current = false;
     }
-  }, [build]);
+  }, [build, imapAcc]);
 
   // Automatyczny zapis co kilkanaście sekund, tylko gdy coś się zmieniło.
   useEffect(() => {
@@ -113,6 +122,13 @@ export function Compose({ init, onSent, onQueued, onClose }: Props) {
     setError(null);
     setSending(true);
     try {
+      if (imapAcc) {
+        const res = await api.imapSend(imapAcc, build());
+        dirty.current = false;
+        backup(null);
+        onSent({ threadId: "", warning: res.warning });
+        return;
+      }
       const info = await api.sendMessage(build());
       dirty.current = false;
       backup(null);
@@ -185,20 +201,27 @@ export function Compose({ init, onSent, onQueued, onClose }: Props) {
         <h2>{MODE_TITLE[init.mode]}</h2>
         <span className="status-text" aria-live="polite">{status}</span>
         <span className="grow" />
-        <button className="small" disabled={sending} onClick={() => void saveDraft(true)}>Zapisz wersję roboczą</button>
+        {!imapAcc && <button className="small" disabled={sending} onClick={() => void saveDraft(true)}>Zapisz wersję roboczą</button>}
         <button className="small" disabled={sending} onClick={() => void requestClose()}>Zamknij</button>
       </header>
 
       {confirmClose && (
         <div className="confirm" role="alertdialog">
           <span>Wiadomość ma niezapisane zmiany.</span>
-          <button className="small primary" onClick={() => void saveAndClose()}>Zapisz wersję roboczą</button>
+          {!imapAcc && <button className="small primary" onClick={() => void saveAndClose()}>Zapisz wersję roboczą</button>}
           <button className="small" onClick={() => { backup(null); onClose(Boolean(draftRef.current)); }}>Odrzuć zmiany</button>
           <button className="small" onClick={() => setConfirmClose(false)}>Wróć do edycji</button>
         </div>
       )}
 
       <div className="fields">
+        {senders && senders.length > 1 && init.mode === "new" && (
+          <label><span>Od</span>
+            <select value={from} disabled={sending} onChange={(e) => { setFrom(e.target.value); markDirty(); }}>
+              {senders.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </label>
+        )}
         <label><span>Do</span>
           <input value={to} onChange={(e) => { setTo(e.target.value); markDirty(); }} placeholder="adres@example.com, drugi@example.com" disabled={sending} />
         </label>

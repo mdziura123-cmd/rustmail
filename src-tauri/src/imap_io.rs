@@ -209,20 +209,24 @@ impl Conn {
     }
 }
 
-async fn open(c: &Creds) -> Result<Conn, String> {
-    if !p::valid_host(&c.host) {
-        return Err("Niepoprawna nazwa serwera IMAP.".to_string());
+async fn tls_connect(host: &str, port: u16) -> Result<TlsStream<TcpStream>, String> {
+    if !p::valid_host(host) {
+        return Err("Niepoprawna nazwa serwera.".to_string());
     }
-    let tcp = match tokio::time::timeout(Duration::from_secs(15), TcpStream::connect((c.host.as_str(), 993u16))).await {
+    let tcp = match tokio::time::timeout(Duration::from_secs(15), TcpStream::connect((host, port))).await {
         Ok(Ok(s)) => s,
-        Ok(Err(e)) => return Err(format!("Nie można połączyć z serwerem {}: {e}", c.host)),
-        Err(_) => return Err(format!("Serwer {} nie odpowiada.", c.host)),
+        Ok(Err(e)) => return Err(format!("Nie można połączyć z serwerem {host}: {e}")),
+        Err(_) => return Err(format!("Serwer {host} nie odpowiada.")),
     };
-    let name = ServerName::try_from(c.host.clone()).map_err(|_| "Niepoprawna nazwa serwera.".to_string())?;
-    let tls = TlsConnector::from(tls_config()?)
+    let name = ServerName::try_from(host.to_string()).map_err(|_| "Niepoprawna nazwa serwera.".to_string())?;
+    TlsConnector::from(tls_config()?)
         .connect(name, tcp)
         .await
-        .map_err(|e| format!("Błąd bezpiecznego połączenia (TLS) z {}: {e}", c.host))?;
+        .map_err(|e| format!("Błąd bezpiecznego połączenia (TLS) z {host}: {e}"))
+}
+
+async fn open(c: &Creds) -> Result<Conn, String> {
+    let tls = tls_connect(&c.host, 993).await?;
     let (r, w) = tokio::io::split(tls);
     let mut conn = Conn { r: BufReader::new(r), w, n: 0 };
     let greet = conn.read_resp().await?;
@@ -494,6 +498,9 @@ pub struct Msg {
     pub cc: String,
     pub subject: String,
     pub date_ms: i64,
+    pub message_id: String,
+    pub references: String,
+    pub reply_to: String,
     pub text: String,
     pub html: String,
     pub attachments: Vec<Att>,
@@ -560,6 +567,9 @@ async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, Strin
         cc: clip(h.get_first_value("Cc").unwrap_or_default(), 500),
         subject: clip(h.get_first_value("Subject").unwrap_or_default(), 300),
         date_ms: date_ms(h.get_first_value("Date")),
+        message_id: clip(h.get_first_value("Message-ID").unwrap_or_default(), 300),
+        references: clip(h.get_first_value("References").unwrap_or_default(), 2000),
+        reply_to: clip(h.get_first_value("Reply-To").unwrap_or_default(), 300),
         text: text.chars().take(500_000).collect(),
         html: html.chars().take(1_500_000).collect(),
         attachments: atts,
@@ -625,4 +635,163 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
         }
         _ => Err("Nieznana akcja.".to_string()),
     }
+}
+
+// ---------- Wysyłanie (SMTP, port 465 z szyfrowaniem) ----------
+
+struct Smtp {
+    r: BufReader<ReadHalf<TlsStream<TcpStream>>>,
+    w: WriteHalf<TlsStream<TcpStream>>,
+}
+
+impl Smtp {
+    async fn reply(&mut self) -> Result<(u16, String), String> {
+        let mut text = String::new();
+        loop {
+            let mut buf: Vec<u8> = Vec::new();
+            let n = tmo(IO_TIMEOUT, self.r.read_until(b'\n', &mut buf), "Odczyt z serwera SMTP").await?;
+            if n == 0 {
+                return Err("Serwer SMTP zamknął połączenie.".to_string());
+            }
+            let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+            let Some((code, more, t)) = p::parse_smtp_line(&line) else {
+                return Err("Niepoprawna odpowiedź serwera SMTP.".to_string());
+            };
+            text.push_str(&t);
+            text.push('\n');
+            if !more {
+                return Ok((code, text));
+            }
+        }
+    }
+
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        tmo(IO_TIMEOUT, self.w.write_all(bytes), "Zapis do serwera SMTP").await?;
+        tmo(IO_TIMEOUT, self.w.flush(), "Zapis do serwera SMTP").await
+    }
+
+    async fn expect(&mut self, cmd: &str, ok: &[u16]) -> Result<String, String> {
+        self.write(format!("{cmd}\r\n").as_bytes()).await?;
+        let (code, text) = self.reply().await?;
+        if ok.contains(&code) {
+            Ok(text)
+        } else {
+            Err(format!("Serwer SMTP odrzucił polecenie ({code}): {}", short(&text)))
+        }
+    }
+}
+
+fn safe_addr(a: &str) -> Result<&str, String> {
+    if a.is_empty() || a.chars().any(|c| c.is_control() || c.is_whitespace() || c == '<' || c == '>') {
+        return Err("Niepoprawny adres.".to_string());
+    }
+    Ok(a)
+}
+
+async fn smtp_send(c: &Creds, rcpts: &[String], data: &[u8]) -> Result<(), String> {
+    let host = p::smtp_host(&c.host);
+    let tls = tls_connect(&host, 465).await?;
+    let (r, w) = tokio::io::split(tls);
+    let mut s = Smtp { r: BufReader::new(r), w };
+    let (code, _) = s.reply().await?;
+    if code != 220 {
+        return Err("Serwer SMTP nie odpowiedział poprawnie.".to_string());
+    }
+    let caps = s.expect("EHLO rustmail.local", &[250]).await?.to_ascii_uppercase();
+    let b64 = |x: &[u8]| crate::compose::base64_encode(x);
+    let login_err = |e: String| format!("Logowanie do serwera SMTP nie powiodło się ({e}). Sprawdź hasło i czy WP pozwala na wysyłanie przez programy pocztowe.");
+    if caps.contains("PLAIN") {
+        let mut payload = vec![0u8];
+        payload.extend_from_slice(c.email.as_bytes());
+        payload.push(0);
+        payload.extend_from_slice(c.password.as_bytes());
+        s.expect(&format!("AUTH PLAIN {}", b64(&payload)), &[235]).await.map_err(login_err)?;
+    } else if caps.contains("LOGIN") {
+        s.expect("AUTH LOGIN", &[334]).await.map_err(login_err)?;
+        s.expect(&b64(c.email.as_bytes()), &[334]).await.map_err(login_err)?;
+        s.expect(&b64(c.password.as_bytes()), &[235]).await.map_err(login_err)?;
+    } else {
+        return Err("Serwer SMTP nie obsługuje logowania PLAIN ani LOGIN.".to_string());
+    }
+    s.expect(&format!("MAIL FROM:<{}>", safe_addr(&c.email)?), &[250]).await?;
+    for a in rcpts {
+        s.expect(&format!("RCPT TO:<{}>", safe_addr(a)?), &[250, 251]).await?;
+    }
+    s.expect("DATA", &[354]).await?;
+    s.write(&p::dot_stuff(data)).await?;
+    let (code, text) = s.reply().await?;
+    if code != 250 {
+        return Err(format!("Serwer SMTP nie przyjął wiadomości ({code}): {}", short(&text)));
+    }
+    let _ = tokio::time::timeout(Duration::from_secs(5), s.expect("QUIT", &[221])).await;
+    Ok(())
+}
+
+async fn append_sent(conn: &mut Conn, folder: &str, raw: &[u8]) -> Result<(), String> {
+    conn.n += 1;
+    let tag = format!("A{:04}", conn.n);
+    conn.send(format!("{tag} APPEND {} (\\Seen) {{{}}}\r\n", p::quote(folder)?, raw.len()).as_bytes()).await?;
+    let want = format!("{tag} ");
+    loop {
+        let r = conn.read_resp().await?;
+        if r.head.starts_with('+') {
+            break;
+        }
+        if r.head.starts_with(&want) {
+            return Err("Serwer odrzucił zapis do folderu Wysłane.".to_string());
+        }
+    }
+    let mut data = raw.to_vec();
+    data.extend_from_slice(b"\r\n");
+    conn.send(&data).await?;
+    let r = conn.collect(&tag).await?;
+    if r.ok {
+        Ok(())
+    } else {
+        Err(format!("Serwer odrzucił zapis do Wysłanych: {}", short(&r.text)))
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendResult {
+    pub warning: Option<String>,
+}
+
+#[tauri::command]
+pub async fn imap_send(account: String, msg: crate::commands::OutgoingDto) -> Result<SendResult, String> {
+    let creds = load(&account)?;
+    let raw = crate::commands::prepare(&msg, &creds.email, true)?;
+    let mut rcpts: Vec<String> = Vec::new();
+    for list in [&msg.to, &msg.cc, &msg.bcc] {
+        rcpts.extend(crate::compose::parse_recipients(list)?);
+    }
+    rcpts.sort();
+    rcpts.dedup();
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let nonce: String = crate::auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let domain = creds.email.rsplit('@').next().unwrap_or("rustmail.local");
+    let prepared = p::smtp_prepare(&raw, &format!("{secs}.{nonce}@{domain}"), &p::rfc2822_date(secs));
+    smtp_send(&creds, &rcpts, &prepared).await?;
+    // Kopia w folderze Wysłane (serwery SMTP same jej nie zapisują). Niepowodzenie nie cofa wysłania.
+    let warning = match save_copy(&creds, &prepared).await {
+        Ok(()) => None,
+        Err(e) => Some(format!("Wiadomość wysłano, ale nie zapisano kopii w Wysłanych: {e}")),
+    };
+    Ok(SendResult { warning })
+}
+
+async fn save_copy(creds: &Creds, raw: &[u8]) -> Result<(), String> {
+    let mut conn = open(creds).await?;
+    let res = async {
+        let folders = list_folders(&mut conn).await?;
+        let sent = folders.iter().find(|f| f.role == "sent").ok_or("Nie znaleziono folderu Wysłane.")?;
+        append_sent(&mut conn, &sent.name, raw).await
+    }
+    .await;
+    conn.bye().await;
+    res
 }

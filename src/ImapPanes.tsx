@@ -36,11 +36,11 @@ export function folderDisplay(folders: ImapFolder[]): Record<string, { label: st
 
 const emailOf = (from: string) => (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
-function toView(m: ImapMsg): MessageView {
+export function toView(m: ImapMsg): MessageView {
   return {
     id: String(m.uid), from: m.from, fromEmail: emailOf(m.from), mine: false, dateMs: m.dateMs,
     body: m.text, htmlOnly: !m.text && !!m.html, html: m.html, attachments: [], to: m.to, cc: m.cc,
-    replyTo: "", messageId: "", references: "", risk: { level: "none", score: 0, reasons: [] },
+    replyTo: m.replyTo, messageId: m.messageId, references: m.references, risk: { level: "none", score: 0, reasons: [] },
   };
 }
 
@@ -196,11 +196,12 @@ interface ReaderProps {
   /** Rola folderu: inbox / sent / trash / spam / drafts / archive / other. */
   role: string;
   uid: number | null;
+  onCompose: (kind: "reply" | "replyAll" | "forward", msg: ImapMsg) => void;
   /** Wywoływane po zmianie wiadomości (przeczytana, gwiazdka, usunięta…). */
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -245,6 +246,10 @@ export function ImapReader({ account, folder, role, uid, onChanged }: ReaderProp
           <header className="reader-head">
             <h2>{msg.subject || "(bez tematu)"}</h2>
             <div className="tools actions" role="toolbar" aria-label="Akcje na wiadomości">
+              <button className="primary" onClick={() => onCompose("reply", msg)}>Odpowiedz</button>
+              <button onClick={() => onCompose("replyAll", msg)}>Odpowiedz wszystkim</button>
+              <button onClick={() => onCompose("forward", msg)}>Przekaż dalej</button>
+              <span className="sep" />
               <button onClick={() => void act(msg.unread ? "read" : "unread")}>{msg.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}</button>
               <button onClick={() => void act(msg.starred ? "unstar" : "star")}>{msg.starred ? "Usuń gwiazdkę" : "Gwiazdka"}</button>
               {role === "inbox" && <button onClick={() => void act("archive")}>Archiwizuj</button>}
@@ -266,7 +271,6 @@ export function ImapReader({ account, folder, role, uid, onChanged }: ReaderProp
               )}
             </article>
           </div>
-          <p className="hint pad">Odpowiadanie i wysyłanie z kont IMAP nie jest jeszcze dostępne.</p>
         </>
       )}
     </main>

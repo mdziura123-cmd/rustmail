@@ -487,7 +487,7 @@ pub struct OutgoingDto {
 }
 
 /// Składa wiadomość z danych z interfejsu. Przy wysyłaniu wymaga co najmniej jednego odbiorcy.
-fn prepare(dto: &OutgoingDto, from: &str, require_to: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn prepare(dto: &OutgoingDto, from: &str, require_to: bool) -> Result<Vec<u8>, String> {
     let to = compose::parse_recipients(&dto.to)?;
     let cc = compose::parse_recipients(&dto.cc)?;
     let bcc = compose::parse_recipients(&dto.bcc)?;

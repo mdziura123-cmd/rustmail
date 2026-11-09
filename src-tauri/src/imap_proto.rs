@@ -247,6 +247,113 @@ pub fn trailing_literal(line: &str) -> Option<(usize, usize)> {
     Some((open, inner.parse().ok()?))
 }
 
+// ---------- Wysyłanie (SMTP) ----------
+
+/// Serwer SMTP na podstawie serwera IMAP (`imap.wp.pl` → `smtp.wp.pl`; inne nazwy bez zmian).
+pub fn smtp_host(imap_host: &str) -> String {
+    match imap_host.strip_prefix("imap.") {
+        Some(rest) => format!("smtp.{rest}"),
+        None => imap_host.to_string(),
+    }
+}
+
+/// Sam adres z zapisu `Imię <adres@x.pl>` albo `adres@x.pl`.
+pub fn bare_addr(s: &str) -> String {
+    let t = s.trim();
+    match (t.rfind('<'), t.rfind('>')) {
+        (Some(a), Some(b)) if a < b => t[a + 1..b].trim().to_string(),
+        _ => t.to_string(),
+    }
+}
+
+/// Data w formacie RFC 2822 (czas UTC), np. `Mon, 09 Nov 2026 18:30:00 +0000`.
+pub fn rfc2822_date(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (h, mi, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    const WD: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MO: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let wd = WD[((days % 7 + 11) % 7) as usize];
+    format!("{wd}, {d:02} {} {y} {h:02}:{mi:02}:{s:02} +0000", MO[(m - 1) as usize])
+}
+
+/// Przygotowuje wiadomość do wysłania przez SMTP: usuwa nagłówek Bcc (ukryci odbiorcy nie mogą trafić do treści)
+/// i dodaje Date oraz Message-ID, jeśli ich brakuje.
+pub fn smtp_prepare(raw: &[u8], message_id: &str, date: &str) -> Vec<u8> {
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(raw.len());
+    let head = String::from_utf8_lossy(&raw[..split]).to_string();
+    let rest = &raw[split.min(raw.len())..];
+    let mut out = String::new();
+    let mut skipping = false;
+    let (mut has_date, mut has_id) = (false, false);
+    for line in head.split("\r\n") {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if !skipping {
+                out.push_str(line);
+                out.push_str("\r\n");
+            }
+            continue;
+        }
+        let low = line.to_ascii_lowercase();
+        skipping = low.starts_with("bcc:");
+        if skipping {
+            continue;
+        }
+        if low.starts_with("date:") {
+            has_date = true;
+        }
+        if low.starts_with("message-id:") {
+            has_id = true;
+        }
+        out.push_str(line);
+        out.push_str("\r\n");
+    }
+    if !has_date {
+        out.push_str(&format!("Date: {date}\r\n"));
+    }
+    if !has_id {
+        out.push_str(&format!("Message-ID: <{message_id}>\r\n"));
+    }
+    let mut v = out.trim_end_matches("\r\n").as_bytes().to_vec();
+    v.extend_from_slice(rest);
+    v
+}
+
+/// Przygotowuje treść do polecenia DATA: podwaja kropki na początku linii i dodaje końcowe `.`.
+pub fn dot_stuff(data: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(data.len() + 16);
+    let mut at_line_start = true;
+    for &b in data {
+        if at_line_start && b == b'.' {
+            out.push(b'.');
+        }
+        out.push(b);
+        at_line_start = b == b'\n';
+    }
+    if !out.ends_with(b"\r\n") {
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(b".\r\n");
+    out
+}
+
+/// Linia odpowiedzi SMTP: (kod, czy_będą_kolejne_linie, tekst).
+pub fn parse_smtp_line(line: &str) -> Option<(u16, bool, String)> {
+    let code: u16 = line.get(..3)?.parse().ok()?;
+    let sep = line.as_bytes().get(3).copied().unwrap_or(b' ');
+    Some((code, sep == b'-', line.get(4..).unwrap_or("").to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +443,29 @@ mod tests {
         assert_eq!(trailing_literal("x {12+}"), Some((2, 12)));
         assert_eq!(trailing_literal("abc {x}"), None);
         assert_eq!(trailing_literal("abc"), None);
+    }
+
+    #[test]
+    fn smtp_helpers() {
+        assert_eq!(smtp_host("imap.wp.pl"), "smtp.wp.pl");
+        assert_eq!(smtp_host("poczta.o2.pl"), "poczta.o2.pl");
+        assert_eq!(bare_addr("Jan <jan@x.pl>"), "jan@x.pl");
+        assert_eq!(bare_addr(" a@b.pl "), "a@b.pl");
+        assert_eq!(rfc2822_date(0), "Thu, 01 Jan 1970 00:00:00 +0000");
+        assert_eq!(rfc2822_date(1794249000), "Mon, 09 Nov 2026 18:30:00 +0000");
+        assert_eq!(rfc2822_date(951_782_400), "Tue, 29 Feb 2000 00:00:00 +0000");
+        let raw = b"From: a@b.pl\r\nTo: c@d.pl\r\nBcc: ukryty@x.pl,\r\n inny@x.pl\r\nSubject: Hej\r\n\r\nTre\xc5\x9b\xc4\x87\r\n.kropka\r\n";
+        let out = String::from_utf8_lossy(&smtp_prepare(raw, "id1@rustmail", "DATA")).to_string();
+        assert!(!out.to_lowercase().contains("bcc"));
+        assert!(!out.contains("ukryty") && !out.contains("inny@x.pl"));
+        assert!(out.contains("Date: DATA\r\n") && out.contains("Message-ID: <id1@rustmail>\r\n"));
+        assert!(out.contains("Subject: Hej\r\n") && out.contains("<id1@rustmail>\r\n\r\nTre"));
+        let again = smtp_prepare(out.as_bytes(), "zz", "inna");
+        assert_eq!(String::from_utf8_lossy(&again).matches("Date:").count(), 1);
+        let st = dot_stuff(b".a\r\nb\r\n.\r\nc");
+        assert_eq!(String::from_utf8(st).unwrap(), "..a\r\nb\r\n..\r\nc\r\n.\r\n");
+        assert_eq!(parse_smtp_line("250-AUTH PLAIN LOGIN"), Some((250, true, "AUTH PLAIN LOGIN".to_string())));
+        assert_eq!(parse_smtp_line("250 OK"), Some((250, false, "OK".to_string())));
+        assert_eq!(parse_smtp_line("zz"), None);
     }
 }
