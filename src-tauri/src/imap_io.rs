@@ -15,7 +15,10 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
 
 use crate::imap_proto::{self as p, LIT};
+use crate::auth::AppState;
+use crate::notify;
 use crate::secrets;
+use crate::spam_io::{self, ImapCand, SpamState};
 
 const KEY: &str = "imap_accounts";
 const OLD_KEY: &str = "imap_account";
@@ -699,6 +702,84 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
         }
         _ => Err("Nieznana akcja.".to_string()),
     }
+}
+
+// ---------- Sprawdzanie poczty w tle: filtr spamu i powiadomienia ----------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PollOut {
+    pub moved: usize,
+    pub notified: usize,
+}
+
+/// Co minutę dla każdego konta IMAP: filtr spamu na nieprzeczytanych z Odebranych, potem powiadomienie o nowych.
+/// Przy pierwszym sprawdzeniu po starcie niczego nie ogłasza.
+#[tauri::command]
+pub async fn imap_poll(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    spam: tauri::State<'_, SpamState>,
+    seen: tauri::State<'_, notify::ImapSeen>,
+    account: String,
+    notify_enabled: bool,
+    show_content: bool,
+) -> Result<PollOut, String> {
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = poll_inner(&mut conn, &app, &state, &spam, &seen, &account, notify_enabled, show_content).await;
+    conn.bye().await;
+    res
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn poll_inner(
+    conn: &mut Conn,
+    app: &tauri::AppHandle,
+    state: &AppState,
+    spam: &SpamState,
+    seen: &notify::ImapSeen,
+    account: &str,
+    notify_enabled: bool,
+    show_content: bool,
+) -> Result<PollOut, String> {
+    let folders = list_folders(conn).await?;
+    let inbox = folders.iter().find(|f| f.role == "inbox").map(|f| f.name.clone()).unwrap_or_else(|| "INBOX".to_string());
+    let page = list_inner(conn, &inbox, 0).await?;
+    let unread: Vec<&Row> = page.rows.iter().filter(|r| r.unread).collect();
+    let cands: Vec<ImapCand> = unread
+        .iter()
+        .map(|r| ImapCand { key: format!("imap:{account}:{}", r.uid), from: r.from.clone(), subject: r.subject.clone(), starred: r.starred })
+        .collect();
+    let verdicts = spam_io::evaluate_imap(app, spam, &state.http, &cands).await;
+    let mut moved_uids: Vec<u32> = Vec::new();
+    for v in &verdicts {
+        let uid = unread[v.idx].uid;
+        if act_inner(conn, &inbox, uid, "spam").await.is_ok() {
+            spam_io::imap_moved(app, spam, &cands[v.idx], &v.reason);
+            moved_uids.push(uid);
+        }
+    }
+    let remaining: Vec<&&Row> = unread.iter().filter(|r| !moved_uids.contains(&r.uid)).collect();
+    let ids: Vec<String> = remaining.iter().map(|r| r.uid.to_string()).collect();
+    let new_ids = match seen.0.lock() {
+        Ok(mut m) => notify::diff_new(m.entry(account.to_string()).or_insert(None), &ids),
+        Err(_) => Vec::new(),
+    };
+    let mut notified = 0usize;
+    if notify_enabled && !new_ids.is_empty() {
+        let items: Vec<notify::Item> = remaining
+            .iter()
+            .filter(|r| new_ids.contains(&r.uid.to_string()))
+            .map(|r| notify::Item { sender: &r.from, subject: &r.subject, risky: false })
+            .collect();
+        if let Some((title, body)) = notify::build_text(&items, show_content) {
+            if notify::send(&title, &body).is_ok() {
+                notified = items.len();
+            }
+        }
+    }
+    Ok(PollOut { moved: moved_uids.len(), notified })
 }
 
 // ---------- Wysyłanie (SMTP, port 465 z szyfrowaniem) ----------

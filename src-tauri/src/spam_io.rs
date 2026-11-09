@@ -698,6 +698,110 @@ pub async fn auto_scan(app: &AppHandle, st: &SpamState, gm: &AppState, email: &s
     }
 }
 
+// ---------- Konta IMAP (np. WP) ----------
+
+const MAX_IMAP_MOVES: usize = 20;
+
+/// Wiadomość ze skrzynki IMAP do oceny (tylko nagłówki: nadawca i temat).
+pub struct ImapCand {
+    /// Unikalny klucz, np. „imap:konto:uid”.
+    pub key: String,
+    pub from: String,
+    pub subject: String,
+    pub starred: bool,
+}
+
+pub struct ImapVerdict {
+    pub idx: usize,
+    pub reason: String,
+}
+
+/// Ocenia wiadomości z IMAP tymi samymi silnikami co w Gmailu. Zwraca te, które trzeba przenieść do Spamu;
+/// podejrzane (tryby „oznaczaj” / „pewne”) trafiają tylko do dziennika. Silnik list używa domeny nadawcy
+/// (linki w treści nie są pobierane – to byłby osobny koszt dla każdej wiadomości).
+pub async fn evaluate_imap(app: &AppHandle, st: &SpamState, http: &reqwest::Client, cands: &[ImapCand]) -> Vec<ImapVerdict> {
+    let cfg = load_config(app);
+    let mode = Mode::parse(&cfg.mode);
+    if mode == Mode::Off || cands.is_empty() {
+        return Vec::new();
+    }
+    let _g = st.busy.lock().await;
+    let Ok((_safe, rules)) = filters_data(app) else { return Vec::new() };
+    let list = if cfg.lists { ensure_list(app, st, http, &cfg.provider, false).await.ok() } else { None };
+    let mut out: Vec<ImapVerdict> = Vec::new();
+    for (idx, c) in cands.iter().enumerate() {
+        if seen_has(app, st, &c.key) {
+            continue;
+        }
+        let addr = crate::imap_proto::bare_addr(&c.from).to_ascii_lowercase();
+        if c.starred || rules.is_allowed(&addr) {
+            seen_add(app, st, &c.key);
+            continue;
+        }
+        let mut votes: Vec<Vote> = Vec::new();
+        if cfg.headers && rules.is_blocked(&addr) {
+            votes.extend(spam::headers_vote("high", &["Nadawca jest na Twojej liście zablokowanych".to_string()]));
+        }
+        if cfg.rules {
+            votes.extend(spam::rules_vote(&format!("{} {}", c.subject, c.from), &cfg.custom));
+        }
+        if cfg.bayes {
+            let toks = spam::tokenize(&c.subject, "", &c.from);
+            if let Some(p) = with_model(app, st, |m| m.classify(&toks)) {
+                votes.extend(spam::bayes_vote(p));
+            }
+        }
+        if let Some(list) = list.as_ref() {
+            votes.extend(spam::lists_vote(list, spam::domain_of_email(&addr).as_deref(), &[]));
+        }
+        match spam::decide(mode, &votes) {
+            Decision::Keep => {}
+            Decision::Flag => log_add(
+                app,
+                LogEntry {
+                    id: c.key.clone(),
+                    ts: now_ms(),
+                    action: "flagged".to_string(),
+                    subject: c.subject.clone(),
+                    sender: c.from.clone(),
+                    snippet: String::new(),
+                    reason: join_reasons(&votes),
+                    open: false,
+                },
+            ),
+            Decision::Move => {
+                if out.len() >= MAX_IMAP_MOVES {
+                    continue; // reszta przy następnym sprawdzeniu
+                }
+                out.push(ImapVerdict { idx, reason: join_reasons(&votes) });
+                continue; // zapamiętamy dopiero po udanym przeniesieniu
+            }
+        }
+        seen_add(app, st, &c.key);
+    }
+    seen_save(app, st);
+    out
+}
+
+/// Zapisuje w dzienniku udane przeniesienie wiadomości z IMAP do Spamu.
+pub fn imap_moved(app: &AppHandle, st: &SpamState, c: &ImapCand, reason: &str) {
+    log_add(
+        app,
+        LogEntry {
+            id: c.key.clone(),
+            ts: now_ms(),
+            action: "moved".to_string(),
+            subject: c.subject.clone(),
+            sender: c.from.clone(),
+            snippet: String::new(),
+            reason: reason.to_string(),
+            open: false,
+        },
+    );
+    seen_add(app, st, &c.key);
+    seen_save(app, st);
+}
+
 // ---------- Decyzje użytkownika ----------
 
 /// Przywraca wiadomość ze Spamu do skrzynki i uczy filtr, że to nie spam.

@@ -34,6 +34,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(auth::AppState::new())
         .manage(notify::Notifier::default())
+        .manage(notify::ImapSeen::default())
         .manage(spam_io::SpamState::default())
         .setup(|app| {
             use tauri::Manager;
@@ -94,6 +95,7 @@ pub fn run() {
             imap_io::imap_search,
             imap_io::imap_send,
             imap_io::imap_download,
+            imap_io::imap_poll,
             imap_io::imap_counts,
             commands::import_label,
             commands::import_message,

@@ -115,6 +115,7 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [imapLoginOpen, setImapLoginOpen] = useState(false);
   const [imapAccs, setImapAccs] = useState<ImapAccount[]>([]);
+  const [imapTick, setImapTick] = useState(0);
   const [imapLoaded, setImapLoaded] = useState(false);
   const [view, setView] = useState<string>(() => load(LS.view, "gmail"));
   const [imapUid, setImapUid] = useState<number | null>(null);
@@ -676,6 +677,31 @@ export default function App() {
     const t = window.setInterval(() => void pollOnce(), 60_000);
     return () => window.clearInterval(t);
   }, [email, pollOnce]);
+  // Konta IMAP (np. WP): filtr spamu i powiadomienia, co minutę (niezależnie od Gmaila).
+  const imapRef = useRef(imapAccs);
+  imapRef.current = imapAccs;
+  const imapPollOnce = useCallback(async () => {
+    for (const a of imapRef.current) {
+      try {
+        const r = await api.imapPoll(a.email, settingsRef.current.notify, settingsRef.current.content);
+        if (r.moved > 0) {
+          showToast(r.moved === 1 ? `Filtr przeniósł 1 wiadomość z ${a.email} do Spamu.` : `Filtr przeniósł wiadomości z ${a.email} do Spamu: ${r.moved}.`);
+          setImapTick((n) => n + 1);
+        }
+      } catch { /* brak sieci albo błąd serwera – spróbujemy za minutę */ }
+    }
+  }, [showToast]);
+  const imapKey = imapAccs.map((a) => a.email).join("|");
+  useEffect(() => {
+    if (!imapKey) return;
+    void imapPollOnce();
+    const t = window.setInterval(() => void imapPollOnce(), 60_000);
+    return () => window.clearInterval(t);
+  }, [imapKey, imapPollOnce]);
+  useEffect(() => {
+    if (imapTick > 0 && view !== "gmail") { void imap.refresh(); if (view === "all") void inboxes.refresh(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imapTick]);
   const syncing = useRef(false);
   const syncOnce = useCallback(async () => {
     if (syncing.current) return;

@@ -11,6 +11,10 @@ pub struct Seen {
     pub counts: Option<(u32, u32)>,
 }
 
+/// Co już widzieliśmy w skrzynkach IMAP (osobno dla każdego konta; `None` = pierwsze sprawdzenie).
+#[derive(Default)]
+pub struct ImapSeen(pub std::sync::Mutex<std::collections::HashMap<String, Option<HashSet<String>>>>);
+
 /// Stan współdzielony między wywołaniami (zarządzany przez Tauri).
 #[derive(Default)]
 pub struct Notifier(pub std::sync::Mutex<Seen>);
