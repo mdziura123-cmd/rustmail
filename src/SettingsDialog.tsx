@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { api, errText } from "./api";
 import { SHORTCUT_HELP } from "./shortcuts";
+import type { Account, ImapAccount } from "./types";
 
-export type SettingsTarget = "signature" | "senders" | "offline" | "spam" | "import";
+export type SettingsTarget = "signature" | "senders" | "offline" | "spam" | "import" | "addGmail" | "addImap";
 
 interface Props {
+  gmail: Account[];
+  imap: ImapAccount[];
+  busy: boolean;
   notify: boolean;
   content: boolean;
   onNotify: (on: boolean) => void;
@@ -20,6 +24,7 @@ interface Props {
 
 const TABS = [
   { id: "general", label: "Ogólne" },
+  { id: "accounts", label: "Konta" },
   { id: "mail", label: "Poczta" },
   { id: "spam", label: "Filtr spamu" },
   { id: "shortcuts", label: "Skróty" },
@@ -70,6 +75,21 @@ export function SettingsDialog(p: Props) {
                 <div className="modal-actions">
                   <button disabled={!p.notify} onClick={() => void test()}>Wyślij próbne powiadomienie</button>
                 </div>
+              </>
+            )}
+            {tab === "accounts" && (
+              <>
+                <p className="hint">Zalogowane konta:</p>
+                <ul className="acc-list">
+                  {p.gmail.map((a) => <li key={"g" + a.email}>{a.email} <span className="hint">(Gmail)</span></li>)}
+                  {p.imap.map((a) => <li key={"i" + a.email}>{a.email} <span className="hint">(WP / IMAP)</span></li>)}
+                  {p.gmail.length + p.imap.length === 0 && <li className="hint">Brak zalogowanych kont.</li>}
+                </ul>
+                <div className="settings-list">
+                  <button disabled={p.busy} onClick={() => p.onOpen("addGmail")}>+ Dodaj konto Gmail…</button>
+                  <button onClick={() => p.onOpen("addImap")}>+ Dodaj konto WP / inne IMAP…</button>
+                </div>
+                <p className="hint">Wylogowanie: wybierz konto w przełączniku u góry po lewej i kliknij „Wyloguj”.</p>
               </>
             )}
             {tab === "mail" && (

@@ -19,7 +19,7 @@ import { ImapLogin } from "./ImapLogin";
 import { ImapListPane, ImapReader, ImapSidebarNav, toView, useImapInboxes, useImapView } from "./ImapPanes";
 import { buildForward, buildNew, buildReply, replyTarget, type ComposeInit } from "./replyLogic";
 import { FOLDERS, type FolderId } from "./folders";
-import { UpdateBanner } from "./UpdateBanner";
+import { StatusBar } from "./StatusBar";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
 import type { Account, AppInfo, AuthStatus, ImapAccount, ImapMsg, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
@@ -754,7 +754,6 @@ export default function App() {
   return (
     <div className="app">
       <Titlebar />
-      <UpdateBanner u={updater} />
       <div className="panes" style={{ gridTemplateColumns: `${left.width}px 6px ${mid.width}px 6px 1fr` }}>
         <aside className="sidebar" aria-label="Foldery">
           <div className="brand">
@@ -1073,17 +1072,8 @@ export default function App() {
         )}
       </div>
 
-      <footer className="status">
-        <span>{info ? `${info.name} ${info.version}${info.appimage ? " · AppImage" : ""}` : "Tryb podglądu w przeglądarce"}</span>
-        <span className="pill">{email ?? "brak konta"}</span>
-        {email && outbox.length > 0 && (
-          <button className="linklike plain" onClick={() => setOutboxOpen(true)}>Do wysłania ({outbox.length})</button>
-        )}
-        {email && <button className="linklike plain" onClick={() => setImportOpen(true)}>Import poczty</button>}
-        {email && <button className="linklike plain" onClick={() => setSettingsOpen(true)}>Ustawienia</button>}
-        <span className="grow" />
-        <button className="linklike" onClick={() => void updater.check(true)}>Sprawdź aktualizację</button>
-      </footer>
+      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length : 0} onOutbox={() => setOutboxOpen(true)}
+        onSettings={() => setSettingsOpen(true)} />
 
       {toast && (
         <div className="toast" role="status" key={toast.key}>
@@ -1131,12 +1121,12 @@ export default function App() {
           onDelete={async (id) => { try { await api.deleteOutbox(id); } catch (e) { showToast(errText(e)); } await flushQueue(false); }} />
       )}
       {settingsOpen && (
-        <SettingsDialog notify={notifyOn} content={notifyContent}
+        <SettingsDialog notify={notifyOn} content={notifyContent} gmail={accounts.length ? accounts : email ? [{ email, active: true }] : []} imap={imapAccs} busy={signingIn}
           autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}
           onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}
           onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}
           onContent={(on) => { setNotifyContent(on); save(LS.content, on ? "1" : "0"); }}
-          onOpen={(w) => { setSettingsOpen(false); if (w === "signature") setSigOpen(true); else if (w === "senders") setSenderDlg({ email: null }); else if (w === "spam") setSpamOpen(true); else if (w === "import") setImportOpen(true); else setCacheOpen(true); }}
+          onOpen={(w) => { setSettingsOpen(false); if (w === "signature") setSigOpen(true); else if (w === "senders") setSenderDlg({ email: null }); else if (w === "spam") setSpamOpen(true); else if (w === "import") setImportOpen(true); else if (w === "addGmail") void signIn(); else if (w === "addImap") setImapLoginOpen(true); else setCacheOpen(true); }}
           onClose={() => setSettingsOpen(false)} />
       )}
       {cacheOpen && <CacheDialog onClose={() => setCacheOpen(false)} onChanged={() => void syncOnce()} />}

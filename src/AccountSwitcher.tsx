@@ -45,9 +45,6 @@ export function AccountSwitcher(p: Props) {
             {item(p.view === "all", "Wszystkie skrzynki razem (Odebrane)", p.onAll, "all")}
           </>
         )}
-        <div className="acc-title">Dodaj konto</div>
-        <button role="menuitem" disabled={p.busy} className="acc-item" onClick={(e) => { close(e); p.onAddGmail(); }}>+ Gmail</button>
-        <button role="menuitem" className="acc-item" onClick={(e) => { close(e); p.onAddImap(); }}>+ WP / inne konto IMAP</button>
         <div className="acc-title">Wylogowanie</div>
         {p.view.startsWith("imap:") ? (
           <button role="menuitem" className="acc-item danger" onClick={(e) => { close(e); p.onSignOutImap(p.view.slice(5)); }}>Wyloguj konto {p.view.slice(5)}</button>

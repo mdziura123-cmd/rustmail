@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api, errText } from "./api";
 import type { UpdateInfo, UpdateState } from "./types";
 
@@ -10,6 +11,7 @@ export function useUpdater(autoCheck: boolean) {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<UpdateState | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const phaseRef = useRef<Phase>("idle");
   const manualRef = useRef(false);
   const dismissed = useRef<string | null>(null);
@@ -40,6 +42,24 @@ export function useUpdater(autoCheck: boolean) {
 
   useEffect(() => { refreshState(); }, [refreshState]);
 
+  // Postęp pobierania (0–100); null = rozmiar nieznany.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let dead = false;
+    listen<{ done: number; total: number }>("update-progress", (e) => {
+      const { done, total } = e.payload;
+      setProgress(total > 0 ? Math.min(100, Math.round((done * 100) / total)) : null);
+    }).then((f) => { if (dead) f(); else off = f; }).catch(() => {});
+    return () => { dead = true; off?.(); };
+  }, []);
+
+  // „Masz najnowszą wersję” znika samo.
+  useEffect(() => {
+    if (phase !== "uptodate") return;
+    const t = setTimeout(() => { if (phaseRef.current === "uptodate") set("idle"); }, 6000);
+    return () => clearTimeout(t);
+  }, [phase, set]);
+
   useEffect(() => {
     if (!autoCheck) return;
     const first = setTimeout(() => { void check(false); }, 8000);
@@ -48,6 +68,7 @@ export function useUpdater(autoCheck: boolean) {
   }, [autoCheck, check]);
 
   const install = useCallback(async () => {
+    setProgress(null);
     set("installing");
     try {
       await api.installUpdate();
@@ -80,7 +101,7 @@ export function useUpdater(autoCheck: boolean) {
   }, [info, set]);
 
   const visible = phase !== "idle" && (phase !== "checking" || manualRef.current);
-  return { phase, info, error, state, visible, check, install, rollback, restart, dismiss };
+  return { phase, info, error, state, progress, visible, check, install, rollback, restart, dismiss };
 }
 
 export type Updater = ReturnType<typeof useUpdater>;

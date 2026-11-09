@@ -126,7 +126,8 @@ pub async fn check_update() -> Result<UpdateInfo, String> {
 
 /// Pobiera, weryfikuje i podmienia plik AppImage. Wywoływane wyłącznie po kliknięciu użytkownika.
 #[tauri::command]
-pub async fn install_update() -> Result<String, String> {
+pub async fn install_update(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Emitter;
     let appimage = appimage_path()?;
     let c = client()?;
     let r = fetch_release(&c).await?;
@@ -164,6 +165,9 @@ pub async fn install_update() -> Result<String, String> {
         .map_err(|e| format!("Nie można zapisać pliku obok AppImage (brak uprawnień do katalogu?): {e}"))?;
     let mut hasher = Sha256::new();
     let mut total = 0u64;
+    let expected_len = resp.content_length().unwrap_or(0);
+    let mut last_pct = u64::MAX;
+    let _ = app.emit("update-progress", serde_json::json!({ "done": 0u64, "total": expected_len }));
     loop {
         match resp.chunk().await {
             Ok(Some(chunk)) => {
@@ -173,6 +177,13 @@ pub async fn install_update() -> Result<String, String> {
                     return Err("Plik aktualizacji jest zbyt duży.".to_string());
                 }
                 hasher.update(&chunk);
+                if expected_len > 0 {
+                    let pct = total * 100 / expected_len;
+                    if pct != last_pct {
+                        last_pct = pct;
+                        let _ = app.emit("update-progress", serde_json::json!({ "done": total, "total": expected_len }));
+                    }
+                }
                 if let Err(e) = file.write_all(&chunk) {
                     cleanup();
                     return Err(format!("Błąd zapisu aktualizacji: {e}"));
