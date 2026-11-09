@@ -51,7 +51,7 @@ export function StatusBar({ info, u, outboxCount, onOutbox, onSettings }: Props)
   return (
     <footer className="status">
       <span>{info ? `${info.name} ${info.version}${info.appimage ? " · AppImage" : ""}` : "Tryb podglądu w przeglądarce"}</span>
-      <button className={"icon-btn" + (checking ? " spin" : "")} title="Sprawdź aktualizację" aria-label="Sprawdź aktualizację"
+      <button className={"icon-btn upd" + (checking ? " spin" : "")} title="Sprawdź aktualizację" aria-label="Sprawdź aktualizację"
         disabled={checking} onClick={() => void u.check(true)}>
         <RefreshIcon />
       </button>
@@ -79,7 +79,7 @@ export function StatusBar({ info, u, outboxCount, onOutbox, onSettings }: Props)
       )}
       <span className="grow" />
       {outboxCount > 0 && <button className="linklike plain" onClick={onOutbox}>Do wysłania ({outboxCount})</button>}
-      <button className="icon-btn" title="Ustawienia" aria-label="Ustawienia" onClick={onSettings}>
+      <button className="icon-btn gear" title="Ustawienia" aria-label="Ustawienia" onClick={onSettings}>
         <GearIcon />
       </button>
     </footer>

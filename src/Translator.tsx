@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 import { api, errText } from "./api";
+import { getProvider, PROVIDERS } from "./translateProviders";
 import type { MessageView } from "./types";
 
-const OK_KEY = "rm.translate.ok";
+const okKey = (provider: string) => "rm.translate.ok." + provider;
 
-function readOk(): boolean {
-  try { return localStorage.getItem(OK_KEY) === "1"; } catch { return false; }
+function readOk(provider: string): boolean {
+  try { return localStorage.getItem(okKey(provider)) === "1"; } catch { return false; }
 }
-function saveOk() {
-  try { localStorage.setItem(OK_KEY, "1"); } catch { /* pamięć niedostępna */ }
+function saveOk(provider: string) {
+  try { localStorage.setItem(okKey(provider), "1"); } catch { /* pamięć niedostępna */ }
 }
 
 /** Tekst wiadomości do tłumaczenia: wersja tekstowa albo tekst wyciągnięty z HTML (bez wykonywania czegokolwiek). */
@@ -33,7 +34,7 @@ function looksForeign(text: string): boolean {
 /** Przycisk „Przetłumacz na polski” (angielski → polski) nad treścią wiadomości. */
 export function Translator({ m }: { m: MessageView }) {
   const text = useMemo(() => plainText(m), [m]);
-  const [ask, setAsk] = useState(false);
+  const [ask, setAsk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ translated: string; truncated: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,11 +42,11 @@ export function Translator({ m }: { m: MessageView }) {
   if (!looksForeign(text)) return null;
 
   const run = async () => {
-    setAsk(false);
+    setAsk(null);
     setBusy(true);
     setError(null);
     try {
-      setResult(await api.translateText(text));
+      setResult(await api.translateText(text, getProvider()));
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -53,7 +54,10 @@ export function Translator({ m }: { m: MessageView }) {
     }
   };
 
-  const start = () => { if (readOk()) void run(); else setAsk(true); };
+  const start = () => {
+    const provider = getProvider();
+    if (readOk(provider)) void run(); else setAsk(provider);
+  };
 
   return (
     <div className="translator">
@@ -64,10 +68,10 @@ export function Translator({ m }: { m: MessageView }) {
       )}
       {ask && (
         <p className="warn-line" role="alert">
-          Treść tej wiadomości zostanie wysłana do darmowej usługi tłumaczenia MyMemory (translated.net). Robimy to tylko po
-          kliknięciu. Nie tłumacz wiadomości poufnych.{" "}
-          <button className="small solid" onClick={() => { saveOk(); void run(); }}>Rozumiem, tłumacz</button>{" "}
-          <button className="small" onClick={() => setAsk(false)}>Anuluj</button>
+          Treść tej wiadomości zostanie wysłana do usługi tłumaczenia: {PROVIDERS.find((p) => p.id === ask)?.name ?? ask}. Możesz ją zmienić w Ustawieniach.
+          Robimy to tylko po kliknięciu. Nie tłumacz wiadomości poufnych.{" "}
+          <button className="small solid" onClick={() => { saveOk(ask); void run(); }}>Rozumiem, tłumacz</button>{" "}
+          <button className="small" onClick={() => setAsk(null)}>Anuluj</button>
         </p>
       )}
       {error && <p className="error" role="alert">{error}</p>}

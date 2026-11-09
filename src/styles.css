@@ -127,3 +127,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .spellbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 10px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); }
 .spell-chip { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 2px 6px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
 .spell-chip b { color: #c33; font-weight: 600; }
+.icon-btn svg { transition: transform .45s ease; }
+.icon-btn.upd:hover:not(:disabled) svg { animation: rm-spin .9s linear infinite; }
+.icon-btn.gear:hover svg, .icon-btn.gear:focus-visible svg { animation: rm-spin 2.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .icon-btn.upd:hover svg, .icon-btn.gear:hover svg, .icon-btn.gear:focus-visible svg { animation: none; } }

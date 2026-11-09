@@ -141,7 +141,10 @@ export const api = {
     invoke<{ moved: number; notified: number }>("imap_poll", { account, notifyEnabled, showContent }),
   imapDownload: (account: string, folder: string, uid: number, index: number, name: string) =>
     invoke<SavedFile>("imap_download", { account, folder, uid, index, name }),
-  translateText: (text: string) => invoke<{ translated: string; truncated: boolean }>("translate_text", { text }),
+  translateKeys: () => invoke<{ deepl: boolean; google: boolean; microsoft: boolean }>("translate_keys"),
+  translateSetKey: (provider: string, key: string, region?: string) => invoke<void>("translate_set_key", { provider, key, region: region ?? null }),
+  translateClearKey: (provider: string) => invoke<void>("translate_clear_key", { provider }),
+  translateText: (text: string, provider: string) => invoke<{ translated: string; truncated: boolean }>("translate_text", { text, provider }),
   getSignature: () => invoke<string>("get_signature"),
   setSignature: (text: string) => invoke<void>("set_signature", { text }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),

@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errText } from "./api";
 import { SHORTCUT_HELP } from "./shortcuts";
+import { getProvider, PROVIDERS, setProvider, type Provider } from "./translateProviders";
 import type { Account, ImapAccount } from "./types";
 
 export type SettingsTarget = "signature" | "senders" | "offline" | "spam" | "import" | "addGmail" | "addImap";
@@ -35,6 +36,66 @@ const TABS = [
   { id: "updates", label: "Aktualizacje" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+
+/** Wybór usługi tłumaczenia i jej klucza API. Klucze trafiają do systemowego magazynu haseł, nie do plików aplikacji. */
+function TranslateSettings() {
+  const [provider, setProv] = useState<Provider>(getProvider);
+  const [keys, setKeys] = useState<{ deepl: boolean; google: boolean; microsoft: boolean }>({ deepl: false, google: false, microsoft: false });
+  const [key, setKey] = useState("");
+  const [region, setRegion] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const refresh = () => { api.translateKeys().then(setKeys).catch(() => {}); };
+  useEffect(refresh, []);
+  const info = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const has = provider !== "mymemory" && keys[provider];
+  const choose = (p: Provider) => { setProv(p); setProvider(p); setKey(""); setNote(null); };
+  const save = async () => {
+    setNote(null);
+    try {
+      await api.translateSetKey(provider, key, provider === "microsoft" ? region : undefined);
+      setKey("");
+      setNote("Klucz zapisany.");
+      refresh();
+    } catch (e) { setNote(errText(e)); }
+  };
+  const clear = async () => {
+    setNote(null);
+    try { await api.translateClearKey(provider); setNote("Klucz usunięty."); refresh(); }
+    catch (e) { setNote(errText(e)); }
+  };
+  return (
+    <>
+      <h4>Tłumacz (angielski → polski)</h4>
+      <p className="hint">Wybierz usługę, której użyje przycisk „Przetłumacz na polski”. Treść wiadomości jest wysyłana do wybranej usługi wyłącznie po kliknięciu.</p>
+      {PROVIDERS.map((p) => (
+        <label key={p.id} className="spam-opt">
+          <input type="radio" name="tr-provider" checked={provider === p.id} onChange={() => choose(p.id)} />
+          <span>
+            <strong>{p.name}</strong>
+            {p.needsKey && <span className="hint"> {keys[p.id as "deepl" | "google" | "microsoft"] ? "· klucz zapisany ✓" : "· brak klucza"}</span>}
+            <br /><span className="hint">{p.hint}</span>
+          </span>
+        </label>
+      ))}
+      {info.needsKey && (
+        <>
+          <div className="modal-actions wrap">
+            <input type="password" autoComplete="off" spellCheck={false} placeholder={info.keyHint} value={key}
+              aria-label={info.keyHint} onChange={(e) => setKey(e.target.value)} />
+            {provider === "microsoft" && (
+              <input autoComplete="off" spellCheck={false} placeholder="Region (np. westeurope, domyślnie global)" value={region}
+                aria-label="Region zasobu Azure" onChange={(e) => setRegion(e.target.value)} />
+            )}
+            <button disabled={!key.trim()} onClick={() => void save()}>{has ? "Zmień klucz" : "Zapisz klucz"}</button>
+            {has && <button onClick={() => void clear()}>Usuń klucz</button>}
+          </div>
+          <p className="hint">Klucz jest przechowywany w systemowym magazynie haseł i wysyłany wyłącznie do tej usługi.</p>
+        </>
+      )}
+      {note && <p className="hint" role="status">{note}</p>}
+    </>
+  );
+}
 
 export function SettingsDialog(p: Props) {
   const [tab, setTab] = useState<Tab>("general");
@@ -93,6 +154,7 @@ export function SettingsDialog(p: Props) {
                 <div className="modal-actions">
                   <button disabled={!p.notify} onClick={() => void test()}>Wyślij próbne powiadomienie</button>
                 </div>
+                <TranslateSettings />
               </>
             )}
             {tab === "accounts" && (
