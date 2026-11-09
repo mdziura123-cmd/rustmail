@@ -769,7 +769,7 @@ export default function App() {
           <>
             <ImapListPane imap={imap} openUid={imapUid} onOpen={(row) => setImapUid(row.uid)} />
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
-            <ImapReader account={imapAccount} folder={imap.folder} uid={imapUid}
+            <ImapReader account={imapAccount} folder={imap.folder} role={imap.folders.find((f) => f.name === imap.folder)?.role ?? "other"} uid={imapUid}
               onChanged={(uid, p) => { if (p === "removed") { imap.remove(uid); setImapUid(null); } else imap.patch(uid, p); }} />
           </>
         ) : (
@@ -896,7 +896,7 @@ export default function App() {
         <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
 
         {unified && imapOpenItem ? (
-          <ImapReader account={imapOpenItem.account} folder="INBOX" uid={imapOpenItem.uid}
+          <ImapReader account={imapOpenItem.account} folder="INBOX" role="inbox" uid={imapOpenItem.uid}
             onChanged={(uid, p) => { if (p === "removed") { inboxes.remove(imapOpenItem.account, uid); setImapOpenItem(null); } else inboxes.patch(imapOpenItem.account, uid, p); }} />
         ) : (
         <main className="reader" aria-label="Konwersacja">

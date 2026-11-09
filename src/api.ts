@@ -98,6 +98,11 @@ export const api = {
     const p = await invoke<ImapPage>("imap_list", { account, folder, offset });
     return { ...p, rows: p.rows.map((r) => ({ ...r, from: cleanDisplay(r.from, 120), subject: cleanDisplay(r.subject, 200) })) };
   },
+  imapSearch: async (account: string, folder: string, query: string) => {
+    const p = await invoke<ImapPage>("imap_search", { account, folder, query });
+    return { ...p, rows: p.rows.map((r) => ({ ...r, from: cleanDisplay(r.from, 120), subject: cleanDisplay(r.subject, 200) })) };
+  },
+  imapCounts: (account: string) => invoke<{ name: string; unseen: number }[]>("imap_counts", { account }),
   imapGet: async (account: string, folder: string, uid: number) => {
     const m = await invoke<ImapMsg>("imap_get", { account, folder, uid });
     return {

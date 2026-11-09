@@ -163,6 +163,7 @@ pub fn role_of(raw_name: &str, attrs: &[String]) -> &'static str {
             "\\trash" => return "trash",
             "\\junk" => return "spam",
             "\\drafts" => return "drafts",
+            "\\archive" | "\\all" => return "archive",
             _ => {}
         }
     }
@@ -176,6 +177,7 @@ pub fn role_of(raw_name: &str, attrs: &[String]) -> &'static str {
         "trash" | "deleted" | "deleted items" | "kosz" | "usunięte" | "usuniete" | "elementy usunięte" => "trash",
         "spam" | "junk" | "junk e-mail" | "bulk mail" | "wiadomości-śmieci" => "spam",
         "drafts" | "draft" | "robocze" | "szkice" | "wersje robocze" => "drafts",
+        "archive" | "archiwum" | "all mail" | "wszystkie wiadomości" => "archive",
         _ => "other",
     }
 }
@@ -300,6 +302,7 @@ mod tests {
         assert_eq!(role_of("INBOX.Spam", &[]), "spam");
         assert_eq!(role_of("Coś", &["\\Junk".to_string()]), "spam");
         assert_eq!(role_of("Prywatne", &[]), "other");
+        assert_eq!(role_of("INBOX/Archive", &[]), "archive");
     }
 
     #[test]

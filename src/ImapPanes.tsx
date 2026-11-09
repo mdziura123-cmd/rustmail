@@ -52,7 +52,13 @@ export function useImapView(account: string | null) {
   const [next, setNext] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [term, setTerm] = useState("");
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const seq = useRef(0);
+
+  const loadCounts = useCallback((acc: string) => {
+    api.imapCounts(acc).then((c) => setCounts(Object.fromEntries(c.map((x) => [x.name, x.unseen])))).catch(() => {});
+  }, []);
 
   const load = useCallback(async (acc: string, name: string, offset: number, append: boolean) => {
     const my = ++seq.current;
@@ -68,22 +74,37 @@ export function useImapView(account: string | null) {
 
   useEffect(() => {
     seq.current++;
-    setFolders([]); setFolder(""); setRows([]); setNext(null); setErr(null);
+    setFolders([]); setFolder(""); setRows([]); setNext(null); setErr(null); setTerm(""); setCounts({});
     if (!account) return;
     const my = seq.current;
     setLoading(true);
+    loadCounts(account);
     api.imapFolders(account).then((f) => {
       if (my !== seq.current) return;
       setFolders(f);
       const inbox = f.find((x) => x.role === "inbox") ?? f[0];
       if (inbox) { setFolder(inbox.name); void load(account, inbox.name, 0, false); } else setLoading(false);
     }).catch((e) => { if (my === seq.current) { setErr(errText(e)); setLoading(false); } });
-  }, [account, load]);
+  }, [account, load, loadCounts]);
+
+  const search = async (q: string) => {
+    if (!account || !folder || !q.trim()) return;
+    const my = ++seq.current;
+    setTerm(q.trim()); setLoading(true); setErr(null);
+    try {
+      const p = await api.imapSearch(account, folder, q.trim());
+      if (my !== seq.current) return;
+      setRows(p.rows); setNext(null);
+    } catch (e) { if (my === seq.current) setErr(errText(e)); }
+    finally { if (my === seq.current) setLoading(false); }
+  };
 
   return {
-    account, folders, folder, rows, next, loading, err,
-    pick: (name: string) => { if (account) { setFolder(name); void load(account, name, 0, false); } },
-    refresh: () => { if (account && folder) void load(account, folder, 0, false); },
+    account, folders, folder, rows, next, loading, err, term, counts,
+    pick: (name: string) => { if (account) { setTerm(""); setFolder(name); void load(account, name, 0, false); } },
+    refresh: () => { if (account && folder) { if (term) { void search(term); } else void load(account, folder, 0, false); loadCounts(account); } },
+    search: (q: string) => void search(q),
+    clearSearch: () => { setTerm(""); if (account && folder) void load(account, folder, 0, false); },
     more: () => { if (account && folder && next !== null) void load(account, folder, next, true); },
     patch: (uid: number, p: Partial<ImapRow>) => setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...p } : r))),
     remove: (uid: number) => setRows((prev) => prev.filter((r) => r.uid !== uid)),
@@ -126,6 +147,7 @@ export function ImapSidebarNav({ imap }: { imap: ImapView }) {
             aria-current={f.name === imap.folder}>
             <Icon d={d.icon} />
             <span>{d.label}</span>
+            {(imap.counts[f.name] ?? 0) > 0 && <span className={"badge" + (f.role === "inbox" ? "" : " muted")}>{imap.counts[f.name]}</span>}
           </button>
         );
       })}
@@ -135,13 +157,21 @@ export function ImapSidebarNav({ imap }: { imap: ImapView }) {
 }
 
 export function ImapListPane({ imap, openUid, onOpen }: { imap: ImapView; openUid: number | null; onOpen: (r: ImapRow) => void }) {
-  const label = folderDisplay(imap.folders)[imap.folder]?.label ?? "";
+  const label = imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
+  const [q, setQ] = useState("");
+  useEffect(() => { setQ(""); }, [imap.account, imap.folder]);
   return (
     <section className="list" aria-label="Lista wiadomości">
       <header className="list-head">
         <h2>{label}{imap.account ? ` · ${imap.account}` : ""}</h2>
         <button className="small" disabled={imap.loading} onClick={imap.refresh}>{imap.loading ? "Wczytywanie…" : "Odśwież"}</button>
       </header>
+      <form className="search" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) imap.search(q); }}>
+        <input type="search" value={q} maxLength={100} placeholder="Szukaj w tym folderze" aria-label="Szukaj w folderze"
+          onChange={(e) => setQ(e.target.value)} />
+        <button className="small" type="submit">Szukaj</button>
+        {imap.term && <button className="small" type="button" onClick={() => { setQ(""); imap.clearSearch(); }}>Wyczyść</button>}
+      </form>
       {imap.err && <p className="error pad" role="alert">{imap.err}</p>}
       {!imap.loading && !imap.err && imap.rows.length === 0 && <div className="empty"><h3>Ten folder jest pusty</h3></div>}
       <ul>
@@ -163,12 +193,14 @@ export function ImapListPane({ imap, openUid, onOpen }: { imap: ImapView; openUi
 interface ReaderProps {
   account: string;
   folder: string;
+  /** Rola folderu: inbox / sent / trash / spam / drafts / archive / other. */
+  role: string;
   uid: number | null;
   /** Wywoływane po zmianie wiadomości (przeczytana, gwiazdka, usunięta…). */
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
 }
 
-export function ImapReader({ account, folder, uid, onChanged }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -192,7 +224,7 @@ export function ImapReader({ account, folder, uid, onChanged }: ReaderProps) {
     setErr(null);
     try {
       await api.imapAct(account, folder, msg.uid, action);
-      if (action === "trash" || action === "spam") { changed.current(msg.uid, "removed"); setMsg(null); return; }
+      if (["trash", "spam", "archive", "inbox"].includes(action)) { changed.current(msg.uid, "removed"); setMsg(null); return; }
       const patch: Partial<ImapRow> = {};
       if (action === "read") patch.unread = false;
       if (action === "unread") patch.unread = true;
@@ -215,8 +247,10 @@ export function ImapReader({ account, folder, uid, onChanged }: ReaderProps) {
             <div className="tools actions" role="toolbar" aria-label="Akcje na wiadomości">
               <button onClick={() => void act(msg.unread ? "read" : "unread")}>{msg.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}</button>
               <button onClick={() => void act(msg.starred ? "unstar" : "star")}>{msg.starred ? "Usuń gwiazdkę" : "Gwiazdka"}</button>
-              <button onClick={() => void act("spam")}>Spam</button>
-              <button onClick={() => void act("trash")}>Usuń</button>
+              {role === "inbox" && <button onClick={() => void act("archive")}>Archiwizuj</button>}
+              {!["inbox", "trash", "spam"].includes(role) && <button onClick={() => void act("inbox")}>Do skrzynki</button>}
+              {role === "spam" ? <button onClick={() => void act("inbox")}>To nie spam</button> : <button onClick={() => void act("spam")}>Spam</button>}
+              {role === "trash" ? <button onClick={() => void act("inbox")}>Przywróć z kosza</button> : <button onClick={() => void act("trash")}>Usuń</button>}
             </div>
           </header>
           <div className="thread">

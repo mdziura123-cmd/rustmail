@@ -136,12 +136,12 @@ impl Conn {
         }
     }
 
-    async fn cmd(&mut self, text: &str) -> Result<Reply, String> {
-        self.n += 1;
-        let tag = format!("A{:04}", self.n);
-        let line = format!("{tag} {text}\r\n");
-        tmo(IO_TIMEOUT, self.w.write_all(line.as_bytes()), "Zapis do serwera").await?;
-        tmo(IO_TIMEOUT, self.w.flush(), "Zapis do serwera").await?;
+    async fn send(&mut self, bytes: &[u8]) -> Result<(), String> {
+        tmo(IO_TIMEOUT, self.w.write_all(bytes), "Zapis do serwera").await?;
+        tmo(IO_TIMEOUT, self.w.flush(), "Zapis do serwera").await
+    }
+
+    async fn collect(&mut self, tag: &str) -> Result<Reply, String> {
         let prefix = format!("{tag} ");
         let mut untagged: Vec<Resp> = Vec::new();
         loop {
@@ -154,6 +154,39 @@ impl Conn {
                 continue;
             }
             untagged.push(r);
+        }
+    }
+
+    async fn cmd(&mut self, text: &str) -> Result<Reply, String> {
+        self.n += 1;
+        let tag = format!("A{:04}", self.n);
+        self.send(format!("{tag} {text}\r\n").as_bytes()).await?;
+        self.collect(&tag).await
+    }
+
+    /// Polecenie z jednym literałem na końcu (np. wyszukiwanie z polskimi znakami).
+    async fn ok_literal(&mut self, before: &str, lit: &[u8]) -> Result<Reply, String> {
+        self.n += 1;
+        let tag = format!("A{:04}", self.n);
+        self.send(format!("{tag} {before}{{{}}}\r\n", lit.len()).as_bytes()).await?;
+        let want = format!("{tag} ");
+        loop {
+            let r = self.read_resp().await?;
+            if r.head.starts_with('+') {
+                break;
+            }
+            if r.head.starts_with(&want) {
+                return Err("Serwer odrzucił zapytanie.".to_string());
+            }
+        }
+        let mut data = lit.to_vec();
+        data.extend_from_slice(b"\r\n");
+        self.send(&data).await?;
+        let r = self.collect(&tag).await?;
+        if r.ok {
+            Ok(r)
+        } else {
+            Err(format!("Serwer odrzucił zapytanie: {}", short(&r.text)))
         }
     }
 
@@ -335,17 +368,11 @@ pub async fn imap_list(account: String, folder: String, offset: u32) -> Result<P
     res
 }
 
-async fn list_inner(conn: &mut Conn, folder: &str, offset: u32) -> Result<Page, String> {
-    let total = conn.select(folder).await?;
-    if total == 0 || offset >= total {
-        return Ok(Page { rows: Vec::new(), next: None, total });
-    }
-    let hi = total - offset;
-    let lo = hi.saturating_sub(PAGE - 1).max(1);
+async fn fetch_rows(conn: &mut Conn, prefix: &str) -> Result<Vec<Row>, String> {
     let r = conn
-        .ok(&format!("FETCH {lo}:{hi} (UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])"))
+        .ok(&format!("{prefix} (UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])"))
         .await?;
-    let mut rows: Vec<(u32, Row)> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
     for u in &r.untagged {
         let Some(info) = p::parse_fetch(&u.head) else { continue };
         let Some(uid) = info.uid else { continue };
@@ -354,21 +381,100 @@ async fn list_inner(conn: &mut Conn, folder: &str, offset: u32) -> Result<Page, 
         }
         let hdr = u.lits.first().map(|b| b.as_slice()).unwrap_or(&[]);
         let (h, _) = mailparse::parse_headers(hdr).unwrap_or((Vec::new(), 0));
-        rows.push((
-            info.seq,
-            Row {
-                uid,
-                from: clip(h.get_first_value("From").unwrap_or_default(), 120),
-                subject: clip(h.get_first_value("Subject").unwrap_or_default(), 200),
-                date_ms: date_ms(h.get_first_value("Date")),
-                unread: !info.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen")),
-                starred: info.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Flagged")),
-            },
-        ));
+        rows.push(Row {
+            uid,
+            from: clip(h.get_first_value("From").unwrap_or_default(), 120),
+            subject: clip(h.get_first_value("Subject").unwrap_or_default(), 200),
+            date_ms: date_ms(h.get_first_value("Date")),
+            unread: !info.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen")),
+            starred: info.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Flagged")),
+        });
     }
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_by(|a, b| b.uid.cmp(&a.uid));
+    Ok(rows)
+}
+
+async fn list_inner(conn: &mut Conn, folder: &str, offset: u32) -> Result<Page, String> {
+    let total = conn.select(folder).await?;
+    if total == 0 || offset >= total {
+        return Ok(Page { rows: Vec::new(), next: None, total });
+    }
+    let hi = total - offset;
+    let lo = hi.saturating_sub(PAGE - 1).max(1);
+    let rows = fetch_rows(conn, &format!("FETCH {lo}:{hi}")).await?;
     let next = if lo > 1 { Some(offset + PAGE) } else { None };
-    Ok(Page { rows: rows.into_iter().map(|(_, r)| r).collect(), next, total })
+    Ok(Page { rows, next, total })
+}
+
+#[tauri::command]
+pub async fn imap_search(account: String, folder: String, query: String) -> Result<Page, String> {
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = search_inner(&mut conn, &folder, &query).await;
+    conn.bye().await;
+    res
+}
+
+async fn search_inner(conn: &mut Conn, folder: &str, query: &str) -> Result<Page, String> {
+    let q = query.trim();
+    if q.is_empty() || q.chars().count() > 100 || q.chars().any(|c| c.is_control()) {
+        return Err("Wpisz krótszą frazę bez znaków sterujących.".to_string());
+    }
+    conn.select(folder).await?;
+    let r = if q.is_ascii() {
+        conn.ok(&format!("UID SEARCH TEXT {}", p::quote(q)?)).await?
+    } else {
+        conn.ok_literal("UID SEARCH CHARSET UTF-8 TEXT ", q.as_bytes()).await?
+    };
+    let mut uids: Vec<u32> = Vec::new();
+    for u in &r.untagged {
+        if let Some(rest) = u.head.strip_prefix("* SEARCH") {
+            uids.extend(rest.split_whitespace().filter_map(|x| x.parse::<u32>().ok()));
+        }
+    }
+    uids.sort_unstable_by(|a, b| b.cmp(a));
+    uids.truncate(50);
+    if uids.is_empty() {
+        return Ok(Page { rows: Vec::new(), next: None, total: 0 });
+    }
+    let set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+    let rows = fetch_rows(conn, &format!("UID FETCH {set}")).await?;
+    let total = rows.len() as u32;
+    Ok(Page { rows, next: None, total })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Count {
+    pub name: String,
+    pub unseen: u32,
+}
+
+/// Liczba nieprzeczytanych w Odebranych i w Spamie.
+#[tauri::command]
+pub async fn imap_counts(account: String) -> Result<Vec<Count>, String> {
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = counts_inner(&mut conn).await;
+    conn.bye().await;
+    res
+}
+
+async fn counts_inner(conn: &mut Conn) -> Result<Vec<Count>, String> {
+    let folders = list_folders(conn).await?;
+    let mut out = Vec::new();
+    for f in folders.iter().filter(|f| f.role == "inbox" || f.role == "spam") {
+        let Ok(r) = conn.ok(&format!("STATUS {} (UNSEEN)", p::quote(&f.name)?)).await else { continue };
+        for u in &r.untagged {
+            if let Some(pos) = u.head.find("UNSEEN ") {
+                let n: String = u.head[pos + 7..].chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(unseen) = n.parse() {
+                    out.push(Count { name: f.name.clone(), unseen });
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[derive(Serialize)]
@@ -491,21 +597,23 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
             conn.ok(&cmd).await?;
             Ok(())
         }
-        "trash" | "spam" => {
-            let want = if action == "trash" { "trash" } else { "spam" };
+        "trash" | "spam" | "archive" | "inbox" => {
+            let want = action;
+            let (name_pl, here_msg) = match want {
+                "trash" => ("Kosz", "Ta wiadomość już jest w koszu."),
+                "spam" => ("Spam", "Ta wiadomość już jest w Spamie."),
+                "archive" => ("Archiwum", "Ta wiadomość już jest w archiwum."),
+                _ => ("Odebrane", "Ta wiadomość już jest w Odebranych."),
+            };
             let folders = list_folders(conn).await?;
             let here = folders.iter().find(|f| f.name == folder).map(|f| f.role.clone()).unwrap_or_default();
             if here == want {
-                return Err(if want == "trash" {
-                    "Ta wiadomość już jest w koszu.".to_string()
-                } else {
-                    "Ta wiadomość już jest w Spamie.".to_string()
-                });
+                return Err(here_msg.to_string());
             }
             let target = folders
                 .iter()
                 .find(|f| f.role == want)
-                .ok_or(if want == "trash" { "Nie znaleziono folderu Kosz." } else { "Nie znaleziono folderu Spam." })?
+                .ok_or_else(|| format!("Nie znaleziono folderu: {name_pl}."))?
                 .name
                 .clone();
             conn.select(folder).await?;
