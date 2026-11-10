@@ -142,7 +142,11 @@ pub fn parse_callback(request_line: &str) -> Result<(String, String), String> {
 }
 
 fn http_response(status: u16, msg: &str) -> String {
-    let reason = if status == 200 { "OK" } else { "Not Found" };
+    let reason = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        _ => "Not Found",
+    };
     let body = format!(
         "<!doctype html><meta charset=\"utf-8\"><title>RustMail</title>\
          <body style=\"font-family:sans-serif;margin:3rem\"><h2>RustMail</h2><p>{msg}</p></body>"
@@ -215,33 +219,46 @@ pub async fn sign_in_flow(http: &reqwest::Client, creds: &ClientCreds) -> Result
     .map_err(|e| e.to_string())?;
     open_browser(url.as_str())?;
 
-    let (code, got_state) = tokio::time::timeout(Duration::from_secs(300), async {
+    let code = tokio::time::timeout(Duration::from_secs(300), async {
         loop {
             let (mut stream, _) = listener.accept().await.map_err(|e| e.to_string())?;
             let mut buf = vec![0u8; 8192];
-            let n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
+            // Każde połączenie ma własny limit czasu – obce, milczące połączenie nie blokuje logowania.
+            let n = match tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf)).await {
+                Ok(Ok(n)) if n > 0 => n,
+                _ => continue,
+            };
             let req = String::from_utf8_lossy(&buf[..n]).to_string();
             let line = req.lines().next().unwrap_or("").to_string();
             if !line.contains("code=") && !line.contains("error=") {
                 let _ = stream.write_all(http_response(404, "Nie znaleziono").as_bytes()).await;
                 continue;
             }
-            let parsed = parse_callback(&line);
-            let msg = if parsed.is_ok() {
-                "Zalogowano. Możesz zamknąć tę kartę i wrócić do RustMail."
-            } else {
-                "Logowanie nie powiodło się. Wróć do RustMail."
-            };
-            let _ = stream.write_all(http_response(200, msg).as_bytes()).await;
-            return parsed;
+            match parse_callback(&line) {
+                // Żądanie z błędnym state (np. od innego procesu) jest ignorowane – czekamy na prawdziwe.
+                Ok((_, got)) if got != state => {
+                    let _ = stream.write_all(http_response(400, "Nieprawidłowe żądanie").as_bytes()).await;
+                    continue;
+                }
+                Ok((code, _)) => {
+                    let msg = "Zalogowano. Możesz zamknąć tę kartę i wrócić do RustMail.";
+                    let _ = stream.write_all(http_response(200, msg).as_bytes()).await;
+                    return Ok::<String, String>(code);
+                }
+                Err(_) if !line.contains(&format!("state={state}")) => {
+                    let _ = stream.write_all(http_response(400, "Nieprawidłowe żądanie").as_bytes()).await;
+                    continue;
+                }
+                Err(e) => {
+                    let msg = "Logowanie nie powiodło się. Wróć do RustMail.";
+                    let _ = stream.write_all(http_response(200, msg).as_bytes()).await;
+                    return Err(e);
+                }
+            }
         }
     })
     .await
     .map_err(|_| "Upłynął czas oczekiwania na logowanie (5 minut).".to_string())??;
-
-    if got_state != state {
-        return Err("Niezgodny parametr state – logowanie przerwano ze względów bezpieczeństwa.".to_string());
-    }
 
     let form = [
         ("code", code.as_str()),
