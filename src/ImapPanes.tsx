@@ -299,18 +299,18 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
           <header className="reader-head">
             <h2>{msg.subject || "(bez tematu)"}</h2>
             <div className="tools actions" role="toolbar" aria-label="Akcje na wiadomości">
-              {role === "drafts" && onEditDraft && <button className="primary" onClick={() => onEditDraft(msg)}><ActIcon n="edit"/>Edytuj wersję roboczą</button>}
-              <button className={role === "drafts" ? "" : "primary"} onClick={() => onCompose("reply", msg)}><ActIcon n="reply"/>Odpowiedz</button>
-              <button onClick={() => onCompose("replyAll", msg)}><ActIcon n="replyAll"/>Odpowiedz wszystkim</button>
-              <button onClick={() => onCompose("forward", msg)}><ActIcon n="forward"/>Przekaż dalej</button>
+              {role === "drafts" && onEditDraft && <button title="Edytuj wersję roboczą" aria-label="Edytuj wersję roboczą" className="primary" onClick={() => onEditDraft(msg)}><ActIcon n="edit"/></button>}
+              <button title="Odpowiedz nadawcy (r)" aria-label="Odpowiedz nadawcy (r)" className={role === "drafts" ? "" : "primary"} onClick={() => onCompose("reply", msg)}><ActIcon n="reply"/></button>
+              <button title="Odpowiedz wszystkim (a)" aria-label="Odpowiedz wszystkim (a)" onClick={() => onCompose("replyAll", msg)}><ActIcon n="replyAll"/></button>
+              <button title="Przekaż dalej (f)" aria-label="Przekaż dalej (f)" onClick={() => onCompose("forward", msg)}><ActIcon n="forward"/></button>
               <span className="sep" />
-              <button onClick={() => void act(msg.unread ? "read" : "unread")}><ActIcon n={msg.unread ? "read" : "unread"} />{msg.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}</button>
-              <button onClick={() => void act(msg.starred ? "unstar" : "star")}><ActIcon n="star" filled={msg.starred} />{msg.starred ? "Usuń gwiazdkę" : "Gwiazdka"}</button>
+              <button title={msg.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} aria-label={msg.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} onClick={() => void act(msg.unread ? "read" : "unread")}><ActIcon n={msg.unread ? "read" : "unread"} /></button>
+              <button title={msg.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} aria-label={msg.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} onClick={() => void act(msg.starred ? "unstar" : "star")}><ActIcon n="star" filled={msg.starred} /></button>
               <PrioMenu itemKey={imapPrioKey(account, folder, msg.uid)} onError={(m) => setErr(m)} />
-              {role === "inbox" && <button onClick={() => void act("archive")}><ActIcon n="archive"/>Archiwizuj</button>}
-              {!["inbox", "trash", "spam"].includes(role) && <button onClick={() => void act("inbox")}><ActIcon n="inbox"/>Do skrzynki</button>}
-              {role === "spam" ? <button onClick={() => void act("inbox")}><ActIcon n="notspam"/>To nie spam</button> : <button onClick={() => void act("spam")}><ActIcon n="spam"/>Spam</button>}
-              {role === "trash" ? <button onClick={() => void act("inbox")}><ActIcon n="restore"/>Przywróć z kosza</button> : <button onClick={() => void act("trash")}><ActIcon n="trash"/>Usuń</button>}
+              {role === "inbox" && <button title="Archiwizuj (e)" aria-label="Archiwizuj (e)" onClick={() => void act("archive")}><ActIcon n="archive"/></button>}
+              {!["inbox", "trash", "spam"].includes(role) && <button title="Przenieś do skrzynki odbiorczej" aria-label="Przenieś do skrzynki odbiorczej" onClick={() => void act("inbox")}><ActIcon n="inbox"/></button>}
+              {role === "spam" ? <button title="To nie jest spam – przenieś do skrzynki" aria-label="To nie jest spam – przenieś do skrzynki" onClick={() => void act("inbox")}><ActIcon n="notspam"/></button> : <button title="Oznacz jako spam (!)" aria-label="Oznacz jako spam (!)" onClick={() => void act("spam")}><ActIcon n="spam"/></button>}
+              {role === "trash" ? <button title="Przywróć z kosza" aria-label="Przywróć z kosza" onClick={() => void act("inbox")}><ActIcon n="restore"/></button> : <button title="Usuń – przenieś do kosza (Delete)" aria-label="Usuń – przenieś do kosza (Delete)" onClick={() => void act("trash")}><ActIcon n="trash"/></button>}
             </div>
           </header>
           <div className="thread">

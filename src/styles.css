@@ -180,3 +180,6 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 @keyframes ai-spin { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
 @keyframes ai-swing { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-18deg); } 65% { transform: rotate(10deg); } }
 .sound-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tools button { padding: 6px 9px; }
+.tools .ai, .tools .ai svg { width: 17px; height: 17px; }
+.tools .prio-menu > summary { padding: 6px 9px; }

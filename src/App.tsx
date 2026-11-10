@@ -1122,26 +1122,25 @@ export default function App() {
               <header className="reader-head">
                 <h2>{detail.subject}</h2>
                 <div className="tools actions" role="toolbar" aria-label="Akcje na konwersacji">
-                  <button className="primary" disabled={needsReauth} onClick={() => reply(false)}><ActIcon n="reply"/>Odpowiedz</button>
-                  <button disabled={needsReauth} onClick={() => reply(true)}><ActIcon n="replyAll"/>Odpowiedz wszystkim</button>
-                  <button disabled={needsReauth} onClick={forward}><ActIcon n="forward"/>Przekaż dalej</button>
+                  <button title="Odpowiedz nadawcy (r)" aria-label="Odpowiedz nadawcy (r)" className="primary" disabled={needsReauth} onClick={() => reply(false)}><ActIcon n="reply"/></button>
+                  <button title="Odpowiedz wszystkim (a)" aria-label="Odpowiedz wszystkim (a)" disabled={needsReauth} onClick={() => reply(true)}><ActIcon n="replyAll"/></button>
+                  <button title="Przekaż dalej (f)" aria-label="Przekaż dalej (f)" disabled={needsReauth} onClick={forward}><ActIcon n="forward"/></button>
                   <span className="sep" />
-                  {detail.inInbox && <button disabled={needsReauth} onClick={() => void runAction("archive")}><ActIcon n="archive"/>Archiwizuj</button>}
+                  {detail.inInbox && <button title="Archiwizuj (e)" aria-label="Archiwizuj (e)" disabled={needsReauth} onClick={() => void runAction("archive")}><ActIcon n="archive"/></button>}
                   {!detail.inInbox && !detail.inTrash && !detail.inSpam && (
-                    <button disabled={needsReauth} onClick={() => void runAction("unarchive")}><ActIcon n="inbox"/>Do skrzynki</button>
+                    <button title="Przenieś do skrzynki odbiorczej" aria-label="Przenieś do skrzynki odbiorczej" disabled={needsReauth} onClick={() => void runAction("unarchive")}><ActIcon n="inbox"/></button>
                   )}
                   {detail.inSpam
-                    ? <button disabled={needsReauth} onClick={() => void runAction("notspam")}><ActIcon n="notspam"/>To nie spam</button>
-                    : <button disabled={needsReauth} onClick={() => void runAction("spam")}><ActIcon n="spam"/>Spam</button>}
+                    ? <button title="To nie jest spam – przenieś do skrzynki" aria-label="To nie jest spam – przenieś do skrzynki" disabled={needsReauth} onClick={() => void runAction("notspam")}><ActIcon n="notspam"/></button>
+                    : <button title="Oznacz jako spam (!)" aria-label="Oznacz jako spam (!)" disabled={needsReauth} onClick={() => void runAction("spam")}><ActIcon n="spam"/></button>}
                   {detail.inTrash
-                    ? <button disabled={needsReauth} onClick={() => void runAction("untrash")}><ActIcon n="restore"/>Przywróć z kosza</button>
-                    : <button disabled={needsReauth} onClick={() => void runAction("trash")}><ActIcon n="trash"/>Usuń</button>}
-                  <button disabled={needsReauth} onClick={() => void runAction(detail.unread ? "read" : "unread")}>
-                    <ActIcon n={detail.unread ? "read" : "unread"} />{detail.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}
-                  </button>
+                    ? <button title="Przywróć z kosza" aria-label="Przywróć z kosza" disabled={needsReauth} onClick={() => void runAction("untrash")}><ActIcon n="restore"/></button>
+                    : <button title="Usuń – przenieś do kosza (Delete)" aria-label="Usuń – przenieś do kosza (Delete)" disabled={needsReauth} onClick={() => void runAction("trash")}><ActIcon n="trash"/></button>}
+                  <button title={detail.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} aria-label={detail.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} disabled={needsReauth} onClick={() => void runAction(detail.unread ? "read" : "unread")}>
+                    <ActIcon n={detail.unread ? "read" : "unread"} /></button>
                   {stats.labels.length > 0 && (
                     <details className="label-menu">
-                      <summary><ActIcon n="label" />Etykiety</summary>
+                      <summary title="Etykiety" aria-label="Etykiety"><ActIcon n="label" /></summary>
                       <div className="label-pop">
                         {stats.labels.map((l) => (
                           <label key={l.id} className="check">
@@ -1154,19 +1153,18 @@ export default function App() {
                       </div>
                     </details>
                   )}
-                  <button disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
-                    <ActIcon n="star" filled={detail.starred} />{detail.starred ? "Usuń gwiazdkę" : "Gwiazdka"}
-                  </button>
+                  <button title={detail.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} aria-label={detail.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
+                    <ActIcon n="star" filled={detail.starred} /></button>
                   {email && <PrioMenu itemKey={gmailPrioKey(email, detail.id)} onError={showToast} />}
                   {(() => {
                     const t = replyTarget(detail.messages);
                     return t && !t.mine ? (
-                      <button onClick={() => setSenderDlg({ email: t.fromEmail })}><ActIcon n="user"/>Nadawca…</button>
+                      <button title="Opcje nadawcy" aria-label="Opcje nadawcy" onClick={() => setSenderDlg({ email: t.fromEmail })}><ActIcon n="user"/></button>
                     ) : null;
                   })()}
                   <span className="sep" />
-                  <button onClick={() => setCollapsed(new Set())}><ActIcon n="expand"/>Rozwiń wszystkie</button>
-                  <button onClick={() => setCollapsed(new Set(detail.messages.map((m) => m.id)))}><ActIcon n="collapse"/>Zwiń wszystkie</button>
+                  <button title="Rozwiń wszystkie wiadomości w wątku" aria-label="Rozwiń wszystkie wiadomości w wątku" onClick={() => setCollapsed(new Set())}><ActIcon n="expand"/></button>
+                  <button title="Zwiń wszystkie wiadomości w wątku" aria-label="Zwiń wszystkie wiadomości w wątku" onClick={() => setCollapsed(new Set(detail.messages.map((m) => m.id)))}><ActIcon n="collapse"/></button>
                 </div>
               </header>
               <RiskBanner messages={detail.messages} dismissed={detail.dismissed} onSafe={(s) => void setSafe(s)} />
