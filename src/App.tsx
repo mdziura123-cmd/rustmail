@@ -11,7 +11,7 @@ import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
 import { ActIcon } from "./ActIcon";
 import { loadSound, playSound, saveSound, type SoundId } from "./sound";
-import { commandFor, isTypingTarget, SHORTCUT_HELP } from "./shortcuts";
+import { applyCustomKeys, commandFor, customKeys, isTypingTarget, shortcutHelp } from "./shortcuts";
 import { Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
@@ -37,7 +37,8 @@ import "./styles.css";
 import "./compose.css";
 
 type Theme = ThemeId;
-const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent", view: "rm.view", active: "rm.activeonly" };
+const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent", view: "rm.view", keys: "rm.keys", active: "rm.activeonly" };
+try { applyCustomKeys(JSON.parse(localStorage.getItem("rm.keys") ?? "null")); } catch { /* zapisane skróty są nieczytelne – zostają domyślne */ }
 const STAR = "M12 3l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.8 6.1 21l1.2-6.5L2.5 9.9 9.1 9z";
 
 function load(key: string, fallback: string): string {
@@ -900,7 +901,14 @@ export default function App() {
 
   return (
     <div className="app">
-      <Titlebar />
+      <Titlebar>
+        {email && (
+          <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
+            label={imapAccount ?? email} busy={signingIn}
+            onGmail={(a) => { changeView("gmail"); if (a !== email) void switchAccount(a); }}
+            onImap={(a) => changeView("imap:" + a)} />
+        )}
+      </Titlebar>
       <div className="panes" style={{ gridTemplateColumns: `${left.width}px 6px ${mid.width}px 6px 1fr` }}>
         <aside className="sidebar" aria-label="Foldery">
           <div className="brand">
@@ -913,12 +921,6 @@ export default function App() {
           <button className="primary" disabled={!email || needsReauth}
             title={needsReauth ? "Zaloguj się ponownie, aby wysyłać wiadomości" : undefined}
             onClick={() => startCompose(buildNew(signature))}>Nowa wiadomość</button>
-          {email && (
-            <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
-              label={imapAccount ?? email} busy={signingIn}
-              onGmail={(a) => { changeView("gmail"); if (a !== email) void switchAccount(a); }}
-              onImap={(a) => changeView("imap:" + a)} />
-          )}
           <nav>
             {imapAccount ? <ImapSidebarNav imap={imap} /> : FOLDERS.map((f) => (
               <button key={f.id} className={"folder" + (f.id === folder ? " active" : "")}
@@ -953,14 +955,6 @@ export default function App() {
             )}
           </nav>
           <div className="spacer" />
-          <label className="theme">
-            <span>Motyw</span>
-            <select value={theme} onChange={(e) => setTheme(isThemeId(e.target.value) ? e.target.value : "auto")}>
-              {THEMES.map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </select>
-          </label>
         </aside>
 
         <div className="handle" onPointerDown={left.onPointerDown} role="separator" aria-orientation="vertical" />
@@ -1229,7 +1223,7 @@ export default function App() {
             <h3>Skróty klawiszowe</h3>
             <table className="keys">
               <tbody>
-                {SHORTCUT_HELP.map((k) => (
+                {shortcutHelp().map((k) => (
                   <tr key={k.keys}><th scope="row"><kbd>{k.keys}</kbd></th><td>{k.what}</td></tr>
                 ))}
               </tbody>
@@ -1250,6 +1244,8 @@ export default function App() {
           onSignOut={() => { setSettingsOpen(false); void signOut(); }} onSignOutImap={(a) => { setSettingsOpen(false); void signOutImap(a); }}
           autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}
           onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}
+          theme={theme} onTheme={setTheme}
+          onKeysChanged={() => save(LS.keys, JSON.stringify(customKeys()))}
           sound={sound} onSound={(s) => { setSound(s); saveSound(s); }}
           onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}
           onContent={(on) => { setNotifyContent(on); save(LS.content, on ? "1" : "0"); }}

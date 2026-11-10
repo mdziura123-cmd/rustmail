@@ -201,3 +201,51 @@ button:disabled .ai { opacity: .5; }
   .small:hover:not(:disabled) .ai-search, .small:focus-visible .ai-search { animation: ai-swing .6s ease; }
 }
 .tools .primary .ai { color: var(--accent-ink); }
+
+/* Okno pisania wiadomości: ikony zamiast napisów */
+.ai-save { --h: #2f9e5f; } .ai-send { --h: #ffffff; } .ai-attach { --h: #d9822b; } .ai-list, .ai-olist { --h: #4f7cc9; }
+.ai-link { --h: #2f80ed; } .ai-eraser { --h: #d9822b; } .ai-plus { --h: #2f80ed; } .ai-dict { --h: #9b5de5; }
+.compose .primary .ai { color: var(--accent-ink); }
+.compose-foot button:not(.primary), .compose-foot .primary { display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; }
+.compose-foot .ai, .compose-foot .ai svg { width: 18px; height: 18px; }
+.compose-foot .small { padding: 6px 9px; }
+.tb { display: inline-flex; align-items: center; }
+.tb .ai, .tb .ai svg { width: 16px; height: 16px; }
+.linklike.plain .ai { vertical-align: middle; }
+@media (prefers-reduced-motion: no-preference) {
+  button:hover:not(:disabled) .ai-save, button:focus-visible .ai-save { animation: ai-pop .45s ease; }
+  button:hover:not(:disabled) .ai-send, button:focus-visible .ai-send { animation: ai-fly .6s ease; }
+  button:hover:not(:disabled) .ai-attach, button:focus-visible .ai-attach { animation: ai-swing .6s ease; }
+  button:hover:not(:disabled) .ai-list, button:focus-visible .ai-list,
+  button:hover:not(:disabled) .ai-olist, button:focus-visible .ai-olist { animation: ai-drop .5s ease; }
+  button:hover:not(:disabled) .ai-link, button:focus-visible .ai-link { animation: ai-swing .6s ease; }
+  button:hover:not(:disabled) .ai-eraser, button:focus-visible .ai-eraser { animation: ai-shake .5s ease; }
+  button:hover:not(:disabled) .ai-plus, button:focus-visible .ai-plus { animation: ai-spin .5s ease; }
+  button:hover:not(:disabled) .ai-dict, button:focus-visible .ai-dict { animation: ai-pop .45s ease; }
+  button[aria-busy="true"] .ai-send { animation: ai-fly 1s ease infinite; }
+}
+@keyframes ai-fly { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(4px, -4px); } }
+
+/* Okrągły przełącznik kont na pasku okna */
+.tb-right { display: flex; align-items: center; height: 100%; gap: 4px; }
+.acc-avatar { position: relative; height: 100%; display: flex; align-items: center; }
+.av-btn { position: relative; width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid transparent; background: transparent; display: grid; place-items: center; cursor: pointer; transition: border-color .15s ease, transform .15s ease; }
+.av-btn:hover, .av-btn.open { border-color: var(--accent); transform: scale(1.08); }
+.av { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 1; color: #fff;
+  background: hsl(var(--hue) 45% 42%); }
+.av.sm { width: 24px; height: 24px; font-size: 12px; flex: none; }
+.av-count { position: absolute; right: -5px; bottom: -4px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); font-size: 9px; font-weight: 700; display: grid; place-items: center; }
+.acc-avatar .acc-pop { left: auto; right: 0; top: calc(100% + 2px); width: max-content; min-width: 260px; max-width: 360px; z-index: 60; margin-top: 0; padding: 4px; }
+.acc-avatar .acc-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; text-align: left; }
+.acc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-kind { font-size: 11px; color: var(--muted); }
+.acc-check { color: var(--accent); font-weight: 700; }
+@media (prefers-reduced-motion: no-preference) {
+  .av-btn .av { animation: av-in .45s ease; }
+  .av-btn:hover .av { animation: av-wobble .6s ease; }
+  .acc-pop { animation: acc-drop .14s ease-out; }
+}
+@keyframes av-in { 0% { transform: rotate(-180deg) scale(.3); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes av-wobble { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-14deg); } 65% { transform: rotate(10deg); } }
+@keyframes acc-drop { from { transform: translateY(-4px); opacity: 0; } to { transform: none; opacity: 1; } }
+.keys td:last-child { text-align: right; padding-left: 12px; }

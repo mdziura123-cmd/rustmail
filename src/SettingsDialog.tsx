@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
-import { SHORTCUT_HELP } from "./shortcuts";
+import { BINDINGS, customKeys, keyLabel, keyOf, keysVersion, resetKeys, setKey, subscribeKeys } from "./shortcuts";
+import { isThemeId, THEMES, type ThemeId } from "./themes";
 import { getProvider, PROVIDERS, setProvider, type Provider } from "./translateProviders";
 import type { Account, ImapAccount } from "./types";
 
@@ -18,6 +19,9 @@ interface Props {
   notify: boolean;
   content: boolean;
   onNotify: (on: boolean) => void;
+  theme: ThemeId;
+  onTheme: (t: ThemeId) => void;
+  onKeysChanged: () => void;
   sound: SoundId;
   onSound: (s: SoundId) => void;
   onContent: (on: boolean) => void;
@@ -118,6 +122,58 @@ function TranslateSettings() {
   );
 }
 
+/** Edytor skrótów: „Zmień”, potem naciśnięcie nowego klawisza. Zmiany zapisują się od razu. */
+function KeyEditor({ onChanged }: { onChanged: () => void }) {
+  useSyncExternalStore(subscribeKeys, keysVersion);
+  const [capturing, setCapturing] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!capturing) return;
+    const h = (e: KeyboardEvent) => {
+      if (["Shift", "Control", "Alt", "Meta", "AltGraph", "CapsLock"].includes(e.key)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape") { setCapturing(null); setErr(null); return; }
+      if (e.ctrlKey || e.altKey || e.metaKey) { setErr("Skrót nie może używać Ctrl, Alt ani Meta."); return; }
+      const b = BINDINGS.find((x) => x.cmd === capturing);
+      if (!b) return;
+      const r = setKey(b.cmd, e.key);
+      if (r) { setErr(r); return; }
+      setErr(null); setCapturing(null); onChanged();
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  }, [capturing, onChanged]);
+  const changed = Object.keys(customKeys()).length > 0;
+  return (
+    <>
+      <table className="keys">
+        <tbody>
+          {BINDINGS.map((b) => (
+            <tr key={b.cmd}>
+              <th scope="row"><kbd>{capturing === b.cmd ? "naciśnij klawisz…" : keyLabel(keyOf(b.cmd))}</kbd></th>
+              <td>{b.what}</td>
+              <td>
+                <button className="small" onClick={() => { setErr(null); setCapturing(capturing === b.cmd ? null : b.cmd); }}>
+                  {capturing === b.cmd ? "Anuluj" : "Zmień"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {err && <p className="error" role="alert">{err}</p>}
+      <p className="hint">
+        Kliknij „Zmień” i naciśnij nowy klawisz (z Shiftem dla wielkiej litery). Klawisz musi być wolny. Stałe są: Delete (usuń),
+        Esc i ? (pomoc), Ctrl+A oraz klik z Ctrl lub Shift. Skróty nie działają podczas pisania w polu tekstowym ani w otwartym oknie.
+      </p>
+      <div className="modal-actions">
+        <button disabled={!changed} onClick={() => { resetKeys(); setCapturing(null); setErr(null); onChanged(); }}>Przywróć domyślne</button>
+      </div>
+    </>
+  );
+}
+
 export function SettingsDialog(p: Props) {
   const [tab, setTab] = useState<Tab>("general");
   const [msg, setMsg] = useState<string | null>(null);
@@ -155,6 +211,12 @@ export function SettingsDialog(p: Props) {
           <div className="settings-body">
             {tab === "general" && (
               <>
+                <div className="check sound-row">
+                  <label htmlFor="theme-pick">Motyw</label>
+                  <select id="theme-pick" value={p.theme} onChange={(e) => p.onTheme(isThemeId(e.target.value) ? e.target.value : "auto")}>
+                    {THEMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                </div>
                 <label className="check">
                   <input type="checkbox" checked={p.notify} onChange={(e) => p.onNotify(e.target.checked)} />
                   Powiadomienia pulpitowe o nowych wiadomościach
@@ -226,14 +288,7 @@ export function SettingsDialog(p: Props) {
             )}
             {tab === "shortcuts" && (
               <>
-                <table className="keys">
-                  <tbody>
-                    {SHORTCUT_HELP.map((s) => (
-                      <tr key={s.keys}><th scope="row"><kbd>{s.keys}</kbd></th><td>{s.what}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="hint">Skróty nie działają podczas pisania w polu tekstowym ani w otwartym oknie.</p>
+                <KeyEditor onChanged={p.onKeysChanged} />
               </>
             )}
             {tab === "updates" && (

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ActIcon } from "./ActIcon";
 import { api, errText } from "./api";
 import { RichEditor, type EditorApi } from "./RichEditor";
 import { SpellBar } from "./SpellBar";
@@ -212,8 +213,8 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
         <h2>{MODE_TITLE[init.mode]}</h2>
         <span className="status-text" aria-live="polite">{status}</span>
         <span className="grow" />
-        <button className="small" disabled={sending} onClick={() => void saveDraft(true)}>Zapisz wersję roboczą</button>
-        <button className="small" disabled={sending} onClick={() => void requestClose()}>Zamknij</button>
+        <button className="small" disabled={sending} title="Zapisz wersję roboczą" aria-label="Zapisz wersję roboczą" onClick={() => void saveDraft(true)}><ActIcon n="save" /></button>
+        <button className="small" disabled={sending} title="Zamknij" aria-label="Zamknij" onClick={() => void requestClose()}><ActIcon n="clear" /></button>
       </header>
 
       {confirmClose && (
@@ -246,7 +247,7 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
             </label>
           </>
         ) : (
-          <button className="linklike plain" onClick={() => setShowCc(true)}>Dodaj DW / UDW</button>
+          <button className="linklike plain" title="Dodaj DW / UDW" aria-label="Dodaj DW / UDW" onClick={() => setShowCc(true)}><ActIcon n="plus" /></button>
         )}
         <label><span>Temat</span>
           <input value={subject} onChange={(e) => { setSubject(e.target.value); markDirty(); }} disabled={sending} />
@@ -264,7 +265,7 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
             <li key={a.name + i}>
               {a.name} · {fmtSize(a.size)}
               <button className="linklike plain" disabled={sending}
-                onClick={() => { setAtts((l) => l.filter((_, j) => j !== i)); markDirty(); }}>Usuń</button>
+                title={`Usuń załącznik ${a.name}`} aria-label={`Usuń załącznik ${a.name}`} onClick={() => { setAtts((l) => l.filter((_, j) => j !== i)); markDirty(); }}><ActIcon n="trash" /></button>
             </li>
           ))}
         </ul>
@@ -282,12 +283,12 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
       )}
 
       <footer className="compose-foot">
-        <button className="primary" disabled={sending} onClick={() => void send()}>{sending ? "Wysyłanie…" : "Wyślij"}</button>
+        <button className="primary" disabled={sending} title={sending ? "Wysyłanie…" : "Wyślij"} aria-label={sending ? "Wysyłanie…" : "Wyślij"} aria-busy={sending} onClick={() => void send()}><ActIcon n="send" /></button>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => void addFiles(e.target.files)} />
-        <button disabled={sending} onClick={() => fileRef.current?.click()}>Dodaj załącznik</button>
+        <button disabled={sending} title="Dodaj załącznik" aria-label="Dodaj załącznik" onClick={() => fileRef.current?.click()}><ActIcon n="attach" /></button>
         <span className="grow" />
-        <button className="small warn" disabled={sending} onClick={() => void discard()}>
-          {draftId ? "Usuń wersję roboczą" : "Odrzuć"}
+        <button className="small warn" disabled={sending} title={draftId ? "Usuń wersję roboczą" : "Odrzuć wiadomość"} aria-label={draftId ? "Usuń wersję roboczą" : "Odrzuć wiadomość"} onClick={() => void discard()}>
+          <ActIcon n="trash" />
         </button>
       </footer>
     </section>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ActIcon } from "./ActIcon";
 import { FONTS, isSafeHref, SIZES, sanitizeHtml } from "./sanitize";
 
 /** Operacje na treści edytora potrzebne do sprawdzania pisowni. */
@@ -156,7 +157,7 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
     emit();
   };
 
-  const btn = (label: string, title: string, run: () => void, cls = "") => (
+  const btn = (label: React.ReactNode, title: string, run: () => void, cls = "") => (
     <button type="button" className={"tb " + cls} title={title} aria-label={title} disabled={disabled}
       onMouseDown={(e) => e.preventDefault()} onClick={run}>
       {label}
@@ -181,10 +182,10 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
           <option value="">Rozmiar</option>
           {SIZES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
-        {btn("• Lista", "Lista punktowana", () => cmd("insertUnorderedList"))}
-        {btn("1. Lista", "Lista numerowana", () => cmd("insertOrderedList"))}
-        {btn("Link", "Wstaw link", () => { rememberSelection(); setLinkOpen((v) => !v); })}
-        {btn("Wyczyść", "Usuń formatowanie zaznaczenia", () => cmd("removeFormat"))}
+        {btn(<ActIcon n="list" />, "Lista punktowana", () => cmd("insertUnorderedList"))}
+        {btn(<ActIcon n="olist" />, "Lista numerowana", () => cmd("insertOrderedList"))}
+        {btn(<ActIcon n="link" />, "Wstaw link", () => { rememberSelection(); setLinkOpen((v) => !v); })}
+        {btn(<ActIcon n="eraser" />, "Usuń formatowanie zaznaczenia", () => cmd("removeFormat"))}
       </div>
       {linkOpen && (
         <div className="linkbar">

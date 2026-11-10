@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ActIcon } from "./ActIcon";
 import type { EditorApi } from "./RichEditor";
 import { addCustomWord, checkWords, ensureSpell, extractWords, suggestWord, type SpellLang } from "./spell";
 
@@ -109,8 +110,8 @@ export function SpellBar({ getHtml, tick, api }: Props) {
               <button type="button" className="small solid" key={s} onMouseDown={keep} onClick={() => fix(w, s)}>{s}</button>
             ))
           )}
-          <button type="button" className="small" title="Dodaj do słownika" aria-label={`Dodaj „${w}” do słownika`} onMouseDown={keep} onClick={() => learn(w)}>+ słownik</button>
-          <button type="button" className="small" title="Ignoruj" aria-label={`Ignoruj „${w}”`} onMouseDown={keep} onClick={() => ignore(w)}>✕</button>
+          <button type="button" className="small" title="Dodaj do słownika" aria-label={`Dodaj „${w}” do słownika`} onMouseDown={keep} onClick={() => learn(w)}><ActIcon n="dict" /></button>
+          <button type="button" className="small" title="Ignoruj" aria-label={`Ignoruj „${w}”`} onMouseDown={keep} onClick={() => ignore(w)}><ActIcon n="clear" /></button>
         </span>
       ))}
       {status === "ready" && bad.length > 6 && <span className="hint">…i {bad.length - 6} więcej</span>}
