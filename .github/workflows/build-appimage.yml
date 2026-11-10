@@ -6,22 +6,27 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   appimage:
     # Ubuntu 22.04 = starsze glibc, dzięki czemu AppImage działa też na nowszych systemach (np. Bazzite).
     runs-on: ubuntu-22.04
     permissions:
-      contents: write # potrzebne do dołączenia plików do wydania (tagi v*)
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri
 
@@ -38,16 +43,17 @@ jobs:
           V="${GITHUB_REF_NAME#v}"
           sed -i "0,/^version = \".*\"/s//version = \"$V\"/" src-tauri/Cargo.toml
           sed -i "s/\"version\": \".*\"/\"version\": \"$V\"/" src-tauri/tauri.conf.json package.json
+          sed -i '/^name = "rustmail"$/{n;s/^version = ".*"/version = "'"$V"'"/}' src-tauri/Cargo.lock
           echo "Wersja: $V"
 
       - name: Zależności frontendu i kontrola typów
         run: |
-          npm install
+          npm ci --ignore-scripts
           npm run typecheck
 
       - name: Testy Rust
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
       - name: Budowanie AppImage
         env:
@@ -74,21 +80,57 @@ jobs:
           echo "Budowanie nie powiodło się po 5 próbach"
           exit 1
 
-      - name: Nazwa pliku i suma SHA-256
+      - name: Nazwa pliku
         run: |
           mkdir -p dist-release
           cp "$(ls -t src-tauri/target/release/bundle/appimage/*.AppImage | head -n1)" dist-release/RustMail-x86_64.AppImage
           chmod +x dist-release/RustMail-x86_64.AppImage
-          (cd dist-release && sha256sum RustMail-x86_64.AppImage > RustMail-x86_64.AppImage.sha256)
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: RustMail-x86_64.AppImage
-          path: dist-release/*
+          path: dist-release/RustMail-x86_64.AppImage
           if-no-files-found: error
 
-      - name: Dołącz pliki do wydania (tylko dla tagów v*)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  # Osobne zadanie: tylko ono ma prawo zapisu do wydań i dostęp do klucza podpisującego.
+  # Kod zależności z etapu budowania nigdy nie widzi tych uprawnień.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: appimage
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: RustMail-x86_64.AppImage
+          path: dist-release
+
+      - name: Suma SHA-256 i podpis Ed25519
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          # Klucz publiczny wkompilowany w aplikację (update.rs, UPDATE_PUBKEY). Niezgodność przerywa wydanie.
+          EXPECTED_PUBKEY_HEX: f77f42f6180af5d1a7b6e3f9f57ce18bfd3222a5d5e7c7770ca6733eef9faa47
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "${UPDATE_SIGNING_KEY:-}" ]; then echo "Brak sekretu UPDATE_SIGNING_KEY"; exit 1; fi
+          cd dist-release
+          chmod +x RustMail-x86_64.AppImage
+          sha256sum RustMail-x86_64.AppImage > RustMail-x86_64.AppImage.sha256
+          SHA=$(cut -d' ' -f1 RustMail-x86_64.AppImage.sha256)
+          KEY="$RUNNER_TEMP/signing-key.pem"
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$KEY"
+          GOT=$(openssl pkey -in "$KEY" -pubout -outform DER | tail -c 32 | od -An -tx1 -v | tr -d ' \n')
+          if [ "$GOT" != "$EXPECTED_PUBKEY_HEX" ]; then rm -f "$KEY"; echo "Klucz podpisu nie pasuje do klucza publicznego w aplikacji"; exit 1; fi
+          printf 'rustmail-appimage-sha256:%s' "$SHA" > "$RUNNER_TEMP/msg"
+          openssl pkeyutl -sign -rawin -inkey "$KEY" -in "$RUNNER_TEMP/msg" -out RustMail-x86_64.AppImage.sig
+          openssl pkey -in "$KEY" -pubout -out "$RUNNER_TEMP/pub.pem"
+          openssl pkeyutl -verify -rawin -pubin -inkey "$RUNNER_TEMP/pub.pem" -in "$RUNNER_TEMP/msg" -sigfile RustMail-x86_64.AppImage.sig
+          rm -f "$KEY"
+          test "$(wc -c < RustMail-x86_64.AppImage.sig)" -eq 64
+
+      - name: Dołącz pliki do wydania
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist-release/*
