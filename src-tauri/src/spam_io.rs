@@ -19,6 +19,8 @@ const LIST_MAX_BYTES: usize = 40 * 1024 * 1024;
 const LIST_MAX_DOMAINS: usize = 1_500_000;
 const SEEN_CAP: usize = 3_000;
 const LOG_CAP: usize = 100;
+/// Najwyżej tyle znaków treści wiadomości trafia do dziennika (ogranicza ilość poufnych danych na dysku).
+const LOG_SNIPPET_CHARS: usize = 80;
 const MAX_MOVES_PER_SCAN: usize = 50;
 const DETAIL_BUDGET_AUTO: usize = 10;
 const DETAIL_BUDGET_MANUAL: usize = 40;
@@ -177,6 +179,19 @@ fn with_model<R>(app: &AppHandle, st: &SpamState, f: impl FnOnce(&mut Model) -> 
     }
 }
 
+/// Usuwa dziennik i wytrenowany model z dysku oraz z pamięci.
+pub fn wipe_data(app: &AppHandle, st: &SpamState) -> Result<(), String> {
+    for p in [log_path(app)?, model_path(app)?] {
+        match std::fs::remove_file(&p) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("Nie udało się usunąć pliku: {e}")),
+        }
+    }
+    *lock(&st.model) = None;
+    Ok(())
+}
+
 fn save_model(app: &AppHandle, st: &SpamState) {
     let text = with_model(app, st, |m| m.to_text());
     if let Ok(p) = model_path(app) {
@@ -261,7 +276,8 @@ fn write_log(app: &AppHandle, entries: &[LogEntry]) {
     }
 }
 
-fn log_add(app: &AppHandle, entry: LogEntry) {
+fn log_add(app: &AppHandle, mut entry: LogEntry) {
+    entry.snippet = entry.snippet.chars().take(LOG_SNIPPET_CHARS).collect();
     let mut v = read_log(app);
     v.retain(|e| !(e.id == entry.id && e.open));
     v.insert(0, entry);

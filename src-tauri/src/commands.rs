@@ -117,6 +117,7 @@ pub async fn sign_out(state: State<'_, AppState>, store: State<'_, Store>, notif
         *s = notify::Seen::default();
     }
     let _ = store.clear();
+    let _ = store.backup_clear();
     let current = secrets::get(auth::KEY_EMAIL)?;
     if let Some(token) = secrets::get(auth::KEY_REFRESH)? {
         auth::revoke(&state.http, &token).await;
@@ -918,6 +919,31 @@ pub async fn spam_set_config(app: AppHandle, spam: State<'_, SpamState>, config:
 #[tauri::command]
 pub async fn spam_status(app: AppHandle, spam: State<'_, SpamState>) -> Result<spam_io::Status, String> {
     Ok(spam_io::status(&app, &spam))
+}
+
+/// Kopia robocza pisanej wiadomości trafia do zaszyfrowanej bazy. Limit rozmiaru chroni bazę.
+#[tauri::command]
+pub fn compose_backup_set(store: State<'_, Store>, json: String) -> Result<(), String> {
+    if json.len() > 5_000_000 {
+        return Err("Kopia robocza jest zbyt duża.".to_string());
+    }
+    store.backup_set(&json)
+}
+
+#[tauri::command]
+pub fn compose_backup_get(store: State<'_, Store>) -> Option<String> {
+    store.backup_get()
+}
+
+#[tauri::command]
+pub fn compose_backup_clear(store: State<'_, Store>) -> Result<(), String> {
+    store.backup_clear()
+}
+
+/// Usuwa dziennik filtra spamu i wytrenowany model (dane lokalne, bez szyfrowania).
+#[tauri::command]
+pub fn spam_wipe_data(app: AppHandle, spam: State<'_, SpamState>) -> Result<(), String> {
+    spam_io::wipe_data(&app, &spam)
 }
 
 #[tauri::command]

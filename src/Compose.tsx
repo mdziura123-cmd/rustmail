@@ -7,7 +7,6 @@ import { sanitizeHtml } from "./sanitize";
 import type { OutAttachment, OutgoingMessage } from "./types";
 import { fmtSize } from "./util";
 
-export const BACKUP_KEY = "rm.compose.backup";
 const MAX_ATTACH_BYTES = 20 * 1024 * 1024;
 const AUTOSAVE_MS = 20000;
 
@@ -41,11 +40,10 @@ function readFile(file: File): Promise<Att> {
   });
 }
 
+// Kopia robocza trafia do zaszyfrowanej bazy lokalnej (nie do localStorage). Brak bazy = brak kopii.
 function backup(value: unknown | null) {
-  try {
-    if (value === null) localStorage.removeItem(BACKUP_KEY);
-    else localStorage.setItem(BACKUP_KEY, JSON.stringify(value));
-  } catch { /* brak dostępu do pamięci – kopia lokalna jest dodatkiem */ }
+  const p = value === null ? api.composeBackupClear() : api.composeBackupSet(JSON.stringify(value));
+  p.catch(() => { /* kopia lokalna jest dodatkiem */ });
 }
 
 export function Compose({ init, onSent, onQueued, onClose, from: fromProp, senders }: Props) {

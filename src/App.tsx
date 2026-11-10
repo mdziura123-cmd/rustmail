@@ -7,7 +7,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
 import { commandFor, isTypingTarget, SHORTCUT_HELP } from "./shortcuts";
-import { BACKUP_KEY, Compose } from "./Compose";
+import { Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
 import { splitQuoted } from "./quoteTrim";
@@ -285,7 +285,9 @@ export default function App() {
   useEffect(() => {
     if (!email) return;
     api.getSignature().then(setSignature).catch(() => setSignature(""));
-    try { if (localStorage.getItem(BACKUP_KEY)) setRestore(localStorage.getItem(BACKUP_KEY)); } catch { /* ignorujemy */ }
+    // Stara, niezaszyfrowana kopia w localStorage jest usuwana; nowa leży w zaszyfrowanej bazie.
+    try { localStorage.removeItem("rm.compose.backup"); } catch { /* ignorujemy */ }
+    api.composeBackupGet().then((b) => { if (b) setRestore(b); }).catch(() => { /* ignorujemy */ });
   }, [email]);
 
   const restoreBackup = () => {
@@ -293,11 +295,11 @@ export default function App() {
       const b = JSON.parse(restore ?? "") as { init: ComposeInit; to: string; cc: string; bcc: string; subject: string; html: string };
       startCompose({ ...b.init, to: b.to, cc: b.cc, bcc: b.bcc, subject: b.subject, html: b.html });
     } catch { showToast("Nie udało się odczytać kopii wiadomości."); }
-    try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignorujemy */ }
+    api.composeBackupClear().catch(() => { /* ignorujemy */ });
     setRestore(null);
   };
   const dropBackup = () => {
-    try { localStorage.removeItem(BACKUP_KEY); } catch { /* ignorujemy */ }
+    api.composeBackupClear().catch(() => { /* ignorujemy */ });
     setRestore(null);
   };
 

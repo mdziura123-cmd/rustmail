@@ -45,6 +45,7 @@ export function SpamDialog({ onClose, onChanged, onToast }: Props) {
   const [log, setLog] = useState<SpamLogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [confirmWipe, setConfirmWipe] = useState(false);
 
   const refresh = useCallback(async () => {
     try { setStatus(await api.spamStatus()); } catch { /* ignorujemy */ }
@@ -168,6 +169,20 @@ export function SpamDialog({ onClose, onChanged, onToast }: Props) {
             const notes = r.notes.length ? ` ${r.notes.join(" ")}` : "";
             return `Sprawdzono ${r.checked}: przeniesiono ${r.moved}, oznaczono ${r.flagged}.${notes}`;
           })}>{busy === "scan" ? "Sprawdzanie…" : "Przeskanuj skrzynkę teraz"}</button>
+          {confirmWipe ? (
+            <>
+              <span className="hint">Usunąć dziennik i wytrenowany model?</span>
+              <button className="danger" disabled={busy !== null} onClick={() => void run("wipe", async () => {
+                await api.spamWipeData();
+                setConfirmWipe(false);
+                await refresh();
+                return "Usunięto dziennik decyzji i wytrenowany model.";
+              })}>Tak, usuń</button>
+              <button onClick={() => setConfirmWipe(false)}>Anuluj</button>
+            </>
+          ) : (
+            <button disabled={busy !== null} onClick={() => setConfirmWipe(true)}>Wyczyść dziennik i model</button>
+          )}
         </div>
         {msg && <p className="hint" role="status">{msg}</p>}
         {bayesLine && <p className="hint">Filtr uczący się: {bayesLine}</p>}

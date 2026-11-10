@@ -275,6 +275,19 @@ impl Store {
         self.with(|c| c.execute(SET_META, params![key, value]).map(|_| ()))
     }
 
+    /// Kopia robocza pisanej wiadomości – w zaszyfrowanej bazie (nie w localStorage).
+    pub fn backup_set(&self, value: &str) -> Result<(), String> {
+        self.set_meta("compose_backup", value)
+    }
+
+    pub fn backup_get(&self) -> Option<String> {
+        self.meta("compose_backup")
+    }
+
+    pub fn backup_clear(&self) -> Result<(), String> {
+        self.with(|c| c.execute(DELETE_META, ["compose_backup"]).map(|_| ()))
+    }
+
     pub fn available(&self) -> bool {
         self.conn.lock().map(|g| g.is_some()).unwrap_or(false)
     }
