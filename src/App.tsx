@@ -990,8 +990,8 @@ export default function App() {
             <form className="search" role="search" onSubmit={doSearch}>
               <input type="search" value={query} maxLength={500} placeholder="Szukaj w poczcie (np. from:ala faktura)"
                 aria-label="Szukaj w poczcie" onChange={(e) => setQuery(e.target.value)} />
-              <button className="small" type="submit">Szukaj</button>
-              {searchTerm && <button className="small" type="button" onClick={() => { clearSearch(); void loadList(folder, null, false); }}>Wyczyść</button>}
+              <button className="small" title="Szukaj" aria-label="Szukaj" type="submit"><ActIcon n="search"/></button>
+              {searchTerm && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { clearSearch(); void loadList(folder, null, false); }}><ActIcon n="clear"/></button>}
             </form>
           )}
           {email && listOffline && (
@@ -1023,19 +1023,19 @@ export default function App() {
               {selected.size > 0 && (
                 <div className="bulkbar" role="toolbar" aria-label="Akcje na zaznaczonych">
                   <strong>Zaznaczono: {selected.size}</strong>
-                  <button className="small" onClick={() => setSelected(new Set(threads.map((t) => t.id)))}>Wszystkie</button>
+                  <button className="small" title="Zaznacz wszystkie na liście (Ctrl+A)" aria-label="Zaznacz wszystkie na liście (Ctrl+A)" onClick={() => setSelected(new Set(threads.map((t) => t.id)))}><ActIcon n="selectAll"/></button>
                   {folder !== "archive" && folder !== "trash" && folder !== "spam" && (
-                    <button className="small" disabled={needsReauth} onClick={() => void bulkRun("archive")}>Archiwizuj</button>
+                    <button className="small" title="Archiwizuj zaznaczone (e)" aria-label="Archiwizuj zaznaczone (e)" disabled={needsReauth} onClick={() => void bulkRun("archive")}><ActIcon n="archive"/></button>
                   )}
                   {folder === "trash"
-                    ? <button className="small" disabled={needsReauth} onClick={() => void bulkRun("untrash")}>Przywróć</button>
-                    : <button className="small" disabled={needsReauth} onClick={() => void bulkRun("trash")}>Usuń</button>}
+                    ? <button className="small" title="Przywróć zaznaczone z kosza" aria-label="Przywróć zaznaczone z kosza" disabled={needsReauth} onClick={() => void bulkRun("untrash")}><ActIcon n="restore"/></button>
+                    : <button className="small" title="Usuń zaznaczone – przenieś do kosza (Delete)" aria-label="Usuń zaznaczone – przenieś do kosza (Delete)" disabled={needsReauth} onClick={() => void bulkRun("trash")}><ActIcon n="trash"/></button>}
                   {folder === "spam"
-                    ? <button className="small" disabled={needsReauth} onClick={() => void bulkRun("notspam")}>To nie spam</button>
-                    : <button className="small" disabled={needsReauth} onClick={() => void bulkRun("spam")}>Spam</button>}
-                  <button className="small" disabled={needsReauth} onClick={() => void bulkRun("read")}>Przeczytane</button>
-                  <button className="small" disabled={needsReauth} onClick={() => void bulkRun("unread")}>Nieprzeczytane</button>
-                  <button className="small" onClick={() => setSelected(new Set())}>Odznacz</button>
+                    ? <button className="small" title="To nie spam – przenieś zaznaczone do skrzynki" aria-label="To nie spam – przenieś zaznaczone do skrzynki" disabled={needsReauth} onClick={() => void bulkRun("notspam")}><ActIcon n="notspam"/></button>
+                    : <button className="small" title="Oznacz zaznaczone jako spam (!)" aria-label="Oznacz zaznaczone jako spam (!)" disabled={needsReauth} onClick={() => void bulkRun("spam")}><ActIcon n="spam"/></button>}
+                  <button className="small" title="Oznacz zaznaczone jako przeczytane (Shift+I)" aria-label="Oznacz zaznaczone jako przeczytane (Shift+I)" disabled={needsReauth} onClick={() => void bulkRun("read")}><ActIcon n="read"/></button>
+                  <button className="small" title="Oznacz zaznaczone jako nieprzeczytane (Shift+U)" aria-label="Oznacz zaznaczone jako nieprzeczytane (Shift+U)" disabled={needsReauth} onClick={() => void bulkRun("unread")}><ActIcon n="unread"/></button>
+                  <button className="small" title="Odznacz wszystko (Esc)" aria-label="Odznacz wszystko (Esc)" onClick={() => setSelected(new Set())}><ActIcon n="clear"/></button>
                 </div>
               )}
               <ul>

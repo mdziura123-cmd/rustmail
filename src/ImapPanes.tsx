@@ -169,20 +169,20 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
       <form className="search" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) imap.search(q); }}>
         <input type="search" value={q} maxLength={300} placeholder="Szukaj w tym folderze (np. od:ala temat:faktura is:unread)" aria-label="Szukaj w folderze"
           onChange={(e) => setQ(e.target.value)} />
-        <button className="small" type="submit">Szukaj</button>
-        {imap.term && <button className="small" type="button" onClick={() => { setQ(""); imap.clearSearch(); }}>Wyczyść</button>}
+        <button className="small" title="Szukaj" aria-label="Szukaj" type="submit"><ActIcon n="search"/></button>
+        {imap.term && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { setQ(""); imap.clearSearch(); }}><ActIcon n="clear"/></button>}
       </form>
       {imap.err && <p className="error pad" role="alert">{imap.err}</p>}
       {selected.size > 0 && (
         <div className="bulkbar" role="toolbar" aria-label="Akcje na zaznaczonych">
           <strong>Zaznaczono: {selected.size}</strong>
-          <button className="small" onClick={onSelectAll}>Wszystkie</button>
-          {role === "inbox" && <button className="small" onClick={() => onBulk("archive")}>Archiwizuj</button>}
-          <button className="small" onClick={() => onBulk(role === "trash" ? "inbox" : "trash")}>{role === "trash" ? "Przywróć" : "Usuń"}</button>
-          <button className="small" onClick={() => onBulk(role === "spam" ? "inbox" : "spam")}>{role === "spam" ? "To nie spam" : "Spam"}</button>
-          <button className="small" onClick={() => onBulk("read")}>Przeczytane</button>
-          <button className="small" onClick={() => onBulk("unread")}>Nieprzeczytane</button>
-          <button className="small" onClick={onClear}>Odznacz</button>
+          <button className="small" title="Zaznacz wszystkie na liście (Ctrl+A)" aria-label="Zaznacz wszystkie na liście (Ctrl+A)" onClick={onSelectAll}><ActIcon n="selectAll"/></button>
+          {role === "inbox" && <button className="small" title="Archiwizuj zaznaczone (e)" aria-label="Archiwizuj zaznaczone (e)" onClick={() => onBulk("archive")}><ActIcon n="archive"/></button>}
+          <button className="small" title={role === "trash" ? "Przywróć zaznaczone z kosza" : "Usuń zaznaczone – przenieś do kosza (Delete)"} aria-label={role === "trash" ? "Przywróć zaznaczone z kosza" : "Usuń zaznaczone – przenieś do kosza (Delete)"} onClick={() => onBulk(role === "trash" ? "inbox" : "trash")}><ActIcon n={role === "trash" ? "restore" : "trash"} /></button>
+          <button className="small" title={role === "spam" ? "To nie spam – przenieś zaznaczone do skrzynki" : "Oznacz zaznaczone jako spam (!)"} aria-label={role === "spam" ? "To nie spam – przenieś zaznaczone do skrzynki" : "Oznacz zaznaczone jako spam (!)"} onClick={() => onBulk(role === "spam" ? "inbox" : "spam")}><ActIcon n={role === "spam" ? "notspam" : "spam"} /></button>
+          <button className="small" title="Oznacz zaznaczone jako przeczytane (Shift+I)" aria-label="Oznacz zaznaczone jako przeczytane (Shift+I)" onClick={() => onBulk("read")}><ActIcon n="read"/></button>
+          <button className="small" title="Oznacz zaznaczone jako nieprzeczytane (Shift+U)" aria-label="Oznacz zaznaczone jako nieprzeczytane (Shift+U)" onClick={() => onBulk("unread")}><ActIcon n="unread"/></button>
+          <button className="small" title="Odznacz wszystko (Esc)" aria-label="Odznacz wszystko (Esc)" onClick={onClear}><ActIcon n="clear"/></button>
         </div>
       )}
       {!imap.loading && !imap.err && imap.rows.length === 0 && <div className="empty"><h3>Ten folder jest pusty</h3></div>}
