@@ -535,6 +535,8 @@ export default function App() {
       case "reply": reply(false); break;
       case "replyAll": reply(true); break;
       case "forward": forward(); break;
+      case "prio0": case "prio1": case "prio2": case "prio3":
+        if (detail) prio.set(gmailPrioKey(email, detail.id), Number(cmd.slice(4))).catch(() => showToast("Nie udało się zapisać flagi.")); break;
       case "compose": startCompose(buildNew(signature)); break;
       case "search": (document.querySelector('input[type="search"]') as HTMLInputElement | null)?.focus(); break;
       case "escape": setSelected(new Set()); break;

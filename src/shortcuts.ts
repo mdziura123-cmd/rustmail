@@ -2,7 +2,7 @@
 
 export type Cmd =
   | "next" | "prev" | "archive" | "trash" | "spam" | "reply" | "replyAll" | "forward"
-  | "compose" | "star" | "read" | "unread" | "search" | "select" | "help" | "escape";
+  | "prio0" | "prio1" | "prio2" | "prio3" | "compose" | "star" | "read" | "unread" | "search" | "select" | "help" | "escape";
 
 export interface KeyInfo {
   key: string;
@@ -13,7 +13,7 @@ export interface KeyInfo {
 
 const MAP: Record<string, Cmd> = {
   j: "next", k: "prev", e: "archive", "#": "trash", Delete: "trash", "!": "spam", r: "reply", a: "replyAll", f: "forward",
-  c: "compose", s: "star", I: "read", U: "unread", "/": "search", x: "select", "?": "help", Escape: "escape",
+  c: "compose", s: "star", I: "read", U: "unread", "/": "search", x: "select", "?": "help", "0": "prio0", "1": "prio1", "2": "prio2", "3": "prio3", Escape: "escape",
 };
 
 /** Polecenie dla naciśniętego klawisza albo null. Kombinacje z Ctrl/Alt/Meta są zawsze pomijane. */
@@ -42,6 +42,7 @@ export const SHORTCUT_HELP: { keys: string; what: string }[] = [
   { keys: "r / a / f", what: "odpowiedz / odpowiedz wszystkim / przekaż dalej" },
   { keys: "c", what: "nowa wiadomość" },
   { keys: "s", what: "gwiazdka" },
+  { keys: "1 / 2 / 3 / 0", what: "flaga: bardzo ważne / ważne / mniej ważne / usuń flagę" },
   { keys: "Shift+I / Shift+U", what: "oznacz jako przeczytane / nieprzeczytane" },
   { keys: "/", what: "szukaj" },
   { keys: "Esc", what: "odznacz zaznaczone" },

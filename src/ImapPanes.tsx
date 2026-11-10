@@ -278,6 +278,8 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
       case "reply": run(() => onCompose("reply", msg)); break;
       case "replyAll": run(() => onCompose("replyAll", msg)); break;
       case "forward": run(() => onCompose("forward", msg)); break;
+      case "prio0": case "prio1": case "prio2": case "prio3":
+        run(() => { prio.set(imapPrioKey(account, folder, msg.uid), Number(cmd.slice(4))).catch(() => setErr("Nie udało się zapisać flagi.")); }); break;
     }
   };
   useEffect(() => {
