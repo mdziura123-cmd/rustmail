@@ -78,6 +78,7 @@ export interface PollResult {
   spamUnread: number;
   labels: LabelInfo[];
   notified: number;
+  newCount: number;
   spamMoved: number;
   spamFlagged: FlagInfo[];
 }

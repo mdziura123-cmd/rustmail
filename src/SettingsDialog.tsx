@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
 import { SHORTCUT_HELP } from "./shortcuts";
 import { getProvider, PROVIDERS, setProvider, type Provider } from "./translateProviders";
@@ -17,6 +18,8 @@ interface Props {
   notify: boolean;
   content: boolean;
   onNotify: (on: boolean) => void;
+  sound: SoundId;
+  onSound: (s: SoundId) => void;
   onContent: (on: boolean) => void;
   autoUpdate: boolean;
   onAutoUpdate: (on: boolean) => void;
@@ -164,6 +167,13 @@ export function SettingsDialog(p: Props) {
                   <input type="checkbox" checked={p.activeOnly} onChange={(e) => p.onActiveOnly(e.target.checked)} />
                   Sprawdzaj pocztę w tle tylko na koncie, na którym pracuję
                 </label>
+                <div className="check sound-row">
+                  <label htmlFor="sound-pick">Dźwięk nowej wiadomości</label>
+                  <select id="sound-pick" value={p.sound} onChange={(e) => { const s = e.target.value as SoundId; p.onSound(s); playSound(s); }}>
+                    {SOUNDS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  </select>
+                  <button type="button" disabled={p.sound === "off"} onClick={() => playSound(p.sound)}>Odtwórz</button>
+                </div>
                 <p className="hint">
                   Domyślnie powiadomienie mówi tylko, że przyszła nowa poczta. Treść wiadomości z ostrzeżeniem nigdy nie jest pokazywana.
                   Poczta jest sprawdzana co minutę, gdy aplikacja jest uruchomiona; powiadomienia wymagają programu

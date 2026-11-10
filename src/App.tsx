@@ -9,6 +9,8 @@ import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
+import { ActIcon } from "./ActIcon";
+import { loadSound, playSound, saveSound, type SoundId } from "./sound";
 import { commandFor, isTypingTarget, SHORTCUT_HELP } from "./shortcuts";
 import { Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
@@ -703,6 +705,9 @@ export default function App() {
   live.current = { openId, count: threads.length, composing: Boolean(compose) };
   const folderRef = useRef(folder);
   folderRef.current = folder;
+  const [sound, setSound] = useState<SoundId>(loadSound);
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
   const settingsRef = useRef({ notify: notifyOn, content: notifyContent });
   settingsRef.current = { notify: notifyOn, content: notifyContent };
   const reloadRef = useRef<() => void>(() => {});
@@ -717,6 +722,7 @@ export default function App() {
     }
     try {
       const r = await api.pollMail(settingsRef.current.notify, settingsRef.current.content);
+      if (r.newCount > 0) playSound(soundRef.current);
       setStats({ inbox: r.inboxUnread, spam: r.spamUnread, labels: r.labels });
       if (r.spamFlagged.length > 0) {
         setFlags((f) => { const n = { ...f }; for (const x of r.spamFlagged) n[x.id] = x.reason; return n; });
@@ -777,6 +783,7 @@ export default function App() {
       try { await flushQueue(false, a.email); } catch { /* ignorujemy */ }
       try {
         const r = await api.imapPoll(a.email, settingsRef.current.notify, settingsRef.current.content);
+        if (r.newCount > 0) playSound(soundRef.current);
         if (r.moved > 0) {
           showToast(r.moved === 1 ? `Filtr przeniósł 1 wiadomość z ${a.email} do Spamu.` : `Filtr przeniósł wiadomości z ${a.email} do Spamu: ${r.moved}.`);
           setImapTick((n) => n + 1);
@@ -1115,26 +1122,26 @@ export default function App() {
               <header className="reader-head">
                 <h2>{detail.subject}</h2>
                 <div className="tools actions" role="toolbar" aria-label="Akcje na konwersacji">
-                  <button className="primary" disabled={needsReauth} onClick={() => reply(false)}>Odpowiedz</button>
-                  <button disabled={needsReauth} onClick={() => reply(true)}>Odpowiedz wszystkim</button>
-                  <button disabled={needsReauth} onClick={forward}>Przekaż dalej</button>
+                  <button className="primary" disabled={needsReauth} onClick={() => reply(false)}><ActIcon n="reply"/>Odpowiedz</button>
+                  <button disabled={needsReauth} onClick={() => reply(true)}><ActIcon n="replyAll"/>Odpowiedz wszystkim</button>
+                  <button disabled={needsReauth} onClick={forward}><ActIcon n="forward"/>Przekaż dalej</button>
                   <span className="sep" />
-                  {detail.inInbox && <button disabled={needsReauth} onClick={() => void runAction("archive")}>Archiwizuj</button>}
+                  {detail.inInbox && <button disabled={needsReauth} onClick={() => void runAction("archive")}><ActIcon n="archive"/>Archiwizuj</button>}
                   {!detail.inInbox && !detail.inTrash && !detail.inSpam && (
-                    <button disabled={needsReauth} onClick={() => void runAction("unarchive")}>Do skrzynki</button>
+                    <button disabled={needsReauth} onClick={() => void runAction("unarchive")}><ActIcon n="inbox"/>Do skrzynki</button>
                   )}
                   {detail.inSpam
-                    ? <button disabled={needsReauth} onClick={() => void runAction("notspam")}>To nie spam</button>
-                    : <button disabled={needsReauth} onClick={() => void runAction("spam")}>Spam</button>}
+                    ? <button disabled={needsReauth} onClick={() => void runAction("notspam")}><ActIcon n="notspam"/>To nie spam</button>
+                    : <button disabled={needsReauth} onClick={() => void runAction("spam")}><ActIcon n="spam"/>Spam</button>}
                   {detail.inTrash
-                    ? <button disabled={needsReauth} onClick={() => void runAction("untrash")}>Przywróć z kosza</button>
-                    : <button disabled={needsReauth} onClick={() => void runAction("trash")}>Usuń</button>}
+                    ? <button disabled={needsReauth} onClick={() => void runAction("untrash")}><ActIcon n="restore"/>Przywróć z kosza</button>
+                    : <button disabled={needsReauth} onClick={() => void runAction("trash")}><ActIcon n="trash"/>Usuń</button>}
                   <button disabled={needsReauth} onClick={() => void runAction(detail.unread ? "read" : "unread")}>
-                    {detail.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}
+                    <ActIcon n={detail.unread ? "read" : "unread"} />{detail.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}
                   </button>
                   {stats.labels.length > 0 && (
                     <details className="label-menu">
-                      <summary>Etykiety</summary>
+                      <summary><ActIcon n="label" />Etykiety</summary>
                       <div className="label-pop">
                         {stats.labels.map((l) => (
                           <label key={l.id} className="check">
@@ -1148,18 +1155,18 @@ export default function App() {
                     </details>
                   )}
                   <button disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
-                    {detail.starred ? "★ Usuń gwiazdkę" : "☆ Gwiazdka"}
+                    <ActIcon n="star" filled={detail.starred} />{detail.starred ? "Usuń gwiazdkę" : "Gwiazdka"}
                   </button>
                   {email && <PrioMenu itemKey={gmailPrioKey(email, detail.id)} onError={showToast} />}
                   {(() => {
                     const t = replyTarget(detail.messages);
                     return t && !t.mine ? (
-                      <button onClick={() => setSenderDlg({ email: t.fromEmail })}>Nadawca…</button>
+                      <button onClick={() => setSenderDlg({ email: t.fromEmail })}><ActIcon n="user"/>Nadawca…</button>
                     ) : null;
                   })()}
                   <span className="sep" />
-                  <button onClick={() => setCollapsed(new Set())}>Rozwiń wszystkie</button>
-                  <button onClick={() => setCollapsed(new Set(detail.messages.map((m) => m.id)))}>Zwiń wszystkie</button>
+                  <button onClick={() => setCollapsed(new Set())}><ActIcon n="expand"/>Rozwiń wszystkie</button>
+                  <button onClick={() => setCollapsed(new Set(detail.messages.map((m) => m.id)))}><ActIcon n="collapse"/>Zwiń wszystkie</button>
                 </div>
               </header>
               <RiskBanner messages={detail.messages} dismissed={detail.dismissed} onSafe={(s) => void setSafe(s)} />
@@ -1245,6 +1252,7 @@ export default function App() {
           onSignOut={() => { setSettingsOpen(false); void signOut(); }} onSignOutImap={(a) => { setSettingsOpen(false); void signOutImap(a); }}
           autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}
           onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}
+          sound={sound} onSound={(s) => { setSound(s); saveSound(s); }}
           onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}
           onContent={(on) => { setNotifyContent(on); save(LS.content, on ? "1" : "0"); }}
           onOpen={(w) => { setSettingsOpen(false); if (w === "signature") setSigOpen(true); else if (w === "senders") setSenderDlg({ email: null }); else if (w === "spam") setSpamOpen(true); else if (w === "import") setImportOpen(true); else if (w === "addGmail") void signIn(); else if (w === "addImap") setImapLoginOpen(true); else setCacheOpen(true); }}

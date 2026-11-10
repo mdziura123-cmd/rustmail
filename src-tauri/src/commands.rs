@@ -715,6 +715,8 @@ pub struct PollResult {
     pub labels: Vec<gmail::LabelInfo>,
     /// Ile nowych wiadomości zgłoszono w powiadomieniu pulpitowym.
     pub notified: usize,
+    /// Ile nowych wiadomości doszło od poprzedniego sprawdzenia (niezależnie od powiadomień; do dźwięku).
+    pub new_count: usize,
     /// Ile wiadomości filtr spamu przeniósł przy tym sprawdzeniu.
     pub spam_moved: usize,
     /// Wiadomości oznaczone przez filtr jako podejrzane (czekają na decyzję użytkownika).
@@ -741,6 +743,7 @@ pub async fn poll_mail(
     }
     let unchanged = notifier.0.lock().map(|s| s.counts == Some(key) && s.ids.is_some()).unwrap_or(false);
     let mut notified = 0usize;
+    let mut new_count = 0usize;
     if !unchanged {
         let email = secrets::get(auth::KEY_EMAIL)?.ok_or("Nie jesteś zalogowany.")?;
         let safe = dismissed::load(&dismissed_path(&app)?);
@@ -755,6 +758,7 @@ pub async fn poll_mail(
             }
             Err(_) => Vec::new(),
         };
+        new_count = new_ids.len();
         if notify_enabled && !new_ids.is_empty() {
             let items: Vec<notify::Item> = page
                 .threads
@@ -774,6 +778,7 @@ pub async fn poll_mail(
         spam_unread: stats.spam_unread,
         labels: stats.labels,
         notified,
+        new_count,
         spam_moved,
         spam_flagged: spam_io::open_flags(&app),
     })

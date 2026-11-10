@@ -784,6 +784,8 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
 pub struct PollOut {
     pub moved: usize,
     pub notified: usize,
+    /// Ile nowych wiadomości doszło od poprzedniego sprawdzenia (do dźwięku).
+    pub new_count: usize,
 }
 
 /// Co minutę dla każdego konta IMAP: filtr spamu na nieprzeczytanych z Odebranych, potem powiadomienie o nowych.
@@ -858,6 +860,7 @@ async fn poll_inner(
         Err(_) => Vec::new(),
     };
     let mut notified = 0usize;
+    let new_count = new_ids.len();
     if notify_enabled && !new_ids.is_empty() {
         let items: Vec<notify::Item> = remaining
             .iter()
@@ -870,7 +873,7 @@ async fn poll_inner(
             }
         }
     }
-    Ok(PollOut { moved: moved_uids.len(), notified })
+    Ok(PollOut { moved: moved_uids.len(), notified, new_count })
 }
 
 // ---------- Wysyłanie (SMTP, port 465 z szyfrowaniem) ----------

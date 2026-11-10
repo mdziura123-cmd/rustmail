@@ -6,6 +6,7 @@ import { MessageBody } from "./MessageBody";
 import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
+import { ActIcon } from "./ActIcon";
 import { FOLDERS } from "./folders";
 import { imapPrioKey, sortSearchResults } from "./prioSort";
 import { prio, usePrioLevels } from "./prio";
@@ -298,18 +299,18 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
           <header className="reader-head">
             <h2>{msg.subject || "(bez tematu)"}</h2>
             <div className="tools actions" role="toolbar" aria-label="Akcje na wiadomości">
-              {role === "drafts" && onEditDraft && <button className="primary" onClick={() => onEditDraft(msg)}>Edytuj wersję roboczą</button>}
-              <button className={role === "drafts" ? "" : "primary"} onClick={() => onCompose("reply", msg)}>Odpowiedz</button>
-              <button onClick={() => onCompose("replyAll", msg)}>Odpowiedz wszystkim</button>
-              <button onClick={() => onCompose("forward", msg)}>Przekaż dalej</button>
+              {role === "drafts" && onEditDraft && <button className="primary" onClick={() => onEditDraft(msg)}><ActIcon n="edit"/>Edytuj wersję roboczą</button>}
+              <button className={role === "drafts" ? "" : "primary"} onClick={() => onCompose("reply", msg)}><ActIcon n="reply"/>Odpowiedz</button>
+              <button onClick={() => onCompose("replyAll", msg)}><ActIcon n="replyAll"/>Odpowiedz wszystkim</button>
+              <button onClick={() => onCompose("forward", msg)}><ActIcon n="forward"/>Przekaż dalej</button>
               <span className="sep" />
-              <button onClick={() => void act(msg.unread ? "read" : "unread")}>{msg.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}</button>
-              <button onClick={() => void act(msg.starred ? "unstar" : "star")}>{msg.starred ? "Usuń gwiazdkę" : "Gwiazdka"}</button>
+              <button onClick={() => void act(msg.unread ? "read" : "unread")}><ActIcon n={msg.unread ? "read" : "unread"} />{msg.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}</button>
+              <button onClick={() => void act(msg.starred ? "unstar" : "star")}><ActIcon n="star" filled={msg.starred} />{msg.starred ? "Usuń gwiazdkę" : "Gwiazdka"}</button>
               <PrioMenu itemKey={imapPrioKey(account, folder, msg.uid)} onError={(m) => setErr(m)} />
-              {role === "inbox" && <button onClick={() => void act("archive")}>Archiwizuj</button>}
-              {!["inbox", "trash", "spam"].includes(role) && <button onClick={() => void act("inbox")}>Do skrzynki</button>}
-              {role === "spam" ? <button onClick={() => void act("inbox")}>To nie spam</button> : <button onClick={() => void act("spam")}>Spam</button>}
-              {role === "trash" ? <button onClick={() => void act("inbox")}>Przywróć z kosza</button> : <button onClick={() => void act("trash")}>Usuń</button>}
+              {role === "inbox" && <button onClick={() => void act("archive")}><ActIcon n="archive"/>Archiwizuj</button>}
+              {!["inbox", "trash", "spam"].includes(role) && <button onClick={() => void act("inbox")}><ActIcon n="inbox"/>Do skrzynki</button>}
+              {role === "spam" ? <button onClick={() => void act("inbox")}><ActIcon n="notspam"/>To nie spam</button> : <button onClick={() => void act("spam")}><ActIcon n="spam"/>Spam</button>}
+              {role === "trash" ? <button onClick={() => void act("inbox")}><ActIcon n="restore"/>Przywróć z kosza</button> : <button onClick={() => void act("trash")}><ActIcon n="trash"/>Usuń</button>}
             </div>
           </header>
           <div className="thread">
