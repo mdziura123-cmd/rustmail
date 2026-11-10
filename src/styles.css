@@ -131,3 +131,15 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .icon-btn.upd:hover:not(:disabled) svg { animation: rm-spin .9s linear infinite; }
 .icon-btn.gear:hover svg, .icon-btn.gear:focus-visible svg { animation: rm-spin 2.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .icon-btn.upd:hover svg, .icon-btn.gear:hover svg, .icon-btn.gear:focus-visible svg { animation: none; } }
+
+/* Flagi ważności */
+.prio-flag { vertical-align: -2px; flex: none; }
+.prio-menu { position: relative; display: inline-block; }
+.prio-menu > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;
+  border: 1px solid var(--line, #ccc); border-radius: 6px; background: transparent; font: inherit; }
+.prio-menu > summary::-webkit-details-marker { display: none; }
+.prio-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 180px; display: flex; flex-direction: column;
+  padding: 4px; border: 1px solid var(--line, #ccc); border-radius: 8px; background: var(--panel, Canvas); color: inherit;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .18); }
+.prio-pop button { text-align: left; border: 0; background: transparent; padding: 7px 10px; border-radius: 6px; font: inherit; color: inherit; cursor: pointer; }
+.prio-pop button:hover, .prio-pop button:focus-visible { background: rgba(127, 127, 127, .18); }

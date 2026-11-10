@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { prio, usePrioLevels } from "./prio";
+import { gmailPrioKey, sortSearchResults } from "./prioSort";
+import { PrioFlag, PrioMenu } from "./PrioUi";
 import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
@@ -189,6 +192,7 @@ export default function App() {
   }, []);
   useEffect(() => { void refreshAuth(); }, [refreshAuth]);
 
+  const emailRef = useRef<string | null>(null);
   const loadList = useCallback(async (f: FolderId, token: string | null, append: boolean) => {
     const my = ++listReq.current;
     setLoadingList(true);
@@ -197,7 +201,12 @@ export default function App() {
       const q = searchRef.current;
       const page = q ? await api.searchThreads(q, token) : await api.listThreads(f, token);
       if (my !== listReq.current) return;
-      setThreads((prev) => (append ? [...prev, ...page.threads] : page.threads));
+      const acc = emailRef.current ?? "";
+      await prio.ensure(page.threads.map((t) => gmailPrioKey(acc, t.id)));
+      if (my !== listReq.current) return;
+      // Wyszukiwanie: najpierw wiadomości z flagą (bardzo ważne → mniej ważne), potem reszta od najnowszych.
+      const order = (l: ThreadSummary[]) => (q ? sortSearchResults(l, (t) => t.lastDateMs, (t) => prio.get(gmailPrioKey(acc, t.id))) : l);
+      setThreads((prev) => order(append ? [...prev, ...page.threads] : page.threads));
       if (!append) setSelected(new Set());
       setNextToken(page.nextPageToken);
       setListOffline(Boolean(page.offline));
@@ -209,6 +218,18 @@ export default function App() {
   }, []);
 
   const email = auth?.email ?? null;
+  emailRef.current = email;
+  const prioLevels = usePrioLevels();
+  // Zmiana flagi podczas wyszukiwania od razu przestawia wyniki.
+  useEffect(() => {
+    if (!searchRef.current || !email) return;
+    setThreads((prev) => sortSearchResults(prev, (t) => t.lastDateMs, (t) => prio.get(gmailPrioKey(email, t.id))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prioLevels]);
+  // Flagi wątków widocznych na liście (poza wyszukiwaniem też je pokazujemy).
+  useEffect(() => {
+    if (email && threads.length) void prio.ensure(threads.map((t) => gmailPrioKey(email, t.id)));
+  }, [email, threads]);
   useEffect(() => {
     if (!email) return;
     setThreads([]);
@@ -1018,7 +1039,7 @@ export default function App() {
                       onClick={(e) => onRowClick(e, t)}>
                       <span className="who">{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
                       <span className="when">
-                        {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
+                        {email && <PrioFlag level={prioLevels[gmailPrioKey(email, t.id)] ?? 0} />} {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
                       </span>
                       <span className="subj">
                         {flags[t.id] && (
@@ -1127,6 +1148,7 @@ export default function App() {
                   <button disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
                     {detail.starred ? "★ Usuń gwiazdkę" : "☆ Gwiazdka"}
                   </button>
+                  {email && <PrioMenu itemKey={gmailPrioKey(email, detail.id)} onError={showToast} />}
                   {(() => {
                     const t = replyTarget(detail.messages);
                     return t && !t.mine ? (

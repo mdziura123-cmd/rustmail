@@ -7,6 +7,9 @@ import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./ty
 import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
 import { FOLDERS } from "./folders";
+import { imapPrioKey, sortSearchResults } from "./prioSort";
+import { prio, usePrioLevels } from "./prio";
+import { PrioFlag, PrioMenu } from "./PrioUi";
 
 const FOLDER_ICON = Object.fromEntries(FOLDERS.map((f) => [f.id, f])) as Record<string, (typeof FOLDERS)[number]>;
 const OTHER_ICON = "M3 7h7l2 2h9v10H3z";
@@ -58,6 +61,16 @@ export function useImapView(account: string | null) {
   const [term, setTerm] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const seq = useRef(0);
+  const levels = usePrioLevels();
+
+  // Wyniki wyszukiwania układają się na nowo, gdy zmieni się flaga.
+  useEffect(() => {
+    if (!term || !account || !folder) return;
+    setRows((prev) => {
+      const sorted = sortSearchResults(prev, (r) => r.dateMs, (r) => levels[imapPrioKey(account, folder, r.uid)] ?? 0);
+      return sorted.every((r, i) => r === prev[i]) ? prev : sorted;
+    });
+  }, [levels, term, account, folder]);
 
   const loadCounts = useCallback((acc: string) => {
     api.imapCounts(acc).then((c) => setCounts(Object.fromEntries(c.map((x) => [x.name, x.unseen])))).catch(() => {});
@@ -68,6 +81,8 @@ export function useImapView(account: string | null) {
     setLoading(true); setErr(null);
     try {
       const p = await api.imapList(acc, name, offset);
+      if (my !== seq.current) return;
+      await prio.ensure(p.rows.map((r) => imapPrioKey(acc, name, r.uid)));
       if (my !== seq.current) return;
       setRows((prev) => (append ? [...prev, ...p.rows] : p.rows));
       setNext(p.next);
@@ -97,7 +112,9 @@ export function useImapView(account: string | null) {
     try {
       const p = await api.imapSearch(account, folder, q.trim());
       if (my !== seq.current) return;
-      setRows(p.rows); setNext(null);
+      await prio.ensure(p.rows.map((r) => imapPrioKey(account, folder, r.uid)));
+      if (my !== seq.current) return;
+      setRows(sortSearchResults(p.rows, (r) => r.dateMs, (r) => prio.get(imapPrioKey(account, folder, r.uid)))); setNext(null);
     } catch (e) { if (my === seq.current) setErr(errText(e)); }
     finally { if (my === seq.current) setLoading(false); }
   };
@@ -140,6 +157,7 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
 }) {
   const label = imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
   const [q, setQ] = useState("");
+  const levels = usePrioLevels();
   useEffect(() => { setQ(""); }, [imap.account, imap.folder]);
   return (
     <section className="list" aria-label="Lista wiadomości">
@@ -173,7 +191,7 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
             <button className={"row" + (r.uid === openUid ? " active" : "") + (r.unread ? " unread" : "")}
               aria-pressed={selected.has(r.uid)} onClick={(e) => onRowClick(e, r)}>
               <span className="who">{r.from}</span>
-              <span className="when">{r.starred ? "★ " : ""}{fmtDate(r.dateMs)}</span>
+              <span className="when"><PrioFlag level={levels[imapPrioKey(imap.account ?? "", imap.folder, r.uid)] ?? 0} />{r.starred ? "★ " : ""}{fmtDate(r.dateMs)}</span>
               <span className="subj">{r.subject || "(bez tematu)"}</span>
             </button>
           </li>
@@ -285,6 +303,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
               <span className="sep" />
               <button onClick={() => void act(msg.unread ? "read" : "unread")}>{msg.unread ? "Oznacz jako przeczytaną" : "Oznacz jako nieprzeczytaną"}</button>
               <button onClick={() => void act(msg.starred ? "unstar" : "star")}>{msg.starred ? "Usuń gwiazdkę" : "Gwiazdka"}</button>
+              <PrioMenu itemKey={imapPrioKey(account, folder, msg.uid)} onError={(m) => setErr(m)} />
               {role === "inbox" && <button onClick={() => void act("archive")}>Archiwizuj</button>}
               {!["inbox", "trash", "spam"].includes(role) && <button onClick={() => void act("inbox")}>Do skrzynki</button>}
               {role === "spam" ? <button onClick={() => void act("inbox")}>To nie spam</button> : <button onClick={() => void act("spam")}>Spam</button>}

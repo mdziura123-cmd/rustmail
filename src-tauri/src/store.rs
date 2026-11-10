@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS threads (
     updated_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS threads_date ON threads (last_date_ms DESC);
+CREATE TABLE IF NOT EXISTS prio (key TEXT PRIMARY KEY, level INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_ms INTEGER NOT NULL,
@@ -566,6 +567,49 @@ impl Store {
 
     pub fn set_outbox_state(&self, account: &str, id: i64, state: &str, error: Option<&str>) -> Result<(), String> {
         self.with(|c| c.execute(SET_OUTBOX_STATE, params![id, state, error, account]).map(|_| ()))
+    }
+
+    // ---------- Flagi ważności (lokalne, w zaszyfrowanej bazie) ----------
+
+    /// Ustawia flagę (1 = bardzo ważne, 2 = ważne, 3 = mniej ważne); 0 usuwa flagę.
+    pub fn prio_set(&self, key: &str, level: u8) -> Result<(), String> {
+        if !crate::prio::valid_key(key) || level > 3 {
+            return Err("Niepoprawna flaga.".to_string());
+        }
+        self.with(|c| {
+            if level == 0 {
+                c.execute("DELETE FROM prio WHERE key = ?1", [key]).map(|_| ())
+            } else {
+                c.execute(
+                    "INSERT INTO prio (key, level) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET level = excluded.level",
+                    params![key, level as i64],
+                )
+                .map(|_| ())
+            }
+        })
+    }
+
+    /// Flagi dla podanych kluczy (brakujące klucze oznaczają brak flagi).
+    pub fn prio_get(&self, keys: &[String]) -> Result<Vec<(String, u8)>, String> {
+        self.with(|c| {
+            let mut out = Vec::new();
+            let mut st = c.prepare("SELECT level FROM prio WHERE key = ?1")?;
+            for k in keys.iter().filter(|k| crate::prio::valid_key(k)).take(crate::prio::MAX_KEYS) {
+                if let Some(l) = st.query_row([k], |r| r.get::<_, i64>(0)).optional()? {
+                    out.push((k.clone(), l.clamp(0, 3) as u8));
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// Usuwa wszystkie flagi o kluczach zaczynających się od prefiksu (np. po wylogowaniu z konta).
+    pub fn prio_purge(&self, prefix: &str) -> Result<(), String> {
+        if !crate::prio::valid_key(prefix) {
+            return Ok(());
+        }
+        let pat = format!("{}%", prefix.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        self.with(|c| c.execute("DELETE FROM prio WHERE key LIKE ?1 ESCAPE '\\'", [pat]).map(|_| ()))
     }
 
     /// Usuwa z kolejki wszystkie wiadomości danego konta (np. po wylogowaniu).

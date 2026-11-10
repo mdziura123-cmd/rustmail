@@ -23,6 +23,7 @@ mod spam_io;
 mod store;
 mod privfs;
 mod blobmig;
+mod prio;
 mod consent;
 mod translate;
 mod update;
@@ -86,6 +87,8 @@ pub fn run() {
             commands::spam_set_config,
             commands::spam_status,
             commands::spam_log,
+            commands::prio_set,
+            commands::prio_get,
             commands::compose_backup_set,
             commands::compose_backup_get,
             commands::compose_backup_clear,

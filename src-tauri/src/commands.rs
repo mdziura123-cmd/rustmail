@@ -119,6 +119,9 @@ pub async fn sign_out(state: State<'_, AppState>, store: State<'_, Store>, notif
     let _ = store.clear();
     let _ = store.backup_clear();
     let current = secrets::get(auth::KEY_EMAIL)?;
+    if let Some(e) = current.as_deref() {
+        let _ = store.prio_purge(&format!("g:{e}:"));
+    }
     if let Some(token) = secrets::get(auth::KEY_REFRESH)? {
         auth::revoke(&state.http, &token).await;
     }
@@ -919,6 +922,17 @@ pub async fn spam_set_config(app: AppHandle, spam: State<'_, SpamState>, config:
 #[tauri::command]
 pub async fn spam_status(app: AppHandle, spam: State<'_, SpamState>) -> Result<spam_io::Status, String> {
     Ok(spam_io::status(&app, &spam))
+}
+
+/// Ustawia flagę ważności wiadomości (0 = brak, 1 = bardzo ważne, 2 = ważne, 3 = mniej ważne).
+#[tauri::command]
+pub fn prio_set(store: State<'_, Store>, key: String, level: u8) -> Result<(), String> {
+    store.prio_set(&key, level)
+}
+
+#[tauri::command]
+pub fn prio_get(store: State<'_, Store>, keys: Vec<String>) -> Result<std::collections::HashMap<String, u8>, String> {
+    Ok(store.prio_get(&keys)?.into_iter().collect())
 }
 
 /// Kopia robocza pisanej wiadomości trafia do zaszyfrowanej bazy. Limit rozmiaru chroni bazę.

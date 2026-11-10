@@ -311,6 +311,7 @@ pub fn imap_logout(store: State<'_, Store>, account: String) -> Result<(), Strin
     save_all(&list)?;
     // Wiadomości czekające w kolejce tego konta nie zostają na dysku po wylogowaniu.
     let _ = store.purge_outbox(&outbox_key(&account));
+    let _ = store.prio_purge(&format!("i:{account}:"));
     Ok(())
 }
 
