@@ -732,13 +732,35 @@ pub async fn auto_scan(app: &AppHandle, st: &SpamState, gm: &AppState, email: &s
 
 const MAX_IMAP_MOVES: usize = 20;
 
-/// Wiadomość ze skrzynki IMAP do oceny (tylko nagłówki: nadawca i temat).
+/// Początek treści wiadomości z IMAP (pobrany tylko do lokalnej oceny, nigdzie nie wysyłany).
+#[derive(Default, Clone)]
+pub struct ImapDetail {
+    /// Tekst jawny (albo tekst wyciągnięty z HTML), początek wiadomości.
+    pub text: String,
+    /// Początek HTML (do wyciągnięcia adresów linków).
+    pub html: String,
+    pub reply_to: String,
+    pub attachment_names: Vec<String>,
+}
+
+/// Wiadomość ze skrzynki IMAP do oceny: nadawca, temat i (jeśli się udało pobrać) początek treści.
 pub struct ImapCand {
     /// Unikalny klucz, np. „imap:konto:uid”.
     pub key: String,
     pub from: String,
     pub subject: String,
     pub starred: bool,
+    pub detail: Option<ImapDetail>,
+}
+
+/// Czy filtr jest włączony (tylko wtedy warto pobierać początek treści wiadomości).
+pub fn imap_filter_active(app: &AppHandle) -> bool {
+    Mode::parse(&load_config(app).mode) != Mode::Off
+}
+
+/// Czy wiadomość była już oceniona (nie pobieramy jej treści drugi raz).
+pub fn imap_seen(app: &AppHandle, st: &SpamState, key: &str) -> bool {
+    seen_has(app, st, key)
 }
 
 pub struct ImapVerdict {
@@ -748,7 +770,7 @@ pub struct ImapVerdict {
 
 /// Ocenia wiadomości z IMAP tymi samymi silnikami co w Gmailu. Zwraca te, które trzeba przenieść do Spamu;
 /// podejrzane (tryby „oznaczaj” / „pewne”) trafiają tylko do dziennika. Silnik list używa domeny nadawcy
-/// (linki w treści nie są pobierane – to byłby osobny koszt dla każdej wiadomości).
+/// (linki w treści nie są pobierane z sieci – oceniana jest tylko ich domena).
 pub async fn evaluate_imap(app: &AppHandle, st: &SpamState, http: &reqwest::Client, cands: &[ImapCand]) -> Vec<ImapVerdict> {
     let cfg = load_config(app);
     let mode = Mode::parse(&cfg.mode);
@@ -768,21 +790,44 @@ pub async fn evaluate_imap(app: &AppHandle, st: &SpamState, http: &reqwest::Clie
             seen_add(app, st, &c.key);
             continue;
         }
+        let d = c.detail.clone().unwrap_or_default();
         let mut votes: Vec<Vote> = Vec::new();
-        if cfg.headers && rules.is_blocked(&addr) {
-            votes.extend(spam::headers_vote("high", &["Nadawca jest na Twojej liście zablokowanych".to_string()]));
+        if cfg.headers {
+            // Te same reguły co w Gmailu (podszywanie się, podobne domeny, adres odpowiedzi, presja czasu,
+            // prośby o hasło, podejrzane linki), bez wyników SPF/DKIM – tych serwer IMAP nie gwarantuje.
+            let name = crate::imap_proto::display_name(&c.from);
+            let a = crate::phishing::assess(&crate::phishing::Signals {
+                from_name: &name,
+                from_email: &addr,
+                reply_to: &d.reply_to,
+                subject: &c.subject,
+                auth: crate::phishing::AuthResults::default(),
+                body: &d.text,
+                html: &d.html,
+                attachment_names: d.attachment_names.clone(),
+                mine: false,
+                blocked: rules.is_blocked(&addr),
+                allowed: false,
+            });
+            votes.extend(spam::headers_vote(a.level.as_str(), &a.reasons));
         }
         if cfg.rules {
-            votes.extend(spam::rules_vote(&format!("{} {}", c.subject, c.from), &cfg.custom));
+            votes.extend(spam::rules_vote(&format!("{} {} {}", c.subject, d.text, c.from), &cfg.custom));
         }
         if cfg.bayes {
-            let toks = spam::tokenize(&c.subject, "", &c.from);
+            let toks = spam::tokenize(&c.subject, &d.text, &c.from);
             if let Some(p) = with_model(app, st, |m| m.classify(&toks)) {
                 votes.extend(spam::bayes_vote(p));
             }
         }
         if let Some(list) = list.as_ref() {
-            votes.extend(spam::lists_vote(list, spam::domain_of_email(&addr).as_deref(), &[]));
+            let mut hosts: Vec<String> = Vec::new();
+            for h in spam::extract_hosts(&d.html).into_iter().chain(spam::extract_hosts(&d.text)) {
+                if !hosts.contains(&h) && hosts.len() < 300 {
+                    hosts.push(h);
+                }
+            }
+            votes.extend(spam::lists_vote(list, spam::domain_of_email(&addr).as_deref(), &hosts));
         }
         match spam::decide(mode, &votes) {
             Decision::Keep => {}
@@ -794,7 +839,7 @@ pub async fn evaluate_imap(app: &AppHandle, st: &SpamState, http: &reqwest::Clie
                     action: "flagged".to_string(),
                     subject: c.subject.clone(),
                     sender: c.from.clone(),
-                    snippet: String::new(),
+                    snippet: c.detail.as_ref().map(|d| d.text.chars().take(LOG_SNIPPET_CHARS).collect()).unwrap_or_default(),
                     reason: join_reasons(&votes),
                     open: false,
                 },
@@ -823,7 +868,7 @@ pub fn imap_moved(app: &AppHandle, st: &SpamState, c: &ImapCand, reason: &str) {
             action: "moved".to_string(),
             subject: c.subject.clone(),
             sender: c.from.clone(),
-            snippet: String::new(),
+            snippet: c.detail.as_ref().map(|d| d.text.chars().take(LOG_SNIPPET_CHARS).collect()).unwrap_or_default(),
             reason: reason.to_string(),
             open: false,
         },

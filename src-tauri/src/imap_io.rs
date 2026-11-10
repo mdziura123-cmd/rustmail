@@ -27,6 +27,9 @@ const OLD_KEY: &str = "imap_account";
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_LITERAL: usize = 40 * 1024 * 1024;
 const PAGE: u32 = 25;
+/// Ile wiadomości na jedno sprawdzenie dostaje ocenę z początkiem treści (oszczędza łącze i serwer).
+const PREVIEWS_PER_POLL: usize = 15;
+const PREVIEW_BYTES: usize = 30_000;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Creds {
@@ -583,6 +586,30 @@ async fn fetch_raw(conn: &mut Conn, folder: &str, uid: u32) -> Result<Vec<u8>, S
     Err("Nie znaleziono wiadomości (mogła zostać usunięta).".to_string())
 }
 
+/// Początek treści wiadomości do lokalnej oceny spamu: pierwsze ~30 KB, bez zmiany flag (PEEK).
+async fn fetch_preview(conn: &mut Conn, folder: &str, uid: u32) -> Result<spam_io::ImapDetail, String> {
+    conn.select(folder).await?;
+    let r = conn.ok(&format!("UID FETCH {uid} (BODY.PEEK[]<0.{PREVIEW_BYTES}>)")).await?;
+    let raw = r
+        .untagged
+        .iter()
+        .filter(|u| p::parse_fetch(&u.head).is_some())
+        .find_map(|u| u.lits.first().cloned())
+        .ok_or("Brak treści wiadomości.")?;
+    let mail = mailparse::parse_mail(&raw).map_err(|e| e.to_string())?;
+    let (mut text, mut html, mut atts) = (String::new(), String::new(), Vec::new());
+    walk(&mail, &mut text, &mut html, &mut atts);
+    if text.trim().is_empty() && !html.is_empty() {
+        text = crate::gmail::strip_html(&html);
+    }
+    Ok(spam_io::ImapDetail {
+        text: text.chars().take(3000).collect(),
+        html: html.chars().take(40_000).collect(),
+        reply_to: mail.headers.get_first_value("Reply-To").unwrap_or_default().chars().take(300).collect(),
+        attachment_names: atts.into_iter().map(|a| a.name).take(20).collect(),
+    })
+}
+
 fn walk(part: &ParsedMail, text: &mut String, html: &mut String, atts: &mut Vec<Att>) {
     if !part.subparts.is_empty() {
         for s in &part.subparts {
@@ -783,14 +810,32 @@ async fn poll_inner(
     let inbox = folders.iter().find(|f| f.role == "inbox").map(|f| f.name.clone()).unwrap_or_else(|| "INBOX".to_string());
     let page = list_inner(conn, &inbox, 0).await?;
     let unread: Vec<&Row> = page.rows.iter().filter(|r| r.unread).collect();
-    let cands: Vec<ImapCand> = unread
-        .iter()
-        .map(|r| ImapCand { key: format!("imap:{account}:{}", r.uid), from: r.from.clone(), subject: r.subject.clone(), starred: r.starred })
-        .collect();
+    // Oceniamy tylko wiadomości, których jeszcze nie oceniono. Dla każdej pobieramy początek treści
+    // (do lokalnej oceny filtra); najwyżej PREVIEWS_PER_POLL na jedno sprawdzenie, reszta przy następnym.
+    let filter_on = spam_io::imap_filter_active(app);
+    let mut cand_rows: Vec<&Row> = Vec::new();
+    let mut cands: Vec<ImapCand> = Vec::new();
+    let mut previews = 0usize;
+    for r in unread.iter().copied() {
+        let key = format!("imap:{account}:{}", r.uid);
+        if filter_on && spam_io::imap_seen(app, spam, &key) {
+            continue;
+        }
+        let mut detail = None;
+        if filter_on && !r.starred {
+            if previews >= PREVIEWS_PER_POLL {
+                continue;
+            }
+            previews += 1;
+            detail = fetch_preview(conn, &inbox, r.uid).await.ok();
+        }
+        cand_rows.push(r);
+        cands.push(ImapCand { key, from: r.from.clone(), subject: r.subject.clone(), starred: r.starred, detail });
+    }
     let verdicts = spam_io::evaluate_imap(app, spam, &state.http, &cands).await;
     let mut moved_uids: Vec<u32> = Vec::new();
     for v in &verdicts {
-        let uid = unread[v.idx].uid;
+        let uid = cand_rows[v.idx].uid;
         if act_inner(conn, &inbox, uid, "spam").await.is_ok() {
             spam_io::imap_moved(app, spam, &cands[v.idx], &v.reason);
             moved_uids.push(uid);

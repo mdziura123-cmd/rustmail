@@ -266,6 +266,15 @@ pub fn bare_addr(s: &str) -> String {
     }
 }
 
+/// Nazwa wyświetlana z nagłówka Od (`"Jan K." <a@b.pl>` → `Jan K.`); pusta, gdy jest sam adres.
+pub fn display_name(s: &str) -> String {
+    let t = s.trim();
+    match t.rfind('<') {
+        Some(a) => t[..a].trim().trim_matches('"').trim().to_string(),
+        None => String::new(),
+    }
+}
+
 /// Numer UID z kodu odpowiedzi serwera: `[APPENDUID <v> <uid>]` albo `[COPYUID <v> <src> <dst>]` (ostatnia liczba).
 pub fn resp_uid(text: &str, code: &str) -> Option<u32> {
     let up = text.to_ascii_uppercase();
@@ -544,5 +553,13 @@ mod tests {
         assert!(!is_connect_error("Serwer SMTP zamknął połączenie."));
         assert!(!is_connect_error("Serwer SMTP nie przyjął wiadomości (554): spam"));
         assert!(!is_connect_error("Logowanie do serwera SMTP nie powiodło się (x)."));
+    }
+
+    #[test]
+    fn display_name_extraction() {
+        assert_eq!(display_name("\"Jan K.\" <jan@x.pl>"), "Jan K.");
+        assert_eq!(display_name("PayPal <a@b.pl>"), "PayPal");
+        assert_eq!(display_name("jan@x.pl"), "");
+        assert_eq!(display_name("<jan@x.pl>"), "");
     }
 }
