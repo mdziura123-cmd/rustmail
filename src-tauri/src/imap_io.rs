@@ -19,6 +19,8 @@ use crate::auth::AppState;
 use crate::notify;
 use crate::secrets;
 use crate::spam_io::{self, ImapCand, SpamState};
+use crate::store::{OutboxItem, Store};
+use tauri::State;
 
 const KEY: &str = "imap_accounts";
 const OLD_KEY: &str = "imap_account";
@@ -289,10 +291,13 @@ pub async fn imap_login(email: String, password: String, host: String) -> Result
 }
 
 #[tauri::command]
-pub fn imap_logout(account: String) -> Result<(), String> {
+pub fn imap_logout(store: State<'_, Store>, account: String) -> Result<(), String> {
     let mut list = all()?;
     list.retain(|c| !c.email.eq_ignore_ascii_case(&account));
-    save_all(&list)
+    save_all(&list)?;
+    // Wiadomości czekające w kolejce tego konta nie zostają na dysku po wylogowaniu.
+    let _ = store.purge_outbox(&outbox_key(&account));
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -1004,30 +1009,108 @@ pub struct SendResult {
     pub warning: Option<String>,
 }
 
-#[tauri::command]
-pub async fn imap_send(account: String, msg: crate::commands::OutgoingDto) -> Result<SendResult, String> {
-    let creds = load(&account)?;
-    let raw = crate::commands::prepare(&msg, &creds.email, true)?;
-    let mut rcpts: Vec<String> = Vec::new();
-    for list in [&msg.to, &msg.cc, &msg.bcc] {
-        rcpts.extend(crate::compose::parse_recipients(list)?);
-    }
+/// Wysyła gotową wiadomość (zbudowaną przez `prepare`) i próbuje zapisać kopię w Wysłanych.
+/// Odbiorcy są odczytywani z nagłówków To/Cc/Bcc, więc ta sama ścieżka obsługuje wysyłkę z kolejki.
+async fn send_raw(creds: &Creds, raw: &[u8]) -> Result<SendResult, String> {
+    let mut rcpts = crate::compose::parse_recipients(&p::recipient_headers(raw))?;
     rcpts.sort();
     rcpts.dedup();
+    if rcpts.is_empty() {
+        return Err("Podaj co najmniej jednego odbiorcę.".to_string());
+    }
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let nonce: String = crate::auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let domain = creds.email.rsplit('@').next().unwrap_or("rustmail.local");
-    let prepared = p::smtp_prepare(&raw, &format!("{secs}.{nonce}@{domain}"), &p::rfc2822_date(secs));
-    smtp_send(&creds, &rcpts, &prepared).await?;
+    let prepared = p::smtp_prepare(raw, &format!("{secs}.{nonce}@{domain}"), &p::rfc2822_date(secs));
+    smtp_send(creds, &rcpts, &prepared).await?;
     // Kopia w folderze Wysłane (serwery SMTP same jej nie zapisują). Niepowodzenie nie cofa wysłania.
-    let warning = match save_copy(&creds, &prepared).await {
+    let warning = match save_copy(creds, &prepared).await {
         Ok(()) => None,
         Err(e) => Some(format!("Wiadomość wysłano, ale nie zapisano kopii w Wysłanych: {e}")),
     };
     Ok(SendResult { warning })
+}
+
+#[tauri::command]
+pub async fn imap_send(account: String, msg: crate::commands::OutgoingDto) -> Result<SendResult, String> {
+    let creds = load(&account)?;
+    let raw = crate::commands::prepare(&msg, &creds.email, true)?;
+    send_raw(&creds, &raw).await
+}
+
+// ---------- Kolejka „Do wysłania” (gdy nie ma połączenia z serwerem) ----------
+// Kolejka leży w zaszyfrowanej bazie lokalnej (ta sama tabela co dla Gmaila, osobny klucz konta).
+// Do kolejki trafia tylko wiadomość, której wysyłka nie zaczęła się z powodu braku połączenia, i to dopiero po
+// zgodzie użytkownika. Błąd po rozpoczęciu wysyłki nie jest ponawiany automatycznie (ryzyko dwukrotnego wysłania).
+
+fn outbox_key(account: &str) -> String {
+    format!("imap:{}", account.to_ascii_lowercase())
+}
+
+#[tauri::command]
+pub async fn imap_outbox_queue(store: State<'_, Store>, account: String, msg: crate::commands::OutgoingDto) -> Result<i64, String> {
+    let creds = load(&account)?;
+    let raw = crate::commands::prepare(&msg, &creds.email, true)?;
+    let subject: String = crate::compose::clean_header_value(&msg.subject).chars().take(200).collect();
+    store.enqueue(
+        &outbox_key(&account),
+        &crate::commands::recipients_summary(&msg),
+        &subject,
+        None,
+        msg.draft_id.as_deref().filter(|d| !d.is_empty()),
+        &raw,
+    )
+}
+
+#[tauri::command]
+pub fn imap_outbox_list(store: State<'_, Store>, account: String) -> Result<Vec<OutboxItem>, String> {
+    store.list_outbox(&outbox_key(&account))
+}
+
+#[tauri::command]
+pub fn imap_outbox_retry(store: State<'_, Store>, account: String, id: i64) -> Result<(), String> {
+    store.retry_outbox(&outbox_key(&account), id)
+}
+
+#[tauri::command]
+pub fn imap_outbox_delete(store: State<'_, Store>, account: String, id: i64) -> Result<(), String> {
+    store.delete_outbox(&outbox_key(&account), id)
+}
+
+/// Wysyła czekające wiadomości tego konta, od najstarszej. Brak połączenia przerywa pętlę (wiadomość wraca
+/// do kolejki); inny błąd oznacza wiadomość jako nieudaną i nie jest ponawiany automatycznie.
+#[tauri::command]
+pub async fn imap_outbox_flush(store: State<'_, Store>, account: String) -> Result<crate::commands::FlushResult, String> {
+    let key = outbox_key(&account);
+    let mut out = crate::commands::FlushResult { sent: 0, failed: 0 };
+    if store.list_outbox(&key)?.iter().all(|i| i.state != "queued") {
+        return Ok(out);
+    }
+    let creds = load(&account)?;
+    for _ in 0..60 {
+        let Some(m) = store.claim_next(&key)? else { break };
+        match send_raw(&creds, &m.raw).await {
+            Ok(_) => {
+                store.delete_outbox(&key, m.id)?;
+                out.sent += 1;
+                if let Some(uid) = m.draft_id.as_deref().and_then(|d| d.parse::<u32>().ok()) {
+                    let _ = imap_delete_draft(account.clone(), uid).await;
+                }
+            }
+            Err(e) if p::is_connect_error(&e) => {
+                store.set_outbox_state(&key, m.id, "queued", None)?;
+                break;
+            }
+            Err(e) => {
+                store.set_outbox_state(&key, m.id, "failed", Some(&e))?;
+                out.failed += 1;
+            }
+        }
+    }
+    Ok(out)
 }
 
 async fn save_copy(creds: &Creds, raw: &[u8]) -> Result<(), String> {

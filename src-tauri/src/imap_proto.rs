@@ -338,6 +338,46 @@ pub fn smtp_prepare(raw: &[u8], message_id: &str, date: &str) -> Vec<u8> {
     v
 }
 
+/// Wartości nagłówków To, Cc i Bcc z gotowej wiadomości (złożone w jedną listę rozdzieloną przecinkami).
+/// Służy do ustalenia odbiorców przy wysyłce wiadomości z kolejki. Czytany jest tylko blok nagłówków.
+pub fn recipient_headers(raw: &[u8]) -> String {
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(raw.len());
+    let head = String::from_utf8_lossy(&raw[..split]).to_string();
+    let mut vals: Vec<String> = Vec::new();
+    let mut cur: Option<String> = None;
+    for line in head.split("\r\n") {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if let Some(c) = cur.as_mut() {
+                c.push(' ');
+                c.push_str(line.trim());
+            }
+            continue;
+        }
+        if let Some(c) = cur.take() {
+            vals.push(c);
+        }
+        let low = line.to_ascii_lowercase();
+        for name in ["to:", "cc:", "bcc:"] {
+            if low.starts_with(name) {
+                cur = Some(line[name.len()..].trim().to_string());
+            }
+        }
+    }
+    if let Some(c) = cur.take() {
+        vals.push(c);
+    }
+    vals.retain(|v| !v.is_empty());
+    vals.join(", ")
+}
+
+/// Czy błąd powstał, zanim cokolwiek wysłano do serwera (brak połączenia z serwerem). Tylko wtedy wolno
+/// bezpiecznie zapisać wiadomość w kolejce i ponowić – przy błędzie po rozpoczęciu wysyłki mogłaby wyjść dwa razy.
+pub fn is_connect_error(e: &str) -> bool {
+    e.starts_with("Nie można połączyć z serwerem")
+        || e.starts_with("Błąd bezpiecznego połączenia")
+        || (e.starts_with("Serwer ") && e.ends_with(" nie odpowiada."))
+}
+
 /// Przygotowuje treść do polecenia DATA: podwaja kropki na początku linii i dodaje końcowe `.`.
 pub fn dot_stuff(data: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(data.len() + 16);
@@ -485,5 +525,24 @@ mod tests {
         assert_eq!(resp_uid("[COPYUID 1 5:7 9:11] ok", "COPYUID"), None);
         assert_eq!(resp_uid("Copy completed", "COPYUID"), None);
         assert_eq!(resp_uid("[APPENDUID 1", "APPENDUID"), None);
+    }
+
+    #[test]
+    fn recipient_headers_collect_to_cc_bcc_only_from_header_block() {
+        let raw = b"From: a@x.pl\r\nTo: b@y.pl,\r\n c@y.pl\r\nCc: d@y.pl\r\nBcc: e@y.pl\r\nSubject: To: zly@z.pl\r\n\r\nTo: tresc@z.pl\r\nBcc: tresc2@z.pl";
+        let h = recipient_headers(raw);
+        assert_eq!(h, "b@y.pl, c@y.pl, d@y.pl, e@y.pl");
+        assert_eq!(recipient_headers(b"Subject: x\r\n\r\nTo: a@b.pl"), "");
+        assert_eq!(recipient_headers(b"TO: A@B.PL\r\n\r\n"), "A@B.PL");
+    }
+
+    #[test]
+    fn only_pre_send_connection_errors_allow_queueing() {
+        assert!(is_connect_error("Nie można połączyć z serwerem smtp.wp.pl: timed out"));
+        assert!(is_connect_error("Błąd bezpiecznego połączenia (TLS) z smtp.wp.pl: x"));
+        assert!(is_connect_error("Serwer smtp.wp.pl nie odpowiada."));
+        assert!(!is_connect_error("Serwer SMTP zamknął połączenie."));
+        assert!(!is_connect_error("Serwer SMTP nie przyjął wiadomości (554): spam"));
+        assert!(!is_connect_error("Logowanie do serwera SMTP nie powiodło się (x)."));
     }
 }

@@ -140,7 +140,10 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
     } catch (e) {
       const m = errText(e);
       setError(m);
-      setCanQueue(m.startsWith("Brak połączenia"));
+      // Kolejka tylko wtedy, gdy wysyłka na pewno się nie zaczęła (brak połączenia z serwerem).
+      setCanQueue(imapAcc
+        ? /^(Nie można połączyć z serwerem|Błąd bezpiecznego połączenia)/.test(m) || /^Serwer .* nie odpowiada\.$/.test(m)
+        : m.startsWith("Brak połączenia"));
       setSending(false);
     }
   };
@@ -149,7 +152,8 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
     setError(null);
     setSending(true);
     try {
-      await api.queueMessage(build());
+      if (imapAcc) await api.imapOutboxQueue(imapAcc, build());
+      else await api.queueMessage(build());
       dirty.current = false;
       backup(null);
       onQueued();
@@ -270,7 +274,7 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
       {canQueue && !sending && (
         <div className="queue-offer" role="status">
           <p>
-            Nie ma połączenia z Gmail. Możesz zapisać wiadomość w kolejce – wyśle się sama, gdy wróci sieć (aplikacja
+            {imapAcc ? "Nie ma połączenia z serwerem poczty." : "Nie ma połączenia z Gmail."} Możesz zapisać wiadomość w kolejce – wyśle się sama, gdy wróci sieć (aplikacja
             musi być wtedy uruchomiona). Do tego czasu wiadomość leży na dysku w szyfrowanej bazie lokalnej.
           </p>
           <button onClick={() => void queue()}>Zapisz w kolejce do wysłania</button>

@@ -689,7 +689,7 @@ export default function App() {
   const pollOnce = useCallback(async () => {
     if (bgRef.current.activeOnly && bgRef.current.view !== "gmail") {
       // Gmail jest nieaktywny: nie sprawdzamy poczty, tylko wysyłamy ewentualną kolejkę.
-      try { await flushQueue(false); } catch { /* ignorujemy */ }
+      try { await flushQueue(false, null); } catch { /* ignorujemy */ }
       return;
     }
     try {
@@ -703,24 +703,42 @@ export default function App() {
         if (folderRef.current === "inbox") reloadRef.current();
       }
       document.title = r.inboxUnread > 0 ? `(${r.inboxUnread}) RustMail` : "RustMail";
-      await flushQueue(false);
+      await flushQueue(false, null);
     } catch { /* brak sieci – spróbujemy za minutę */ }
   }, []);
-  const flushQueue = async (manual: boolean) => {
+  // Kolejka „Do wysłania” działa osobno dla Gmaila (account = null) i dla każdego konta IMAP.
+  const outboxOps = (account: string | null) => account
+    ? {
+        list: () => api.imapOutboxList(account),
+        flush: () => api.imapOutboxFlush(account),
+        retry: (id: number) => api.imapOutboxRetry(account, id),
+        del: (id: number) => api.imapOutboxDelete(account, id),
+      }
+    : { list: api.listOutbox, flush: api.flushOutbox, retry: api.retryOutbox, del: api.deleteOutbox };
+  const flushQueue = async (manual: boolean, target?: string | null) => {
+    const account = target === undefined ? imapAccountRef.current : target;
+    const ops = outboxOps(account);
+    const current = () => account === imapAccountRef.current;
     try {
-      let items = await api.listOutbox();
-      setOutbox(items);
+      let items = await ops.list();
+      if (current()) setOutbox(items);
       if (items.some((i) => i.state === "queued")) {
-        const r = await api.flushOutbox();
+        const r = await ops.flush();
         if (r.sent > 0) showToast(r.sent === 1 ? "Wysłano wiadomość z kolejki." : `Wysłano wiadomości z kolejki: ${r.sent}.`);
         if (r.failed > 0) showToast("Nie udało się wysłać części wiadomości z kolejki – zobacz „Do wysłania”.");
-        items = await api.listOutbox();
-        setOutbox(items);
+        items = await ops.list();
+        if (current()) setOutbox(items);
       } else if (manual) {
         showToast("Kolejka jest pusta albo wymaga Twojej decyzji.");
       }
     } catch (e) { if (manual) showToast(errText(e)); }
   };
+  // Po zmianie widoku pokazujemy kolejkę właściwego konta (tylko odczyt, bez wysyłania).
+  useEffect(() => {
+    setOutbox([]);
+    outboxOps(imapAccount).list().then((items) => { if (imapAccountRef.current === imapAccount) setOutbox(items); }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
   useEffect(() => {
     if (!email) return;
     void pollOnce();
@@ -733,6 +751,7 @@ export default function App() {
   const imapPollOnce = useCallback(async () => {
     for (const a of imapRef.current) {
       if (bgRef.current.activeOnly && bgRef.current.view !== "imap:" + a.email) continue;
+      try { await flushQueue(false, a.email); } catch { /* ignorujemy */ }
       try {
         const r = await api.imapPoll(a.email, settingsRef.current.notify, settingsRef.current.content);
         if (r.moved > 0) {
@@ -1193,8 +1212,8 @@ export default function App() {
       )}
       {outboxOpen && (
         <OutboxDialog items={outbox} onClose={() => setOutboxOpen(false)} onSendNow={() => void flushQueue(true)}
-          onRetry={async (id) => { try { await api.retryOutbox(id); } catch (e) { showToast(errText(e)); } await flushQueue(true); }}
-          onDelete={async (id) => { try { await api.deleteOutbox(id); } catch (e) { showToast(errText(e)); } await flushQueue(false); }} />
+          onRetry={async (id) => { try { await outboxOps(imapAccount).retry(id); } catch (e) { showToast(errText(e)); } await flushQueue(true); }}
+          onDelete={async (id) => { try { await outboxOps(imapAccount).del(id); } catch (e) { showToast(errText(e)); } await flushQueue(false); }} />
       )}
       {settingsOpen && (
         <SettingsDialog notify={notifyOn} content={notifyContent} gmail={accounts.length ? accounts : email ? [{ email, active: true }] : []} imap={imapAccs} busy={signingIn}

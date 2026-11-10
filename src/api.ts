@@ -65,6 +65,11 @@ export const api = {
   retryOutbox: (id: number) => invoke<void>("retry_outbox", { id }),
   deleteOutbox: (id: number) => invoke<void>("delete_outbox", { id }),
   flushOutbox: () => invoke<FlushResult>("flush_outbox"),
+  imapOutboxQueue: (account: string, msg: OutgoingMessage) => invoke<number>("imap_outbox_queue", { account, msg }),
+  imapOutboxList: (account: string) => invoke<OutboxItem[]>("imap_outbox_list", { account }),
+  imapOutboxRetry: (account: string, id: number) => invoke<void>("imap_outbox_retry", { account, id }),
+  imapOutboxDelete: (account: string, id: number) => invoke<void>("imap_outbox_delete", { account, id }),
+  imapOutboxFlush: (account: string) => invoke<FlushResult>("imap_outbox_flush", { account }),
   pollMail: (notifyEnabled: boolean, showContent: boolean) =>
     invoke<PollResult>("poll_mail", { notifyEnabled, showContent }).then((r) => ({
       ...r,

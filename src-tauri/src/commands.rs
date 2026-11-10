@@ -809,7 +809,7 @@ pub fn test_notification() -> Result<(), String> {
 // ---------- Etap 9: kolejka wysyłania ----------
 
 /// Podsumowanie odbiorców do listy kolejki (adresy z pól Do/DW/UDW, najwyżej 3 + liczba pozostałych).
-fn recipients_summary(dto: &OutgoingDto) -> String {
+pub(crate) fn recipients_summary(dto: &OutgoingDto) -> String {
     let all: Vec<String> = [&dto.to, &dto.cc, &dto.bcc]
         .iter()
         .flat_map(|f| f.split([',', ';']).map(|s| s.trim().to_string()).collect::<Vec<_>>())

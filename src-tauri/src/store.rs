@@ -568,6 +568,11 @@ impl Store {
         self.with(|c| c.execute(SET_OUTBOX_STATE, params![id, state, error, account]).map(|_| ()))
     }
 
+    /// Usuwa z kolejki wszystkie wiadomości danego konta (np. po wylogowaniu).
+    pub fn purge_outbox(&self, account: &str) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM outbox WHERE account = ?1", [account]).map(|_| ()))
+    }
+
     pub fn retry_outbox(&self, account: &str, id: i64) -> Result<(), String> {
         self.with(|c| c.execute(RETRY_OUTBOX, params![id, account]).map(|_| ()))
     }
