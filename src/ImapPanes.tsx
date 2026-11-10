@@ -148,7 +148,7 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
         <ReceiveButton busy={imap.loading} onClick={imap.refresh} />
       </header>
       <form className="search" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) imap.search(q); }}>
-        <input type="search" value={q} maxLength={100} placeholder="Szukaj w tym folderze" aria-label="Szukaj w folderze"
+        <input type="search" value={q} maxLength={300} placeholder="Szukaj w tym folderze (np. od:ala temat:faktura is:unread)" aria-label="Szukaj w folderze"
           onChange={(e) => setQ(e.target.value)} />
         <button className="small" type="submit">Szukaj</button>
         {imap.term && <button className="small" type="button" onClick={() => { setQ(""); imap.clearSearch(); }}>Wyczyść</button>}

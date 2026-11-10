@@ -104,6 +104,7 @@ fn write_private(path: &Path, contents: &str) -> Result<(), String> {
 const KEY_LOG: &str = "spam:log";
 const KEY_MODEL: &str = "spam:bayes";
 const KEY_SEEN: &str = "spam:seen";
+const KEY_SETTINGS: &str = "spam:settings";
 
 fn blob_load(app: &AppHandle, key: &str, legacy: &Path) -> Option<String> {
     let st = app.try_state::<Store>();
@@ -114,13 +115,13 @@ fn blob_load(app: &AppHandle, key: &str, legacy: &Path) -> Option<String> {
     blobmig::load(db, key, legacy)
 }
 
-fn blob_save(app: &AppHandle, key: &str, legacy: &Path, text: &str) {
+fn blob_save(app: &AppHandle, key: &str, legacy: &Path, text: &str) -> Result<(), String> {
     let st = app.try_state::<Store>();
     let db: Option<&dyn BlobDb> = match &st {
         Some(s) if s.available() => Some(s.inner()),
         _ => None,
     };
-    let _ = blobmig::save(db, key, legacy, text);
+    blobmig::save(db, key, legacy, text)
 }
 
 fn blob_wipe(app: &AppHandle, key: &str, legacy: &Path) -> Result<(), String> {
@@ -134,14 +135,14 @@ fn blob_wipe(app: &AppHandle, key: &str, legacy: &Path) -> Result<(), String> {
 
 pub fn load_config(app: &AppHandle) -> Config {
     let Ok(d) = dir(app) else { return Config::default() };
-    let text = std::fs::read_to_string(d.join("spam_settings.json")).unwrap_or_default();
+    let text = blob_load(app, KEY_SETTINGS, &d.join("spam_settings.json")).unwrap_or_default();
     clean_config(serde_json::from_str(&text).unwrap_or_default())
 }
 
 pub fn save_config(app: &AppHandle, st: &SpamState, c: Config) -> Result<Config, String> {
     let c = clean_config(c);
     let json = serde_json::to_string_pretty(&c).map_err(|e| e.to_string())?;
-    write_private(&dir(app)?.join("spam_settings.json"), &json)?;
+    blob_save(app, KEY_SETTINGS, &dir(app)?.join("spam_settings.json"), &json)?;
     if let Ok(mut k) = st.last_key.lock() {
         *k = None; // po zmianie ustawień skrzynka zostanie sprawdzona od nowa
     }
@@ -209,7 +210,7 @@ pub fn wipe_data(app: &AppHandle, st: &SpamState) -> Result<(), String> {
 fn save_model(app: &AppHandle, st: &SpamState) {
     let text = with_model(app, st, |m| m.to_text());
     if let Ok(p) = model_path(app) {
-        blob_save(app, KEY_MODEL, &p, &text);
+        let _ = blob_save(app, KEY_MODEL, &p, &text);
     }
 }
 
@@ -250,7 +251,7 @@ fn seen_add(app: &AppHandle, st: &SpamState, id: &str) {
 fn seen_save(app: &AppHandle, st: &SpamState) {
     let text = lock(&st.seen).order.join("\n");
     if let Ok(p) = seen_path(app) {
-        blob_save(app, KEY_SEEN, &p, &text);
+        let _ = blob_save(app, KEY_SEEN, &p, &text);
     }
 }
 
@@ -286,7 +287,7 @@ pub fn read_log(app: &AppHandle) -> Vec<LogEntry> {
 
 fn write_log(app: &AppHandle, entries: &[LogEntry]) {
     if let (Ok(p), Ok(json)) = (log_path(app), serde_json::to_string(entries)) {
-        blob_save(app, KEY_LOG, &p, &json);
+        let _ = blob_save(app, KEY_LOG, &p, &json);
     }
 }
 

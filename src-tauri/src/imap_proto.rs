@@ -24,6 +24,98 @@ pub fn quote(s: &str) -> Result<String, String> {
     Ok(o)
 }
 
+/// Element polecenia SEARCH: zwykły tekst albo literał (wartość z polskimi znakami wysyłana osobno, w UTF-8).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SPart {
+    Text(String),
+    Lit(String),
+}
+
+fn split_terms(q: &str) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_q = false;
+    let mut had = false;
+    for c in q.chars() {
+        match c {
+            '"' => {
+                in_q = !in_q;
+                had = true;
+            }
+            c if c.is_whitespace() && !in_q => {
+                if had || !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                    had = false;
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if in_q {
+        return Err("Zamknij cudzysłów w wyszukiwanej frazie.".to_string());
+    }
+    if had || !cur.is_empty() {
+        out.push(cur);
+    }
+    Ok(out)
+}
+
+fn value_parts(key: &str, v: &str) -> Result<Vec<SPart>, String> {
+    if v.is_empty() || v.chars().count() > 100 || v.chars().any(|c| c.is_control()) {
+        return Err("Fraza w wyszukiwaniu jest pusta, za długa albo zawiera znaki sterujące.".to_string());
+    }
+    if v.is_ascii() {
+        Ok(vec![SPart::Text(format!("{key} {}", quote(v)?))])
+    } else {
+        Ok(vec![SPart::Text(format!("{key} ")), SPart::Lit(v.to_string())])
+    }
+}
+
+/// Zamienia frazę wyszukiwania na kryteria IMAP SEARCH. Obsługiwane: słowa (cały tekst), `od:`, `do:`, `temat:`
+/// (także `from:`, `to:`, `subject:`), `is:unread`, `is:read`, `is:starred`, fraza w cudzysłowie. Wszystkie warunki
+/// łączą się spójnikiem „i”. Wartości spoza ASCII idą jako literały UTF-8 (patrz `search_needs_utf8`).
+pub fn search_parts(q: &str) -> Result<Vec<SPart>, String> {
+    let terms = split_terms(q)?;
+    if terms.is_empty() {
+        return Err("Wpisz frazę do wyszukania.".to_string());
+    }
+    if terms.len() > 8 {
+        return Err("Za dużo warunków w wyszukiwaniu (najwyżej 8).".to_string());
+    }
+    let mut parts: Vec<SPart> = Vec::new();
+    for (i, t) in terms.iter().enumerate() {
+        if i > 0 {
+            parts.push(SPart::Text(" ".to_string()));
+        }
+        let low = t.to_lowercase();
+        let one = match low.split_once(':') {
+            Some(("od" | "from", _)) => value_parts("FROM", &t[t.find(':').unwrap_or(0) + 1..])?,
+            Some(("do" | "to", _)) => value_parts("TO", &t[t.find(':').unwrap_or(0) + 1..])?,
+            Some(("temat" | "subject", _)) => value_parts("SUBJECT", &t[t.find(':').unwrap_or(0) + 1..])?,
+            Some(("is", "unread")) => vec![SPart::Text("UNSEEN".to_string())],
+            Some(("is", "read")) => vec![SPart::Text("SEEN".to_string())],
+            Some(("is", "starred")) => vec![SPart::Text("FLAGGED".to_string())],
+            Some(("is", _)) => return Err("Nieznany warunek „is:” (dozwolone: is:unread, is:read, is:starred).".to_string()),
+            _ => value_parts("TEXT", t)?,
+        };
+        parts.extend(one);
+    }
+    // sklejamy sąsiednie fragmenty tekstu
+    let mut out: Vec<SPart> = Vec::new();
+    for p in parts {
+        match (out.last_mut(), p) {
+            (Some(SPart::Text(a)), SPart::Text(b)) => a.push_str(&b),
+            (_, p) => out.push(p),
+        }
+    }
+    Ok(out)
+}
+
+/// Czy wyszukiwanie zawiera literały spoza ASCII (wtedy polecenie musi mieć `CHARSET UTF-8`).
+pub fn search_needs_utf8(parts: &[SPart]) -> bool {
+    parts.iter().any(|p| matches!(p, SPart::Lit(_)))
+}
+
 /// Nazwa serwera: litery, cyfry, kropki i myślniki; musi zawierać kropkę.
 pub fn valid_host(h: &str) -> bool {
     let h = h.trim();
@@ -561,5 +653,44 @@ mod tests {
         assert_eq!(display_name("PayPal <a@b.pl>"), "PayPal");
         assert_eq!(display_name("jan@x.pl"), "");
         assert_eq!(display_name("<jan@x.pl>"), "");
+    }
+
+    fn t(s: &str) -> SPart {
+        SPart::Text(s.to_string())
+    }
+    fn l(s: &str) -> SPart {
+        SPart::Lit(s.to_string())
+    }
+
+    #[test]
+    fn search_plain_words_and_operators() {
+        assert_eq!(search_parts("faktura").unwrap(), vec![t("TEXT \"faktura\"")]);
+        assert_eq!(
+            search_parts("od:jan@x.pl temat:\"plan pracy\" is:unread").unwrap(),
+            vec![t("FROM \"jan@x.pl\" SUBJECT \"plan pracy\" UNSEEN")]
+        );
+        assert_eq!(search_parts("Do:a@b.pl IS:Starred").unwrap(), vec![t("TO \"a@b.pl\" FLAGGED")]);
+        assert_eq!(search_parts("\"dwa słowa\"").unwrap().len(), 2); // spoza ASCII → literał
+    }
+
+    #[test]
+    fn search_non_ascii_values_become_literals_in_order() {
+        let p = search_parts("od:Łukasz temat:umowa zażółć").unwrap();
+        assert_eq!(p, vec![t("FROM "), l("Łukasz"), t(" SUBJECT \"umowa\" TEXT "), l("zażółć")]);
+        assert!(search_needs_utf8(&p));
+        assert!(!search_needs_utf8(&search_parts("abc").unwrap()));
+    }
+
+    #[test]
+    fn search_rejects_bad_input() {
+        assert!(search_parts("").is_err());
+        assert!(search_parts("   ").is_err());
+        assert!(search_parts("\"niezamknięty").is_err());
+        assert!(search_parts("is:bogus").is_err());
+        assert!(search_parts("od:").is_err());
+        assert!(search_parts("a b c d e f g h i").is_err());
+        assert!(search_parts("a\u{0}b").is_err());
+        // wstrzyknięcie: cudzysłów i backslash są zawsze escapowane
+        assert_eq!(search_parts("a\\b").unwrap(), vec![t("TEXT \"a\\\\b\"")]);
     }
 }

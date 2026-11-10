@@ -172,24 +172,35 @@ impl Conn {
         self.collect(&tag).await
     }
 
-    /// Polecenie z jednym literałem na końcu (np. wyszukiwanie z polskimi znakami).
-    async fn ok_literal(&mut self, before: &str, lit: &[u8]) -> Result<Reply, String> {
+    /// Polecenie złożone z tekstu i literałów (wartości z polskimi znakami). Każdy literał jest wysyłany
+    /// dopiero po zgłoszeniu gotowości przez serwer (`+`), a polecenie kończy się po ostatnim fragmencie.
+    async fn ok_parts(&mut self, prefix: &str, parts: &[p::SPart]) -> Result<Reply, String> {
         self.n += 1;
         let tag = format!("A{:04}", self.n);
-        self.send(format!("{tag} {before}{{{}}}\r\n", lit.len()).as_bytes()).await?;
         let want = format!("{tag} ");
-        loop {
-            let r = self.read_resp().await?;
-            if r.head.starts_with('+') {
-                break;
-            }
-            if r.head.starts_with(&want) {
-                return Err("Serwer odrzucił zapytanie.".to_string());
+        let mut line = format!("{tag} {prefix}");
+        for part in parts {
+            match part {
+                p::SPart::Text(t) => line.push_str(t),
+                p::SPart::Lit(v) => {
+                    line.push_str(&format!("{{{}}}\r\n", v.len()));
+                    self.send(line.as_bytes()).await?;
+                    loop {
+                        let r = self.read_resp().await?;
+                        if r.head.starts_with('+') {
+                            break;
+                        }
+                        if r.head.starts_with(&want) {
+                            return Err("Serwer odrzucił zapytanie.".to_string());
+                        }
+                    }
+                    self.send(v.as_bytes()).await?;
+                    line = String::new();
+                }
             }
         }
-        let mut data = lit.to_vec();
-        data.extend_from_slice(b"\r\n");
-        self.send(&data).await?;
+        line.push_str("\r\n");
+        self.send(line.as_bytes()).await?;
         let r = self.collect(&tag).await?;
         if r.ok {
             Ok(r)
@@ -432,15 +443,13 @@ pub async fn imap_search(account: String, folder: String, query: String) -> Resu
 
 async fn search_inner(conn: &mut Conn, folder: &str, query: &str) -> Result<Page, String> {
     let q = query.trim();
-    if q.is_empty() || q.chars().count() > 100 || q.chars().any(|c| c.is_control()) {
-        return Err("Wpisz krótszą frazę bez znaków sterujących.".to_string());
+    if q.chars().count() > 300 {
+        return Err("Wpisz krótszą frazę.".to_string());
     }
+    let parts = p::search_parts(q)?;
     conn.select(folder).await?;
-    let r = if q.is_ascii() {
-        conn.ok(&format!("UID SEARCH TEXT {}", p::quote(q)?)).await?
-    } else {
-        conn.ok_literal("UID SEARCH CHARSET UTF-8 TEXT ", q.as_bytes()).await?
-    };
+    let prefix = if p::search_needs_utf8(&parts) { "UID SEARCH CHARSET UTF-8 " } else { "UID SEARCH " };
+    let r = conn.ok_parts(prefix, &parts).await?;
     let mut uids: Vec<u32> = Vec::new();
     for u in &r.untagged {
         if let Some(rest) = u.head.strip_prefix("* SEARCH") {
