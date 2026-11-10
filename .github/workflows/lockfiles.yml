@@ -1,0 +1,37 @@
+name: Generate lockfiles
+
+# Jednorazowe narzędzie: tworzy Cargo.lock i package-lock.json oraz przypina słowniki do dokładnych wersji.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo.lock
+        working-directory: src-tauri
+        run: cargo generate-lockfile
+      - name: package-lock.json i dokładne wersje słowników
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          for p in dictionary-pl dictionary-en; do
+            v=$(node -e "console.log(require('./package-lock.json').packages['node_modules/$p'].version)")
+            echo "$p => $v"
+            npm pkg set "devDependencies.$p=$v"
+          done
+          npm install --package-lock-only --ignore-scripts
+      - name: Zapis do repozytorium
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/Cargo.lock package-lock.json package.json
+          git commit -m "Dodaj pliki blokujące zależności (Cargo.lock, package-lock.json) i przypnij słowniki" || echo "bez zmian"
+          git push
