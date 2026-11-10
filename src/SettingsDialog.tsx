@@ -44,7 +44,11 @@ function TranslateSettings() {
   const [key, setKey] = useState("");
   const [region, setRegion] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const refresh = () => { api.translateKeys().then(setKeys).catch(() => {}); };
+  const [consent, setConsent] = useState<{ enabled: boolean; granted: string[] } | null>(null);
+  const refresh = () => {
+    api.translateKeys().then(setKeys).catch(() => {});
+    api.translateConsent().then(setConsent).catch(() => {});
+  };
   useEffect(refresh, []);
   const info = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
   const has = provider !== "mymemory" && keys[provider];
@@ -66,7 +70,15 @@ function TranslateSettings() {
   return (
     <>
       <h4>Tłumacz (angielski → polski)</h4>
-      <p className="hint">Wybierz usługę, której użyje przycisk „Przetłumacz na polski”. Treść wiadomości jest wysyłana do wybranej usługi wyłącznie po kliknięciu.</p>
+      <label className="spam-opt">
+        <input type="checkbox" checked={consent?.enabled ?? true}
+          onChange={(e) => { api.translateSetEnabled(e.target.checked).then(setConsent).catch((er) => setNote(errText(er))); }} />
+        <span>
+          <strong>Tłumaczenie online</strong><br />
+          <span className="hint">Po wyłączeniu przycisk „Przetłumacz na polski” znika, a aplikacja nie wyśle do żadnej usługi ani jednego znaku treści wiadomości.</span>
+        </span>
+      </label>
+      <p className="hint">Wybierz usługę, której użyje przycisk „Przetłumacz na polski”. Treść wiadomości jest wysyłana do wybranej usługi wyłącznie po kliknięciu i po Twojej zgodzie na tę usługę. Nic nie jest tłumaczone w tle.</p>
       {PROVIDERS.map((p) => (
         <label key={p.id} className="spam-opt">
           <input type="radio" name="tr-provider" checked={provider === p.id} onChange={() => choose(p.id)} />
@@ -92,6 +104,12 @@ function TranslateSettings() {
           <p className="hint">Klucz jest przechowywany w systemowym magazynie haseł i wysyłany wyłącznie do tej usługi.</p>
         </>
       )}
+      <div className="modal-actions wrap">
+        <button disabled={!consent || consent.granted.length === 0}
+          onClick={() => { api.translateRevoke().then((c) => { setConsent(c); setNote("Zgody cofnięte – przed następnym tłumaczeniem aplikacja zapyta ponownie."); }).catch((er) => setNote(errText(er))); }}>
+          Cofnij zgody na wysyłanie treści{consent && consent.granted.length > 0 ? ` (${consent.granted.length})` : ""}
+        </button>
+      </div>
       {note && <p className="hint" role="status">{note}</p>}
     </>
   );

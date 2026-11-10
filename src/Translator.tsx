@@ -1,16 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, errText } from "./api";
 import { getProvider, PROVIDERS } from "./translateProviders";
 import type { MessageView } from "./types";
-
-const okKey = (provider: string) => "rm.translate.ok." + provider;
-
-function readOk(provider: string): boolean {
-  try { return localStorage.getItem(okKey(provider)) === "1"; } catch { return false; }
-}
-function saveOk(provider: string) {
-  try { localStorage.setItem(okKey(provider), "1"); } catch { /* pamięć niedostępna */ }
-}
 
 /** Tekst wiadomości do tłumaczenia: wersja tekstowa albo tekst wyciągnięty z HTML (bez wykonywania czegokolwiek). */
 function plainText(m: MessageView): string {
@@ -38,8 +29,11 @@ export function Translator({ m }: { m: MessageView }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ translated: string; truncated: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Zgoda i włączenie funkcji są przechowywane w backendzie, który sam odmawia wysyłki bez zgody.
+  const [consent, setConsent] = useState<{ enabled: boolean; granted: string[] } | null>(null);
+  useEffect(() => { api.translateConsent().then(setConsent).catch(() => setConsent(null)); }, [m.id]);
 
-  if (!looksForeign(text)) return null;
+  if (!consent || !consent.enabled || !looksForeign(text)) return null;
 
   const run = async () => {
     setAsk(null);
@@ -56,7 +50,17 @@ export function Translator({ m }: { m: MessageView }) {
 
   const start = () => {
     const provider = getProvider();
-    if (readOk(provider)) void run(); else setAsk(provider);
+    if (consent.granted.includes(provider)) void run(); else setAsk(provider);
+  };
+
+  const accept = async (provider: string) => {
+    try {
+      setConsent(await api.translateGrant(provider));
+      await run();
+    } catch (e) {
+      setAsk(null);
+      setError(errText(e));
+    }
   };
 
   return (
@@ -70,7 +74,7 @@ export function Translator({ m }: { m: MessageView }) {
         <p className="warn-line" role="alert">
           Treść tej wiadomości zostanie wysłana do usługi tłumaczenia: {PROVIDERS.find((p) => p.id === ask)?.name ?? ask}. Możesz ją zmienić w Ustawieniach.
           Robimy to tylko po kliknięciu. Nie tłumacz wiadomości poufnych.{" "}
-          <button className="small solid" onClick={() => { saveOk(ask); void run(); }}>Rozumiem, tłumacz</button>{" "}
+          <button className="small solid" onClick={() => void accept(ask)}>Rozumiem, tłumacz</button>{" "}
           <button className="small" onClick={() => setAsk(null)}>Anuluj</button>
         </p>
       )}

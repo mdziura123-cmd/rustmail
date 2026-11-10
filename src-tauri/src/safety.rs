@@ -36,12 +36,47 @@ fn v6_public(ip: &Ipv6Addr) -> bool {
         return v4_public(&v4);
     }
     let s = ip.segments();
+    // Adresy IPv6 z osadzonym IPv4 (NAT64, 6to4, zgodne z IPv4) mogłyby prowadzić do sieci lokalnej.
+    let embedded = |hi: u16, lo: u16| Ipv4Addr::new((hi >> 8) as u8, hi as u8, (lo >> 8) as u8, lo as u8);
+    if s[0] == 0x0064 && s[1] == 0xff9b && s[2..6].iter().all(|x| *x == 0) {
+        return v4_public(&embedded(s[6], s[7])); // NAT64 64:ff9b::/96
+    }
+    if s[0] == 0x2002 {
+        return v4_public(&embedded(s[1], s[2])); // 6to4 2002::/16
+    }
+    if s[..6].iter().all(|x| *x == 0) {
+        return false; // ::/96 (zgodne z IPv4, w tym :: i ::1)
+    }
     !(ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_multicast()
         || (s[0] & 0xfe00) == 0xfc00 // unikatowe lokalne fc00::/7
         || (s[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+        || (s[0] & 0xffc0) == 0xfec0 // przestarzałe site-local fec0::/10
+        || (s[0] == 0x2001 && s[1] == 0x0000) // Teredo
+        || (s[0] == 0x0100 && s[1..4].iter().all(|x| *x == 0)) // 100::/64 (discard)
         || (s[0] == 0x2001 && s[1] == 0x0db8)) // dokumentacyjne
+}
+
+/// Zapisuje pobrany plik w podanym katalogu pod bezpieczną, unikalną nazwą. Plik jest tworzony od razu
+/// z prawami 0600 (bez okna, w którym byłby czytelny dla innych), bez prawa wykonywania, i nigdy nie
+/// nadpisuje istniejącego pliku.
+pub fn write_download(dir: &Path, name: &str, data: &[u8]) -> Result<PathBuf, String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let safe = safe_filename(name);
+    for _ in 0..20 {
+        let path = unique_path(dir, &safe, |p| p.exists());
+        match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path) {
+            Ok(mut f) => {
+                f.write_all(data).map_err(|e| format!("Nie można zapisać pliku: {e}"))?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Nie można zapisać pliku: {e}")),
+        }
+    }
+    Err("Nie udało się wybrać wolnej nazwy pliku.".to_string())
 }
 
 /// Dozwolone typy obrazów do pobrania (bez SVG, który może zawierać aktywną treść).
@@ -143,6 +178,8 @@ mod tests {
             "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254", "0.0.0.0",
             "100.64.0.1", "224.0.0.1", "255.255.255.255", "192.0.2.1", "198.18.0.1", "::1", "::", "fe80::1", "fc00::1",
             "fd12:3456::1", "ff02::1", "::ffff:192.168.0.1", "::ffff:127.0.0.1", "2001:db8::1",
+            "64:ff9b::7f00:1", "64:ff9b::c0a8:1", "2002:7f00:1::1", "2002:c0a8:101::1", "::127.0.0.1", "::10.0.0.1",
+            "fec0::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "100::1",
         ] {
             assert!(!ip_is_public(&ip(a)), "powinno być odrzucone: {a}");
         }
@@ -150,9 +187,29 @@ mod tests {
 
     #[test]
     fn public_addresses_are_accepted() {
-        for a in ["8.8.8.8", "1.1.1.1", "172.32.0.1", "93.184.216.34", "2606:4700:4700::1111", "::ffff:8.8.8.8"] {
+        for a in ["8.8.8.8", "1.1.1.1", "172.32.0.1", "93.184.216.34", "2606:4700:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::1"] {
             assert!(ip_is_public(&ip(a)), "powinno być dozwolone: {a}");
         }
+    }
+
+    #[test]
+    fn downloads_are_private_and_never_overwrite() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("rm-dl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let p1 = write_download(&d, "raport.pdf", b"jeden").unwrap();
+        let p2 = write_download(&d, "raport.pdf", b"dwa").unwrap();
+        assert_ne!(p1, p2);
+        assert_eq!(std::fs::read(&p1).unwrap(), b"jeden");
+        for p in [&p1, &p2] {
+            let mode = std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "załącznik musi być czytelny tylko dla właściciela");
+        }
+        // nazwa próbująca wyjść z katalogu zostaje zamknięta w katalogu
+        let p3 = write_download(&d, "../../etc/zly.txt", b"x").unwrap();
+        assert!(p3.starts_with(&d));
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

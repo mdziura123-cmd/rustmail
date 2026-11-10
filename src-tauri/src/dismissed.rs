@@ -23,13 +23,10 @@ pub fn load(path: &Path) -> HashSet<String> {
 }
 
 fn save(path: &Path, set: &HashSet<String>) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("Nie można utworzyć katalogu konfiguracji: {e}"))?;
-    }
     let mut ids: Vec<&String> = set.iter().collect();
     ids.sort();
     let text = ids.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n");
-    fs::write(path, text).map_err(|e| format!("Nie można zapisać listy: {e}"))
+    crate::privfs::write_private(path, text.as_bytes()).map_err(|e| format!("Nie można zapisać listy: {e}"))
 }
 
 pub fn add(path: &Path, id: &str) -> Result<(), String> {

@@ -275,6 +275,10 @@ impl Store {
         self.with(|c| c.execute(SET_META, params![key, value]).map(|_| ()))
     }
 
+    fn blob_query(&self, key: &str) -> Result<Option<String>, String> {
+        self.with(|c| c.query_row(GET_META, [key], |r| r.get::<_, String>(0)).optional())
+    }
+
     /// Kopia robocza pisanej wiadomości – w zaszyfrowanej bazie (nie w localStorage).
     pub fn backup_set(&self, value: &str) -> Result<(), String> {
         self.set_meta("compose_backup", value)
@@ -570,5 +574,18 @@ impl Store {
 
     pub fn delete_outbox(&self, account: &str, id: i64) -> Result<(), String> {
         self.with(|c| c.execute(DELETE_OUTBOX, params![id, account]).map(|_| ()))
+    }
+}
+
+/// Małe dane tekstowe (dziennik i model filtra spamu) trzymamy w tabeli `meta` zaszyfrowanej bazy.
+impl crate::blobmig::BlobDb for Store {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        self.blob_query(key)
+    }
+    fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        self.set_meta(key, value)
+    }
+    fn delete(&self, key: &str) -> Result<(), String> {
+        self.with(|c| c.execute(DELETE_META, [key]).map(|_| ()))
     }
 }

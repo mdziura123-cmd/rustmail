@@ -12,6 +12,8 @@ use tauri::{AppHandle, Manager};
 use crate::auth::AppState;
 use crate::blocklist::{self, Rules};
 use crate::spam::{self, Decision, Mode, Model, Vote};
+use crate::blobmig::{self, BlobDb};
+use crate::store::Store;
 use crate::{dismissed, gmail};
 
 const LIST_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
@@ -94,23 +96,40 @@ fn dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn write_private(path: &Path, contents: &str) -> Result<(), String> {
-    if let Some(p) = path.parent() {
-        std::fs::create_dir_all(p).map_err(|e| format!("Nie można utworzyć katalogu: {e}"))?;
-    }
-    let tmp = path.with_extension("tmp");
-    {
-        use std::io::Write;
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp).map_err(|e| format!("Nie można zapisać pliku: {e}"))?;
-        f.write_all(contents.as_bytes()).map_err(|e| format!("Nie można zapisać pliku: {e}"))?;
-    }
-    std::fs::rename(&tmp, path).map_err(|e| format!("Nie można zapisać pliku: {e}"))
+    crate::privfs::write_private(path, contents.as_bytes())
+}
+
+// Dziennik, model Bayesa i lista ocenionych wątków leżą w zaszyfrowanej bazie (SQLCipher).
+// Stare, jawne pliki są migrowane przy pierwszym wczytaniu (patrz `blobmig`).
+const KEY_LOG: &str = "spam:log";
+const KEY_MODEL: &str = "spam:bayes";
+const KEY_SEEN: &str = "spam:seen";
+
+fn blob_load(app: &AppHandle, key: &str, legacy: &Path) -> Option<String> {
+    let st = app.try_state::<Store>();
+    let db: Option<&dyn BlobDb> = match &st {
+        Some(s) if s.available() => Some(s.inner()),
+        _ => None,
+    };
+    blobmig::load(db, key, legacy)
+}
+
+fn blob_save(app: &AppHandle, key: &str, legacy: &Path, text: &str) {
+    let st = app.try_state::<Store>();
+    let db: Option<&dyn BlobDb> = match &st {
+        Some(s) if s.available() => Some(s.inner()),
+        _ => None,
+    };
+    let _ = blobmig::save(db, key, legacy, text);
+}
+
+fn blob_wipe(app: &AppHandle, key: &str, legacy: &Path) -> Result<(), String> {
+    let st = app.try_state::<Store>();
+    let db: Option<&dyn BlobDb> = match &st {
+        Some(s) if s.available() => Some(s.inner()),
+        _ => None,
+    };
+    blobmig::wipe(db, key, legacy)
 }
 
 pub fn load_config(app: &AppHandle) -> Config {
@@ -170,7 +189,7 @@ fn model_path(app: &AppHandle) -> Result<PathBuf, String> {
 fn with_model<R>(app: &AppHandle, st: &SpamState, f: impl FnOnce(&mut Model) -> R) -> R {
     let mut g = lock(&st.model);
     if g.is_none() {
-        let text = model_path(app).ok().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let text = model_path(app).ok().and_then(|p| blob_load(app, KEY_MODEL, &p)).unwrap_or_default();
         *g = Some(Model::from_text(&text));
     }
     match g.as_mut() {
@@ -181,21 +200,16 @@ fn with_model<R>(app: &AppHandle, st: &SpamState, f: impl FnOnce(&mut Model) -> 
 
 /// Usuwa dziennik i wytrenowany model z dysku oraz z pamięci.
 pub fn wipe_data(app: &AppHandle, st: &SpamState) -> Result<(), String> {
-    for p in [log_path(app)?, model_path(app)?] {
-        match std::fs::remove_file(&p) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("Nie udało się usunąć pliku: {e}")),
-        }
-    }
+    let log = blob_wipe(app, KEY_LOG, &log_path(app)?);
+    let model = blob_wipe(app, KEY_MODEL, &model_path(app)?);
     *lock(&st.model) = None;
-    Ok(())
+    log.and(model)
 }
 
 fn save_model(app: &AppHandle, st: &SpamState) {
     let text = with_model(app, st, |m| m.to_text());
     if let Ok(p) = model_path(app) {
-        let _ = write_private(&p, &text);
+        blob_save(app, KEY_MODEL, &p, &text);
     }
 }
 
@@ -208,7 +222,7 @@ fn seen_path(app: &AppHandle) -> Result<PathBuf, String> {
 fn seen_has(app: &AppHandle, st: &SpamState, id: &str) -> bool {
     let mut g = lock(&st.seen);
     if !g.loaded {
-        let text = seen_path(app).ok().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let text = seen_path(app).ok().and_then(|p| blob_load(app, KEY_SEEN, &p)).unwrap_or_default();
         for l in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
             if g.set.insert(l.to_string()) {
                 g.order.push(l.to_string());
@@ -236,7 +250,7 @@ fn seen_add(app: &AppHandle, st: &SpamState, id: &str) {
 fn seen_save(app: &AppHandle, st: &SpamState) {
     let text = lock(&st.seen).order.join("\n");
     if let Ok(p) = seen_path(app) {
-        let _ = write_private(&p, &text);
+        blob_save(app, KEY_SEEN, &p, &text);
     }
 }
 
@@ -265,14 +279,14 @@ fn log_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn read_log(app: &AppHandle) -> Vec<LogEntry> {
     log_path(app)
         .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|p| blob_load(app, KEY_LOG, &p))
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_default()
 }
 
 fn write_log(app: &AppHandle, entries: &[LogEntry]) {
     if let (Ok(p), Ok(json)) = (log_path(app), serde_json::to_string(entries)) {
-        let _ = write_private(&p, &json);
+        blob_save(app, KEY_LOG, &p, &json);
     }
 }
 

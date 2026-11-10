@@ -115,6 +115,9 @@ pub fn deepl_url(k: &str) -> &'static str {
 
 // ---- część sieciowa ----
 use serde::Serialize;
+use tauri::{AppHandle, Manager};
+
+use crate::consent::{self, Consent};
 use std::time::Duration;
 
 #[derive(Serialize)]
@@ -279,10 +282,12 @@ async fn mymemory_translate(client: &reqwest::Client, body: &str) -> Result<Stri
 
 /// Tłumaczy tekst wybraną usługą (`mymemory`, `deepl`, `google`, `microsoft`). Usługa jest wybierana w Ustawieniach.
 #[tauri::command]
-pub async fn translate_text(text: String, provider: String) -> Result<TranslateOut, String> {
+pub async fn translate_text(app: AppHandle, text: String, provider: String) -> Result<TranslateOut, String> {
     if !PROVIDERS.contains(&provider.as_str()) {
         return Err("Nieznana usługa tłumaczenia.".to_string());
     }
+    // Backend sam pilnuje zgody: bez włączonej funkcji i zgody na tę usługę nic nie jest wysyłane.
+    consent::check(&load_consent(&app), &provider)?;
     let cleaned: String = text.chars().map(|c| if c.is_control() && c != '\n' { ' ' } else { c }).collect();
     let truncated = cleaned.chars().count() > MAX_CHARS;
     let body: String = cleaned.chars().take(MAX_CHARS).collect();
@@ -302,6 +307,64 @@ pub async fn translate_text(text: String, provider: String) -> Result<TranslateO
         _ => mymemory_translate(&client, &body).await?,
     };
     Ok(TranslateOut { translated, truncated })
+}
+
+fn consent_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("translate_consent.txt"))
+}
+
+fn load_consent(app: &AppHandle) -> Consent {
+    consent_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|t| consent::parse(&t, &PROVIDERS))
+        .unwrap_or_default()
+}
+
+fn save_consent(app: &AppHandle, c: &Consent) -> Result<(), String> {
+    crate::privfs::write_private(&consent_path(app)?, consent::render(c).as_bytes())
+}
+
+#[derive(Serialize)]
+pub struct ConsentOut {
+    pub enabled: bool,
+    pub granted: Vec<String>,
+}
+
+fn out(c: Consent) -> ConsentOut {
+    ConsentOut { enabled: c.enabled, granted: c.granted }
+}
+
+#[tauri::command]
+pub fn translate_consent(app: AppHandle) -> ConsentOut {
+    out(load_consent(&app))
+}
+
+/// Całkowite włączenie/wyłączenie tłumaczenia online (po wyłączeniu przycisk znika, a backend odmawia).
+#[tauri::command]
+pub fn translate_set_enabled(app: AppHandle, enabled: bool) -> Result<ConsentOut, String> {
+    let mut c = load_consent(&app);
+    c.enabled = enabled;
+    save_consent(&app, &c)?;
+    Ok(out(c))
+}
+
+/// Zgoda na wysyłanie treści do wskazanej usługi (wywoływana po kliknięciu „Rozumiem” w interfejsie).
+#[tauri::command]
+pub fn translate_grant(app: AppHandle, provider: String) -> Result<ConsentOut, String> {
+    let mut c = load_consent(&app);
+    consent::grant(&mut c, &provider, &PROVIDERS)?;
+    save_consent(&app, &c)?;
+    Ok(out(c))
+}
+
+/// Cofnięcie wszystkich zgód (przy następnym tłumaczeniu aplikacja zapyta ponownie).
+#[tauri::command]
+pub fn translate_revoke(app: AppHandle) -> Result<ConsentOut, String> {
+    let mut c = load_consent(&app);
+    c.granted.clear();
+    save_consent(&app, &c)?;
+    Ok(out(c))
 }
 
 #[cfg(test)]

@@ -65,10 +65,7 @@ pub fn load_list(path: &Path) -> Vec<String> {
 }
 
 fn save_list(path: &Path, list: &[String]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("Nie można utworzyć katalogu konfiguracji: {e}"))?;
-    }
-    fs::write(path, list.join("\n")).map_err(|e| format!("Nie można zapisać listy: {e}"))
+    crate::privfs::write_private(path, list.join("\n").as_bytes()).map_err(|e| format!("Nie można zapisać listy: {e}"))
 }
 
 pub fn add(path: &Path, entry: &str) -> Result<String, String> {

@@ -2,9 +2,7 @@
 //! pobranie obrazu z wiadomości, zapis załącznika na dysku i otwarcie linku w przeglądarce.
 //! Wszystkie reguły bezpieczeństwa (które adresy, jakie nazwy plików) są w `safety.rs`.
 
-use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -86,24 +84,13 @@ fn downloads_dir() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join("Downloads"))
 }
 
-/// Zapisuje załącznik w ~/Downloads pod bezpieczną, unikalną nazwą, bez uprawnień do uruchamiania.
+/// Zapisuje załącznik w ~/Downloads pod bezpieczną, unikalną nazwą, z prawami 0600 od samego utworzenia
+/// (czyta go tylko właściciel, nikt inny w systemie) i bez uprawnień do uruchamiania.
 /// Istniejące pliki nigdy nie są nadpisywane.
 pub fn save_download(name: &str, data: &[u8]) -> Result<PathBuf, String> {
     let dir = downloads_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Nie można utworzyć katalogu Pobrane: {e}"))?;
-    let safe = safety::safe_filename(name);
-    for _ in 0..20 {
-        let path = safety::unique_path(&dir, &safe, |p| p.exists());
-        match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&path) {
-            Ok(mut f) => {
-                f.write_all(data).map_err(|e| format!("Nie można zapisać pliku: {e}"))?;
-                return Ok(path);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("Nie można zapisać pliku: {e}")),
-        }
-    }
-    Err("Nie udało się wybrać wolnej nazwy pliku.".to_string())
+    safety::write_download(&dir, name, data)
 }
 
 /// Otwiera adres w przeglądarce systemowej (tylko http, https, mailto).

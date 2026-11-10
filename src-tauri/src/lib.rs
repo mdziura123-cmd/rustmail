@@ -21,6 +21,9 @@ mod imap_proto;
 mod spam;
 mod spam_io;
 mod store;
+mod privfs;
+mod blobmig;
+mod consent;
 mod translate;
 mod update;
 
@@ -39,6 +42,10 @@ pub fn run() {
         .manage(spam_io::SpamState::default())
         .setup(|app| {
             use tauri::Manager;
+            // Katalogi aplikacji (konfiguracja, dane, pamięć podręczna) są dostępne tylko dla właściciela.
+            for d in [app.path().app_config_dir(), app.path().app_data_dir(), app.path().app_cache_dir()].into_iter().flatten() {
+                let _ = privfs::ensure_private_dir(&d);
+            }
             // Baza lokalna: jeśli nie da się jej otworzyć, aplikacja działa dalej tylko online.
             // Klucz szyfrowania bazy leży w pęku kluczy systemu (jak tokeny), nigdy na dysku obok bazy.
             let key = match secrets::get("db_key") {
@@ -83,6 +90,10 @@ pub fn run() {
             commands::compose_backup_get,
             commands::compose_backup_clear,
             commands::spam_wipe_data,
+            translate::translate_consent,
+            translate::translate_set_enabled,
+            translate::translate_grant,
+            translate::translate_revoke,
             commands::spam_scan_now,
             commands::spam_train,
             commands::spam_bootstrap,

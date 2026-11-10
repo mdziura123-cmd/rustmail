@@ -603,7 +603,7 @@ pub(crate) async fn save_scanned(app: &AppHandle, name: &str, bytes: &[u8]) -> R
     let type_warning = filetype::mismatch(&name, &bytes);
 
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("Nie można utworzyć katalogu tymczasowego: {e}"))?;
+    crate::privfs::ensure_private_dir(&cache).map_err(|e| format!("Nie można utworzyć katalogu tymczasowego: {e}"))?;
     let nonce: String = auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let tmp = cache.join(format!("scan-{nonce}.bin"));
     scan::write_private(&tmp, &bytes).map_err(|e| format!("Nie można utworzyć pliku do skanowania: {e}"))?;

@@ -20,10 +20,7 @@ pub fn write_to(path: &Path, text: &str) -> Result<(), String> {
     if t.chars().count() > MAX_CHARS {
         return Err(format!("Podpis jest za długi (maksymalnie {MAX_CHARS} znaków)."));
     }
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|e| format!("Nie można utworzyć katalogu konfiguracji: {e}"))?;
-    }
-    fs::write(path, t).map_err(|e| format!("Nie można zapisać podpisu: {e}"))
+    crate::privfs::write_private(path, t.as_bytes()).map_err(|e| format!("Nie można zapisać podpisu: {e}"))
 }
 
 #[cfg(test)]
