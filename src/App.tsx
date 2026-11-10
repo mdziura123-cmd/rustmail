@@ -30,7 +30,7 @@ import { StatusBar } from "./StatusBar";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
 import type { Account, AppInfo, AuthStatus, ImapAccount, ImapActOut, ImapMsg, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
-import { THEMES, isThemeId, resolveTheme, type ThemeId } from "./themes";
+import { isThemeId, resolveTheme, type ThemeId } from "./themes";
 import Titlebar from "./Titlebar";
 import "./themes.css";
 import "./styles.css";
