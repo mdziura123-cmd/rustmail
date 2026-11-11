@@ -89,26 +89,62 @@ pub fn build_text(items: &[Item<'_>], show_content: bool) -> Option<(String, Str
     Some((format!("Nowe wiadomości: {n}"), body))
 }
 
-/// Pokazuje powiadomienie przez `notify-send`. Brak programu lub błąd nie przerywają pracy aplikacji.
-pub fn send(title: &str, body: &str) -> Result<(), String> {
+fn command(title: &str, body: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new("notify-send");
-    // `--` kończy opcje, więc tekst z wiadomości nigdy nie zostanie wzięty za opcję.
     cmd.arg("--app-name=RustMail")
         .arg("--icon=pl.rustmail.app")
         .arg("--hint=string:desktop-entry:pl.rustmail.app")
-        .arg("--expire-time=8000")
-        .arg("--").arg(clean_text(title, 80)).arg(clean_text(body, 400));
-    for k in ["LD_LIBRARY_PATH", "LD_PRELOAD", "APPDIR", "GDK_PIXBUF_MODULE_FILE"] {
+        .arg("--expire-time=8000");
+    cmd.env_remove("LD_LIBRARY_PATH");
+    for k in ["LD_PRELOAD", "APPDIR", "GDK_PIXBUF_MODULE_FILE"] {
         cmd.env_remove(k);
     }
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    // `--` kończy opcje, więc tekst z wiadomości nigdy nie zostanie wzięty za opcję (opcje dodane później
+    // muszą trafić przed `--`, dlatego `finish` dokłada go na końcu).
+    let _ = (title, body);
+    cmd
+}
+
+fn finish(mut cmd: std::process::Command, title: &str, body: &str) -> std::process::Command {
+    cmd.arg("--").arg(clean_text(title, 80)).arg(clean_text(body, 400));
+    cmd.stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    cmd
+}
+
+/// Pokazuje powiadomienie przez `notify-send`. Brak programu lub błąd nie przerywają pracy aplikacji.
+pub fn send(title: &str, body: &str) -> Result<(), String> {
+    let mut cmd = finish(command(title, body), title, body);
+    cmd.stdout(std::process::Stdio::null());
     match cmd.status() {
         Ok(st) if st.success() => Ok(()),
         Ok(_) => Err("notify-send zakończył się błędem.".to_string()),
         Err(e) => Err(format!("Nie można pokazać powiadomienia (notify-send): {e}")),
     }
+}
+
+/// Powiadomienie, którego kliknięcie pokazuje okno aplikacji i wysyła do interfejsu zdarzenie `open-mail`
+/// z opisem wiadomości (`g:identyfikator` dla Gmaila, `i:konto` dla IMAP). Czekanie na kliknięcie odbywa się
+/// w osobnym wątku; starsze `notify-send` bez obsługi akcji dostaje zwykłe powiadomienie.
+pub fn send_click(app: &tauri::AppHandle, title: &str, body: &str, target: String) {
+    use tauri::Emitter;
+    let (app, t, b) = (app.clone(), title.to_string(), body.to_string());
+    std::thread::spawn(move || {
+        let mut cmd = command(&t, &b);
+        cmd.arg("--action=default=Otwórz").arg("--wait");
+        let mut cmd = finish(cmd, &t, &b);
+        cmd.stdout(std::process::Stdio::piped());
+        match cmd.output() {
+            Ok(out) if out.status.success() => {
+                if String::from_utf8_lossy(&out.stdout).trim() == "default" {
+                    crate::background::show_main(&app);
+                    let _ = app.emit("open-mail", target);
+                }
+            }
+            _ => {
+                let _ = send(&t, &b);
+            }
+        }
+    });
 }
 
 #[cfg(test)]

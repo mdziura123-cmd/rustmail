@@ -3,6 +3,8 @@ import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
 import { AddressBook } from "./AddressBook";
 import { Backup } from "./Backup";
+import { Rules } from "./Rules";
+import { clearLog, useLog } from "./eventLog";
 import { getLabels, getScale, getUndo, setLabels, setScale, setUndo, SCALES, UNDO_DELAYS } from "./display";
 import { BINDINGS, customKeys, keyLabel, keyOf, keysVersion, resetKeys, setKey, subscribeKeys } from "./shortcuts";
 import { isThemeId, THEMES, type ThemeId } from "./themes";
@@ -46,8 +48,27 @@ const TABS = [
   { id: "spam", label: "Filtr spamu" },
   { id: "shortcuts", label: "Skróty" },
   { id: "updates", label: "Aktualizacje" },
+  { id: "log", label: "Dziennik" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+
+/** Dziennik zdarzeń z bieżącej sesji (tylko w pamięci) – do diagnozy, gdy coś nie działa. */
+function LogView() {
+  const log = useLog();
+  const text = log.map((e) => `${new Date(e.t).toLocaleTimeString("pl-PL")} [${e.kind}] ${e.text}`).join("\n");
+  const [note, setNote] = useState<string | null>(null);
+  return (
+    <>
+      <p className="hint">Ostatnie zdarzenia z tej sesji (do 200). Dziennik jest tylko w pamięci i znika po zamknięciu programu; nie zawiera treści wiadomości.</p>
+      <div className="modal-actions">
+        <button disabled={log.length === 0} onClick={() => { void navigator.clipboard.writeText(text).then(() => setNote("Skopiowano.")).catch(() => setNote("Nie udało się skopiować.")); }}>Kopiuj</button>
+        <button disabled={log.length === 0} onClick={clearLog}>Wyczyść</button>
+      </div>
+      {note && <p className="hint" role="status">{note}</p>}
+      <pre className="log-box" aria-label="Dziennik zdarzeń">{text || "Brak zdarzeń."}</pre>
+    </>
+  );
+}
 
 /** Wybór usługi tłumaczenia i jej klucza API. Klucze trafiają do systemowego magazynu haseł, nie do plików aplikacji. */
 function TranslateSettings() {
@@ -313,6 +334,7 @@ export function SettingsDialog(p: Props) {
                 <button onClick={() => p.onOpen("offline")}>Tryb offline…</button>
                 <button onClick={() => p.onOpen("import")}>Import poczty z pliku…</button>
                 <AddressBook />
+                <Rules />
                 <Backup />
               </div>
             )}
@@ -343,6 +365,7 @@ export function SettingsDialog(p: Props) {
                 </div>
               </>
             )}
+            {tab === "log" && <LogView />}
             {msg && <p className="hint" role="status">{msg}</p>}
           </div>
         </div>

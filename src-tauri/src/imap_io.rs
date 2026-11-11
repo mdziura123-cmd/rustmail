@@ -899,16 +899,33 @@ async fn poll_inner(
     };
     let mut notified = 0usize;
     let new_count = new_ids.len();
-    if notify_enabled && !new_ids.is_empty() {
-        let items: Vec<notify::Item> = remaining
-            .iter()
-            .filter(|r| new_ids.contains(&r.uid.to_string()))
-            .map(|r| notify::Item { sender: &r.from, subject: &r.subject, risky: false })
-            .collect();
-        if let Some((title, body)) = notify::build_text(&items, show_content) {
-            if notify::send(&title, &body).is_ok() {
-                notified = items.len();
+    // Reguły automatyczne działają na nowych wiadomościach; przeczytane lub zarchiwizowane nie powiadamiają.
+    let mut silenced: Vec<u32> = Vec::new();
+    {
+        use tauri::Manager as _;
+        let store = app.state::<Store>();
+        let rules = store.rules_list().unwrap_or_default();
+        if !rules.is_empty() {
+            for r in remaining.iter().filter(|r| new_ids.contains(&r.uid.to_string())) {
+                for a in crate::rules::actions_for(&rules, &r.from, &r.subject) {
+                    if let Some(level) = crate::rules::flag_level(a) {
+                        let _ = store.prio_set(&format!("i:{account}:{inbox}:{}", r.uid), level);
+                    } else if act_inner(conn, &inbox, r.uid, a).await.is_ok() {
+                        silenced.push(r.uid);
+                    }
+                }
             }
+        }
+    }
+    if notify_enabled && !new_ids.is_empty() {
+        let shown: Vec<&&&Row> = remaining
+            .iter()
+            .filter(|r| new_ids.contains(&r.uid.to_string()) && !silenced.contains(&r.uid))
+            .collect();
+        let items: Vec<notify::Item> = shown.iter().map(|r| notify::Item { sender: &r.from, subject: &r.subject, risky: false }).collect();
+        if let Some((title, body)) = notify::build_text(&items, show_content) {
+            notify::send_click(app, &title, &body, format!("i:{account}"));
+            notified = items.len();
         }
     }
     Ok(PollOut { moved: moved_uids.len(), notified, new_count, unread: remaining.len() })

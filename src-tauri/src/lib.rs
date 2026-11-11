@@ -17,6 +17,7 @@ mod notify;
 mod offline;
 mod phishing;
 mod remote;
+mod rules;
 mod safety;
 mod scan;
 mod secrets;
@@ -175,6 +176,9 @@ pub fn run() {
             later::snooze_list,
             later::snooze_due,
             later::snooze_done,
+            rules::rules_list,
+            rules::rules_add,
+            rules::rules_delete,
             commands::set_thread_label,
             commands::cache_status,
             commands::set_offline_enabled,

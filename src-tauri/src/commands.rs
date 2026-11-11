@@ -731,6 +731,7 @@ pub async fn poll_mail(
     state: State<'_, AppState>,
     notifier: State<'_, Notifier>,
     spam: State<'_, SpamState>,
+    store: State<'_, Store>,
     notify_enabled: bool,
     show_content: bool,
 ) -> Result<PollResult, String> {
@@ -759,17 +760,32 @@ pub async fn poll_mail(
             Err(_) => Vec::new(),
         };
         new_count = new_ids.len();
+        // Reguły automatyczne działają na nowych wiadomościach; przeczytane lub zarchiwizowane nie powiadamiają.
+        let mut silenced: Vec<String> = Vec::new();
+        let rules = store.rules_list().unwrap_or_default();
+        if !rules.is_empty() {
+            for t in page.threads.iter().filter(|t| new_ids.contains(&t.id)) {
+                let from = format!("{} {}", t.participants, t.senders);
+                for a in crate::rules::actions_for(&rules, &from, &t.subject) {
+                    if let Some(level) = crate::rules::flag_level(a) {
+                        let _ = store.prio_set(&format!("g:{email}:{}", t.id), level);
+                    } else if gmail::thread_action(&state, &t.id, a).await.is_ok() {
+                        silenced.push(t.id.clone());
+                    }
+                }
+            }
+        }
         if notify_enabled && !new_ids.is_empty() {
-            let items: Vec<notify::Item> = page
-                .threads
+            let shown: Vec<&gmail::ThreadSummary> =
+                page.threads.iter().filter(|t| new_ids.contains(&t.id) && !silenced.contains(&t.id)).collect();
+            let items: Vec<notify::Item> = shown
                 .iter()
-                .filter(|t| new_ids.contains(&t.id))
                 .map(|t| notify::Item { sender: &t.participants, subject: &t.subject, risky: t.risk.level != "none" && !t.dismissed })
                 .collect();
             if let Some((title, body)) = notify::build_text(&items, show_content) {
-                if notify::send(&title, &body).is_ok() {
-                    notified = items.len();
-                }
+                let target = if shown.len() == 1 { format!("g:{}", shown[0].id) } else { "g:".to_string() };
+                notify::send_click(&app, &title, &body, target);
+                notified = items.len();
             }
         }
     }

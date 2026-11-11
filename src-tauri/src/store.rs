@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS scheduled (
     draft_id TEXT,
     raw BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    field TEXT NOT NULL,
+    needle TEXT NOT NULL,
+    action TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS snoozed (
     account TEXT NOT NULL,
     thread_id TEXT NOT NULL,
@@ -643,6 +649,32 @@ impl Store {
             tx.commit()?;
             Ok(keys)
         })
+    }
+
+    // ---------- reguły automatyczne ----------
+
+    pub fn rules_list(&self) -> Result<Vec<crate::rules::Rule>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT id, field, needle, action FROM rules ORDER BY id")?;
+            let rows = st.query_map([], |r| Ok(crate::rules::Rule { id: r.get(0)?, field: r.get(1)?, needle: r.get(2)?, action: r.get(3)? }))?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    pub fn rule_add(&self, field: &str, needle: &str, action: &str) -> Result<i64, String> {
+        self.with(|c| {
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM rules", [], |r| r.get(0))?;
+            if n >= crate::rules::MAX_RULES as i64 {
+                return Err(rusqlite::Error::InvalidParameterName("za dużo reguł".to_string()));
+            }
+            c.execute("INSERT INTO rules (field, needle, action) VALUES (?1, ?2, ?3)", params![field, needle, action])?;
+            Ok(c.last_insert_rowid())
+        })
+        .map_err(|e| if e.contains("za dużo reguł") { "Można mieć najwyżej 100 reguł.".to_string() } else { e })
+    }
+
+    pub fn rule_delete(&self, id: i64) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM rules WHERE id = ?1", [id]).map(|_| ()))
     }
 
     // ---------- odłożone wiadomości (Gmail) ----------

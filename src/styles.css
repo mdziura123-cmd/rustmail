@@ -356,6 +356,10 @@ html.show-labels .tools .ai, html.show-labels .compose .small .ai { width: auto;
 html.show-labels .tools .ai::after, html.show-labels .compose .small .ai::after { content: attr(data-l); font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--ink); }
 html.show-labels .tools button, html.show-labels .compose .small { width: auto; }
 
+.log-box { margin: 0; max-height: 280px; overflow: auto; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.rule-box { display: grid; gap: 8px; width: 100%; }
+.rule-box input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); min-width: 0; flex: 1 1 140px; }
+
 /* Cofnięcie wysyłki i zaplanowana wysyłka */
 .undo-send { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--panel) 80%, transparent); }
 .undo-card { display: grid; gap: 14px; justify-items: center; padding: 22px 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); font-size: 16px; }

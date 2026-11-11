@@ -34,6 +34,8 @@ import { FOLDERS, type FolderId } from "./folders";
 import { StatusBar } from "./StatusBar";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
+import { logEvent } from "./eventLog";
+import { listen } from "@tauri-apps/api/event";
 import type { Account, AppInfo, AuthStatus, ImapAccount, ImapActOut, ImapMsg, ImapRow, LabelInfo, OutboxItem, SchedItem, SnoozeItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import { isThemeId, resolveTheme, type ThemeId } from "./themes";
 import Titlebar from "./Titlebar";
@@ -340,6 +342,34 @@ export default function App() {
     await loadDetail(t.id);
   };
 
+  // Kliknięcie w powiadomienie: pokazujemy skrzynkę (i wiadomość, jeśli wiadomo która).
+  const openMailRef = useRef<(target: string) => void>(() => {});
+  openMailRef.current = (target: string) => {
+    logEvent("Powiadomienie", "Kliknięto powiadomienie");
+    if (compose) return; // nie przerywamy pisania wiadomości
+    if (target.startsWith("i:")) {
+      const acc = target.slice(2);
+      if (acc) changeView("imap:" + acc);
+      return;
+    }
+    if (target.startsWith("g:")) {
+      const id = target.slice(2);
+      changeView("gmail");
+      setFolder("inbox");
+      if (id) { setOpenId(id); void loadDetail(id); }
+    }
+  };
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let dead = false;
+    listen<string>("open-mail", (e) => openMailRef.current(String(e.payload ?? "")))
+      .then((f) => { if (dead) f(); else off = f; })
+      .catch(() => undefined);
+    return () => { dead = true; off?.(); };
+  }, []);
+  useEffect(() => {
+    api.backgroundState().then((ok) => logEvent("System", ok ? "Ikona w zasobniku działa." : "Ikona w zasobniku niedostępna.")).catch(() => undefined);
+  }, []);
   useEffect(() => {
     if (!email) return;
     api.getSignature().then(setSignature).catch(() => setSignature(""));
@@ -789,7 +819,7 @@ export default function App() {
       }
       document.title = r.inboxUnread > 0 ? `(${r.inboxUnread}) RustMail` : "RustMail";
       await flushQueue(false, null);
-    } catch { /* brak sieci – spróbujemy za minutę */ }
+    } catch (e) { logEvent("Gmail", "Sprawdzanie poczty nie powiodło się: " + errText(e)); /* spróbujemy za minutę */ }
   }, []);
   pollRef.current = pollOnce;
   // Wyszukiwanie na koncie IMAP jest per folder: zmiana konta lub folderu czyści pole i opcje.
@@ -822,7 +852,7 @@ export default function App() {
       } else if (manual) {
         showToast("Kolejka jest pusta albo wymaga Twojej decyzji.");
       }
-    } catch (e) { if (manual) showToast(errText(e)); }
+    } catch (e) { logEvent("Kolejka", "Wysyłanie z kolejki nie powiodło się: " + errText(e)); if (manual) showToast(errText(e)); }
   };
   // Zaplanowane wiadomości i odłożone konwersacje bieżącego widoku (lista w oknie „Do wysłania”).
   const refreshLater = useCallback(async () => {
@@ -861,7 +891,7 @@ export default function App() {
           showToast(r.moved === 1 ? `Filtr przeniósł 1 wiadomość z ${a.email} do Spamu.` : `Filtr przeniósł wiadomości z ${a.email} do Spamu: ${r.moved}.`);
           setImapTick((n) => n + 1);
         }
-      } catch { /* brak sieci albo błąd serwera – spróbujemy za minutę */ }
+      } catch (e) { logEvent("IMAP " + a.email, "Sprawdzanie poczty nie powiodło się: " + errText(e)); /* spróbujemy za minutę */ }
     }
   }, [showToast]);
   const imapKey = imapAccs.map((a) => a.email).join("|");
@@ -881,7 +911,7 @@ export default function App() {
         const keys = await api.scheduleRelease();
         for (const k of keys) await flushRef.current(false, k);
         if (keys.length > 0) void refreshLater();
-      } catch { /* baza lokalna niedostępna */ }
+      } catch (e) { logEvent("Zaplanowane", "Zaplanowana wysyłka: " + errText(e)); }
       if (!email) return;
       try {
         const due = await api.snoozeDue();
@@ -898,7 +928,7 @@ export default function App() {
           } catch { /* spróbujemy przy następnym sprawdzeniu */ }
         }
         if (woke > 0) { playSound(soundRef.current); void refreshLater(); void pollRef.current(); }
-      } catch { /* brak sieci albo bazy – spróbujemy za chwilę */ }
+      } catch (e) { logEvent("Odłożone", "Odłożone wiadomości: " + errText(e)); }
     };
     void tick();
     const t = window.setInterval(() => void tick(), 30_000);

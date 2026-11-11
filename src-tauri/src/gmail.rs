@@ -121,6 +121,9 @@ pub struct ThreadSummary {
     /// Etykiety Gmail wszystkich wiadomości wątku (do filtrowania folderów w trybie offline).
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Adresy nadawców (do reguł automatycznych); wypełniane tylko dla list pobranych z serwera.
+    #[serde(default)]
+    pub senders: String,
 }
 
 #[derive(Serialize)]
@@ -515,6 +518,7 @@ pub fn summary_of_detail(d: &ThreadDetail) -> ThreadSummary {
             .unwrap_or(Risk { level: "none".to_string(), score: 0, reasons: vec![] }),
         dismissed: d.dismissed,
         labels: d.labels.clone(),
+        senders: String::new(),
     }
 }
 
@@ -1201,6 +1205,16 @@ fn summarize(t: &RawThread, my_email: &str, f: &Filters<'_>) -> ThreadSummary {
             .unwrap_or_else(|| Assessment::none().into()),
         dismissed: f.dismissed.contains(&t.id),
         labels: thread_labels(t),
+        senders: {
+            let mut v: Vec<String> = Vec::new();
+            for m in t.messages.iter().filter(|m| !is_mine(m, my_email)) {
+                let e = from_of(m).1;
+                if !e.is_empty() && !v.contains(&e) {
+                    v.push(e);
+                }
+            }
+            v.join(" ")
+        },
     }
 }
 
