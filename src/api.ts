@@ -140,6 +140,7 @@ export const api = {
   testNotification: () => invoke<void>("test_notification"),
   setBackground: (enabled: boolean) => invoke<void>("set_background", { enabled }),
   backgroundState: () => invoke<boolean>("background_state"),
+  setUnread: (count: number) => invoke<void>("set_unread", { count }),
   cacheStatus: () => invoke<CacheStatus>("cache_status"),
   setOfflineEnabled: (enabled: boolean) => invoke<CacheStatus>("set_offline_enabled", { enabled }),
   clearCache: () => invoke<CacheStatus>("clear_cache"),
@@ -157,7 +158,7 @@ export const api = {
   downloadAttachment: (messageId: string, attachmentId: string, name: string) =>
     invoke<SavedFile>("download_attachment", { messageId, attachmentId, name }),
   imapPoll: (account: string, notifyEnabled: boolean, showContent: boolean) =>
-    invoke<{ moved: number; notified: number; newCount: number }>("imap_poll", { account, notifyEnabled, showContent }),
+    invoke<{ moved: number; notified: number; newCount: number; unread: number }>("imap_poll", { account, notifyEnabled, showContent }),
   imapDownload: (account: string, folder: string, uid: number, index: number, name: string) =>
     invoke<SavedFile>("imap_download", { account, folder, uid, index, name }),
   translateKeys: () => invoke<{ deepl: boolean; google: boolean; microsoft: boolean }>("translate_keys"),

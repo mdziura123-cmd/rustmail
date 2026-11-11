@@ -1,6 +1,7 @@
 mod accounts;
 mod auth;
 mod background;
+mod badge;
 mod blocklist;
 mod commands;
 mod dbkey;
@@ -159,6 +160,7 @@ pub fn run() {
             commands::test_notification,
             background::set_background,
             background::background_state,
+            background::set_unread,
             commands::set_thread_label,
             commands::cache_status,
             commands::set_offline_enabled,

@@ -832,6 +832,7 @@ export default function App() {
   // Konta IMAP (np. WP): filtr spamu i powiadomienia, co minutę (niezależnie od Gmaila).
   const imapRef = useRef(imapAccs);
   imapRef.current = imapAccs;
+  const [imapUnread, setImapUnread] = useState<Record<string, number>>({});
   const imapPollOnce = useCallback(async () => {
     for (const a of imapRef.current) {
       if (bgRef.current.activeOnly && bgRef.current.view !== "imap:" + a.email) continue;
@@ -839,6 +840,7 @@ export default function App() {
       try {
         const r = await api.imapPoll(a.email, settingsRef.current.notify, settingsRef.current.content);
         if (r.newCount > 0) playSound(soundRef.current);
+        setImapUnread((m) => (m[a.email] === r.unread ? m : { ...m, [a.email]: r.unread }));
         if (r.moved > 0) {
           showToast(r.moved === 1 ? `Filtr przeniósł 1 wiadomość z ${a.email} do Spamu.` : `Filtr przeniósł wiadomości z ${a.email} do Spamu: ${r.moved}.`);
           setImapTick((n) => n + 1);
@@ -857,6 +859,9 @@ export default function App() {
     if (imapTick > 0 && view !== "gmail") void imap.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imapTick]);
+  // Znacznik nowych wiadomości na ikonie w zasobniku i w pasku (Gmail + konta IMAP).
+  const totalUnread = stats.inbox + imapAccs.reduce((n, a) => n + (imapUnread[a.email] ?? 0), 0);
+  useEffect(() => { void api.setUnread(totalUnread).catch(() => undefined); }, [totalUnread]);
   const syncing = useRef(false);
   const syncOnce = useCallback(async () => {
     if (syncing.current) return;

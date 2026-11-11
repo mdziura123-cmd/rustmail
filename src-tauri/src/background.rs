@@ -8,7 +8,7 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::PathBuf,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
     time::Duration,
 };
 
@@ -18,12 +18,45 @@ use tauri::{
     AppHandle, Manager,
 };
 
-use crate::launcher;
+use crate::{badge, launcher};
 
 /// Ikona w zasobniku powstała (bez niej nigdy nie chowamy okna – inaczej nie dałoby się go przywrócić).
 static TRAY_OK: AtomicBool = AtomicBool::new(false);
 /// Ustawienie użytkownika: zamknięcie okna zostawia aplikację w tle.
 static KEEP_BG: AtomicBool = AtomicBool::new(true);
+
+/// Ostatnio ustawiona liczba nieprzeczytanych (żeby nie odświeżać ikon bez zmiany).
+static LAST_UNREAD: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// Ustawia znacznik nowych wiadomości: kropkę na ikonie zasobnika, podpowiedź i licznik na ikonie w pasku.
+#[tauri::command]
+pub fn set_unread(app: AppHandle, count: u32) {
+    if LAST_UNREAD.swap(count, Ordering::SeqCst) == count {
+        return;
+    }
+    if let Some(tray) = app.tray_by_id("rustmail") {
+        let _ = tray.set_tooltip(Some(badge::tooltip(count)));
+        if let Some(base) = app.default_window_icon() {
+            let (w, h) = (base.width(), base.height());
+            let mut rgba = base.rgba().to_vec();
+            if count > 0 {
+                badge::draw_dot(&mut rgba, w as usize, h as usize);
+            }
+            let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
+        }
+    }
+    // Licznik na ikonie aplikacji w pasku (KDE Plasma i inne środowiska z interfejsem Unity Launcher).
+    // Bez programu gdbus po prostu nic się nie dzieje.
+    std::thread::spawn(move || {
+        let mut cmd = std::process::Command::new("gdbus");
+        cmd.args(badge::unity_args(launcher::DESKTOP_ID, count));
+        for k in ["LD_LIBRARY_PATH", "LD_PRELOAD", "APPDIR", "GDK_PIXBUF_MODULE_FILE", "GIO_EXTRA_MODULES", "GSETTINGS_SCHEMA_DIR"] {
+            cmd.env_remove(k);
+        }
+        cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        let _ = cmd.status();
+    });
+}
 
 pub fn should_hide_on_close() -> bool {
     TRAY_OK.load(Ordering::SeqCst) && KEEP_BG.load(Ordering::SeqCst)

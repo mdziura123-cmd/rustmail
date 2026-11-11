@@ -822,6 +822,8 @@ pub struct PollOut {
     pub notified: usize,
     /// Ile nowych wiadomości doszło od poprzedniego sprawdzenia (do dźwięku).
     pub new_count: usize,
+    /// Ile nieprzeczytanych jest w Odebranych (na pierwszej stronie listy) po filtrze spamu.
+    pub unread: usize,
 }
 
 /// Co minutę dla każdego konta IMAP: filtr spamu na nieprzeczytanych z Odebranych, potem powiadomienie o nowych.
@@ -909,7 +911,7 @@ async fn poll_inner(
             }
         }
     }
-    Ok(PollOut { moved: moved_uids.len(), notified, new_count })
+    Ok(PollOut { moved: moved_uids.len(), notified, new_count, unread: remaining.len() })
 }
 
 // ---------- Wysyłanie (SMTP, port 465 z szyfrowaniem) ----------
