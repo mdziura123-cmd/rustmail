@@ -46,10 +46,10 @@ export function AccountSwitcher(p: Props) {
   return (
     <div className="acc-avatar" ref={box}>
       <button className={"av-btn" + (open ? " open" : "")} aria-haspopup="menu" aria-expanded={open}
-        title={`Konto: ${p.label}${total > 1 ? " – kliknij, aby przełączyć" : ""}`} aria-label={`Konto: ${p.label}. Przełącz konto`}
+        title={`Aktywne konto: ${p.label}${total > 1 ? " – kliknij, aby przełączyć" : ""}`} aria-label={`Aktywne konto: ${p.label}. Przełącz konto`}
         onClick={() => setOpen((v) => !v)}>
         <span key={p.label} className="av" style={{ ["--hue" as string]: hue(p.label) }}>{initial(p.label)}</span>
-        {total > 1 && <span className="av-count" aria-hidden="true">{total}</span>}
+        <span className="av-dot" aria-hidden="true" />
       </button>
       {open && (
         <div className="acc-pop" role="menu">

@@ -284,3 +284,10 @@ button:disabled .ai { opacity: .5; }
 .tb-search-pop .search-opts { padding: 0; }
 @media (prefers-reduced-motion: no-preference) { .tb-search-pop { animation: acc-drop .14s ease-out; } }
 @media (max-width: 760px) { .tb-title { display: none; } }
+
+/* Pasek akcji w czytniku: zwykłe ikony bez kolorów (kolor tekstu motywu) */
+.tools .ai { color: var(--ink); }
+.tools .primary .ai { color: var(--accent-ink); }
+.tools button:disabled .ai { color: var(--muted); }
+/* Zielony znacznik aktywnego konta zamiast licznika kont */
+.av-dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; background: #2e9e5f; border: 2px solid var(--panel-2); }
