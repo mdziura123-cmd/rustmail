@@ -40,8 +40,8 @@ export function buildQuery(text: string, f: Filters, dialect: "gmail" | "imap"):
   const gm = dialect === "gmail";
   if (from) parts.push(`${gm ? "from" : "od"}:"${from}"`);
   if (subject) parts.push(`${gm ? "subject" : "temat"}:"${subject}"`);
-  if (f.dateFrom && validDate(f.dateFrom)) parts.push(gm ? `after:${f.dateFrom.replaceAll("-", "/")}` : `po:${f.dateFrom}`);
-  if (f.dateTo && validDate(f.dateTo)) parts.push(gm ? `before:${nextDay(f.dateTo).replaceAll("-", "/")}` : `przed:${nextDay(f.dateTo)}`);
+  if (f.dateFrom && validDate(f.dateFrom)) parts.push(gm ? `after:${f.dateFrom.replace(/-/g, "/")}` : `po:${f.dateFrom}`);
+  if (f.dateTo && validDate(f.dateTo)) parts.push(gm ? `before:${nextDay(f.dateTo).replace(/-/g, "/")}` : `przed:${nextDay(f.dateTo)}`);
   return parts.join(" ");
 }
 

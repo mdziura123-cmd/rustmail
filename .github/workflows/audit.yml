@@ -27,8 +27,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - name: npm audit (poziom wysoki i krytyczny)
-        run: npm audit --audit-level=high
+      - name: npm audit (biblioteki dostarczane w aplikacji, poziom wysoki i krytyczny; narzędzia deweloperskie pomijamy)
+        run: npm audit --omit=dev --audit-level=high
 
   cargo:
     runs-on: ubuntu-22.04
