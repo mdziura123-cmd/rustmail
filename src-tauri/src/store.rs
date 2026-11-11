@@ -595,6 +595,38 @@ impl Store {
         })
     }
 
+    /// Uzupełnia książkę adresów adresami z poczty. Liczba użyć ustawiana jest na większą z wartości (powtórne
+    /// uruchomienie niczego nie zawyża), a nazwa uzupełnia się tylko gdy jej brakowało.
+    pub fn contacts_learn(&self, items: &[(crate::contacts::Addr, i64)]) -> Result<usize, String> {
+        if items.is_empty() {
+            return Ok(0);
+        }
+        self.with(|c| {
+            c.execute_batch("BEGIN")?;
+            let mut n = 0usize;
+            for (a, uses) in items {
+                let r = c.execute(
+                    "INSERT INTO contacts (email, name, uses, last_ms) VALUES (?1, ?2, ?3, 0) \
+                     ON CONFLICT(email) DO UPDATE SET uses = MAX(uses, excluded.uses), \
+                     name = CASE WHEN contacts.name = '' THEN excluded.name ELSE contacts.name END",
+                    params![a.email, a.name, uses],
+                );
+                if let Err(e) = r {
+                    let _ = c.execute_batch("ROLLBACK");
+                    return Err(e);
+                }
+                n += 1;
+            }
+            c.execute(
+                "DELETE FROM contacts WHERE email IN (SELECT email FROM contacts ORDER BY uses ASC, last_ms ASC \
+                 LIMIT MAX(0, (SELECT COUNT(*) FROM contacts) - ?1))",
+                [crate::contacts::MAX_CONTACTS],
+            )?;
+            c.execute_batch("COMMIT")?;
+            Ok(n)
+        })
+    }
+
     /// Podpowiedzi adresów: najpierw te zaczynające się od wpisanego tekstu, potem najczęściej i ostatnio używane.
     pub fn contacts_suggest(&self, q: &str, limit: usize) -> Result<Vec<(String, String)>, String> {
         let q = q.trim().to_lowercase();

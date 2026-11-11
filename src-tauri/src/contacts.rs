@@ -67,6 +67,14 @@ pub fn parse_list(s: &str) -> Vec<Addr> {
     out
 }
 
+/// Adresy, których nie warto podpowiadać: automaty i powiadomienia (noreply, mailer-daemon itp.).
+pub fn is_automatic(email: &str) -> bool {
+    let local = email.split('@').next().unwrap_or("").to_lowercase();
+    ["noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "mailer-daemon", "postmaster", "bounce", "notification"]
+        .iter()
+        .any(|p| local.contains(p))
+}
+
 /// Zapytanie do LIKE: znaki specjalne są poprzedzone znakiem ucieczki `\`.
 pub fn like_escape(q: &str) -> String {
     let mut o = String::with_capacity(q.len());
@@ -100,6 +108,14 @@ mod tests {
         assert!(!valid_email("a@b..pl"));
         assert!(!valid_email("<a@b.pl>"));
         assert!(!valid_email(&format!("{}@b.pl", "x".repeat(70))));
+    }
+
+    #[test]
+    fn automatic_addresses() {
+        assert!(is_automatic("noreply@x.pl"));
+        assert!(is_automatic("no-reply@x.pl"));
+        assert!(is_automatic("MAILER-DAEMON@x.pl"));
+        assert!(!is_automatic("jan.kowalski@x.pl"));
     }
 
     #[test]

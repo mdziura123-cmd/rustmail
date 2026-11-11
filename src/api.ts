@@ -85,6 +85,7 @@ export const api = {
   contactsRemember: (list: string) => invoke<number>("contacts_remember", { list }),
   contactsList: () => invoke<{ email: string; name: string }[]>("contacts_list"),
   contactsDelete: (email: string) => invoke<void>("contacts_delete", { email }),
+  contactsHarvest: () => invoke<number>("contacts_harvest"),
   contactsClear: () => invoke<void>("contacts_clear"),
   composeBackupSet: (json: string) => invoke<void>("compose_backup_set", { json }),
   composeBackupGet: () => invoke<string | null>("compose_backup_get"),

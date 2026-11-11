@@ -433,6 +433,42 @@ async fn list_inner(conn: &mut Conn, folder: &str, offset: u32) -> Result<Page, 
     Ok(Page { rows, next, total })
 }
 
+/// Nagłówki Od/Do/DW ostatnich wiadomości z folderu (do książki adresów). Flag nie zmienia (PEEK).
+async fn harvest_folder(conn: &mut Conn, folder: &str, count: u32) -> Result<Vec<(String, String, String)>, String> {
+    let total = conn.select(folder).await?;
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+    let lo = total.saturating_sub(count.saturating_sub(1)).max(1);
+    let r = conn.ok(&format!("FETCH {lo}:{total} (BODY.PEEK[HEADER.FIELDS (FROM TO CC)])")).await?;
+    let mut out = Vec::new();
+    for u in &r.untagged {
+        let Some(hdr) = u.lits.first() else { continue };
+        let (h, _) = mailparse::parse_headers(hdr).unwrap_or((Vec::new(), 0));
+        out.push((
+            h.get_first_value("From").unwrap_or_default(),
+            h.get_first_value("To").unwrap_or_default(),
+            h.get_first_value("Cc").unwrap_or_default(),
+        ));
+    }
+    Ok(out)
+}
+
+/// Skrzynka odbiorcza i wysłane konta IMAP: (rola folderu, nagłówki Od/Do/DW). Błąd jednego folderu nie przerywa reszty.
+pub async fn harvest_account(account: &str, count: u32) -> Result<Vec<(String, (String, String, String))>, String> {
+    let creds = load(account)?;
+    let mut conn = open(&creds).await?;
+    let mut out = Vec::new();
+    let folders = list_folders(&mut conn).await.unwrap_or_default();
+    for f in folders.iter().filter(|f| f.role == "inbox" || f.role == "sent") {
+        if let Ok(v) = harvest_folder(&mut conn, &f.name, count).await {
+            out.extend(v.into_iter().map(|h| (f.role.clone(), h)));
+        }
+    }
+    conn.bye().await;
+    Ok(out)
+}
+
 #[tauri::command]
 pub async fn imap_search(account: String, folder: String, query: String) -> Result<Page, String> {
     let creds = load(&account)?;

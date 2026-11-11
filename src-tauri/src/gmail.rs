@@ -395,6 +395,43 @@ pub async fn list_threads(
     Ok(ThreadPage { threads, next_page_token: next, offline: false })
 }
 
+/// Nagłówki adresowe (Od, Do, DW) ostatnich wiadomości z danej etykiety – do uzupełnienia książki adresów.
+/// Zwraca wartości nagłówków; nic nie jest zmieniane w Gmailu.
+pub async fn harvest_headers(state: &AppState, label: &str, count: usize) -> Result<Vec<(String, String, String)>, String> {
+    #[derive(Deserialize)]
+    struct MsgRef { id: String }
+    #[derive(Deserialize)]
+    struct MsgList {
+        #[serde(default)]
+        messages: Vec<MsgRef>,
+    }
+    let token = access_token(state).await?;
+    let max = count.clamp(1, 300).to_string();
+    let list: MsgList = get_json(&state.http, &token, "messages", &[("labelIds", label), ("maxResults", &max)]).await?;
+    let mut out = Vec::new();
+    for chunk in list.messages.chunks(8) {
+        let mut set = JoinSet::new();
+        for m in chunk {
+            check_id(&m.id)?;
+            let (http, tok, id) = (state.http.clone(), token.clone(), m.id.clone());
+            set.spawn(async move {
+                get_json::<RawMessage>(
+                    &http, &tok, &format!("messages/{id}"),
+                    &[("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "To"), ("metadataHeaders", "Cc")],
+                ).await
+            });
+        }
+        while let Some(r) = set.join_next().await {
+            let Ok(Ok(m)) = r else { continue };
+            if let Some(p) = &m.payload {
+                let g = |n: &str| decode_mime_words(header(p, n).unwrap_or(""));
+                out.push((g("From"), g("To"), g("Cc")));
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub async fn get_thread(
     state: &AppState,
     id: &str,

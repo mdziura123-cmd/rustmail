@@ -134,6 +134,18 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [imapLoginOpen, setImapLoginOpen] = useState(false);
   const [imapAccs, setImapAccs] = useState<ImapAccount[]>([]);
+  // Książka adresów uzupełnia się sama z odebranych i wysłanych (raz na tydzień, po chwili od startu).
+  const harvestReady = Boolean(auth?.email) || imapAccs.length > 0;
+  useEffect(() => {
+    if (!harvestReady) return;
+    let last = 0;
+    try { last = Number(localStorage.getItem("rm.harvest") ?? "0"); } catch { /* brak pamięci */ }
+    if (Date.now() - last < 7 * 86_400_000) return;
+    const t = window.setTimeout(() => {
+      api.contactsHarvest().then(() => { try { localStorage.setItem("rm.harvest", String(Date.now())); } catch { /* */ } }).catch(() => {});
+    }, 8000);
+    return () => window.clearTimeout(t);
+  }, [harvestReady]);
   const [imapTick, setImapTick] = useState(0);
   const [imapLoaded, setImapLoaded] = useState(false);
   const [view, setView] = useState<string>(() => { const v = load(LS.view, "gmail"); return v.startsWith("imap:") ? v : "gmail"; });

@@ -8,6 +8,9 @@ export function AddressBook() {
   const [add, setAdd] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [added, setAdded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const load = () => api.contactsList().then(setList).catch((e) => setErr(errText(e)));
   useEffect(() => { void load(); }, []);
   return (
@@ -20,12 +23,22 @@ export function AddressBook() {
         e.preventDefault();
         if (!add.trim()) return;
         api.contactsRemember(add).then((n) => {
-          if (n === 0) setErr("Nie znalazłem poprawnego adresu e-mail."); else { setErr(null); setAdd(""); void load(); }
+          if (n === 0) setErr("Nie znalazłem poprawnego adresu e-mail."); else { setErr(null); setAdd(""); setAdded(true); window.setTimeout(() => setAdded(false), 2500); void load(); }
         }).catch((x) => setErr(errText(x)));
       }}>
         <input value={add} onChange={(e) => setAdd(e.target.value)} placeholder="Dodaj adres, np. Jan Kowalski <jan@firma.pl>" aria-label="Dodaj adres" />
         <button className="small" type="submit" title="Dodaj do książki adresów" aria-label="Dodaj do książki adresów"><ActIcon n="plus" /></button>
+        {added && <span className="addr-dot ok inline" role="img" aria-label="Adres dodany" title="Adres dodany" />}
       </form>
+      <div className="addr-harvest">
+        <button className="small" disabled={busy} onClick={() => {
+          setBusy(true); setNote(null); setErr(null);
+          api.contactsHarvest().then((n) => { setNote(`Uzupełniono z poczty: ${n} adresów.`); void load(); })
+            .catch((x) => setErr(errText(x))).finally(() => setBusy(false));
+        }}>{busy ? "Szukam adresów…" : "Uzupełnij z poczty"}</button>
+        <span className="hint">Szuka adresów w ostatnich wiadomościach odebranych i wysłanych (Gmail i WP).</span>
+      </div>
+      {note && <p role="status">{note}</p>}
       {err && <p className="error" role="alert">{err}</p>}
       {list && list.length === 0 && <p className="hint">Książka adresów jest pusta. Wyślij pierwszą wiadomość, a adres zapisze się sam.</p>}
       {list && list.length > 0 && (

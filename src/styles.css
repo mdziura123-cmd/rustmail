@@ -361,3 +361,13 @@ button, .row, summary, select, input { touch-action: manipulation; }
 @keyframes sent-fade { 0% { opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes sent-plane { 0% { transform: scale(.6); opacity: 0; } 25% { transform: scale(1); opacity: 1; } 50% { transform: translate(0, 0) scale(1); } 100% { transform: translate(60vw, -55vh) scale(.5) rotate(10deg); opacity: 0; } }
 @keyframes sent-text { 0%, 30% { opacity: 0; transform: translateY(6px); } 50%, 90% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+
+/* Kropka sprawdzenia adresu */
+.addr-wrap.has-dot input { padding-right: 30px; }
+.addr-dot { position: absolute; right: 11px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; pointer-events: auto; }
+.addr-dot.ok { background: #2e9e5f; box-shadow: 0 0 0 3px color-mix(in srgb, #2e9e5f 25%, transparent); }
+.addr-dot.bad { background: #d6453d; box-shadow: 0 0 0 3px color-mix(in srgb, #d6453d 25%, transparent); }
+.addr-dot.inline { position: static; flex: none; align-self: center; margin: 0 4px; }
+@media (prefers-reduced-motion: no-preference) { .addr-dot { animation: udot-in .25s ease; } }
+.addr-harvest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.addr-harvest .hint { margin: 0; }

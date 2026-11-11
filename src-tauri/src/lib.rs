@@ -95,6 +95,7 @@ pub fn run() {
             commands::contacts_list,
             commands::contacts_delete,
             commands::contacts_clear,
+            commands::contacts_harvest,
             commands::compose_backup_set,
             commands::compose_backup_get,
             commands::compose_backup_clear,

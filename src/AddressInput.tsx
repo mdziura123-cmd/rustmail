@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { checkField } from "./addr";
 
 interface Props {
   value: string;
@@ -23,6 +24,7 @@ export function AddressInput({ value, onChange, disabled, placeholder, label }: 
   const [sugs, setSugs] = useState<Sug[]>([]);
   const [idx, setIdx] = useState(0);
   const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
   const seq = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -51,13 +53,19 @@ export function AddressInput({ value, onChange, disabled, placeholder, label }: 
   };
 
   const show = open && sugs.length > 0;
+  // Zielona kropka: wszystkie wpisane adresy są poprawne. Czerwona: któryś jest błędny. Podczas wpisywania ostatniego adresu bez oceny.
+  const typing = focused && token.length > 0;
+  const chk = typing ? null : checkField(value);
+  const dot = !chk || chk.state === "empty" ? null : chk.state === "ok"
+    ? { cls: "ok", tip: chk.count === 1 ? "Adres wygląda poprawnie" : `Wszystkie adresy (${chk.count}) wyglądają poprawnie` }
+    : { cls: "bad", tip: "Niepoprawny adres: " + chk.bad.join(", ") };
   return (
-    <div className="addr-wrap">
+    <div className={"addr-wrap" + (dot ? " has-dot" : "")}>
       <input ref={inputRef} value={value} disabled={disabled} placeholder={placeholder} aria-label={label}
         role="combobox" aria-expanded={show} aria-autocomplete="list" autoComplete="off" spellCheck={false}
         onChange={(e) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        onFocus={() => { setOpen(true); setFocused(true); }}
+        onBlur={() => { setFocused(false); window.setTimeout(() => setOpen(false), 120); }}
         onKeyDown={(e) => {
           if (!show) return;
           if (e.key === "ArrowDown") { e.preventDefault(); setIdx((i) => (i + 1) % sugs.length); }
@@ -65,6 +73,7 @@ export function AddressInput({ value, onChange, disabled, placeholder, label }: 
           else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pick(sugs[idx]); }
           else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); }
         }} />
+      {dot && <span className={"addr-dot " + dot.cls} role="img" aria-label={dot.tip} title={dot.tip} />}
       {show && (
         <div className="addr-pop" role="listbox">
           {sugs.map((s, i) => (

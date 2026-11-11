@@ -14,7 +14,7 @@ use crate::store::{CacheStatus, Store};
 use crate::notify::{self, Notifier};
 use crate::spam_io::{self, SpamState};
 use crate::accounts::{self, Account};
-use crate::{dismissed, filetype, gmail, offline, remote, safety, scan, secrets, signature};
+use crate::{contacts, dismissed, filetype, gmail, imap_io, offline, remote, safety, scan, secrets, signature};
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct AppInfo {
@@ -1048,4 +1048,53 @@ pub fn contacts_delete(store: State<'_, Store>, email: String) -> Result<(), Str
 #[tauri::command]
 pub fn contacts_clear(store: State<'_, Store>) -> Result<(), String> {
     store.contacts_clear()
+}
+
+/// Uzupełnia książkę adresów z ostatnich wiadomości skrzynki odbiorczej i wysłanych (Gmail i konta IMAP).
+/// Adresy z wysłanych liczą się trzykrotnie (pisałeś do tej osoby), z odebranych jednokrotnie. Nic nie zmienia na serwerach.
+#[tauri::command]
+pub async fn contacts_harvest(state: State<'_, AppState>, store: State<'_, Store>) -> Result<usize, String> {
+    use std::collections::HashMap;
+    let mut mine: Vec<String> = imap_io::imap_accounts()?.into_iter().map(|a| a.email.to_lowercase()).collect();
+    let gmail_email = secrets::get(auth::KEY_EMAIL)?;
+    if let Some(e) = &gmail_email {
+        mine.push(e.to_lowercase());
+    }
+    // (adres → (nazwa, liczba użyć))
+    let mut found: HashMap<String, (String, i64)> = HashMap::new();
+    let mut add = |sent: bool, h: &(String, String, String)| {
+        let w = if sent { 3 } else { 1 };
+        // w wysłanych liczą się odbiorcy (Do, DW); w odebranych nadawca, a odbiorcy wiadomości do kilku osób tylko raz
+        let fields: [&str; 3] = if sent { [&h.1, &h.2, ""] } else { [&h.0, &h.1, &h.2] };
+        for f in fields {
+            for a in contacts::parse_list(f) {
+                if mine.contains(&a.email) || contacts::is_automatic(&a.email) {
+                    continue;
+                }
+                let e = found.entry(a.email).or_insert((String::new(), 0));
+                if e.0.is_empty() {
+                    e.0 = a.name;
+                }
+                e.1 += w;
+            }
+        }
+    };
+    if gmail_email.is_some() {
+        for (label, sent) in [("INBOX", false), ("SENT", true)] {
+            if let Ok(v) = gmail::harvest_headers(&state, label, 150).await {
+                for h in &v {
+                    add(sent, h);
+                }
+            }
+        }
+    }
+    for acc in imap_io::imap_accounts()? {
+        if let Ok(v) = imap_io::harvest_account(&acc.email, 200).await {
+            for (role, h) in &v {
+                add(role == "sent", h);
+            }
+        }
+    }
+    let items: Vec<(contacts::Addr, i64)> = found.into_iter().map(|(email, (name, n))| (contacts::Addr { email, name }, n)).collect();
+    store.contacts_learn(&items)
 }
