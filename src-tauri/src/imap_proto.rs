@@ -60,6 +60,23 @@ fn split_terms(q: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// Data `RRRR-MM-DD` → `D-Mon-RRRR` (format IMAP). Sprawdza zakres dnia i miesiąca.
+fn imap_date(v: &str) -> Result<String, String> {
+    const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let bad = || "Data w wyszukiwaniu ma mieć postać RRRR-MM-DD.".to_string();
+    let b = v.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !v.chars().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit()) {
+        return Err(bad());
+    }
+    let y: u32 = v[0..4].parse().map_err(|_| bad())?;
+    let m: usize = v[5..7].parse().map_err(|_| bad())?;
+    let d: u32 = v[8..10].parse().map_err(|_| bad())?;
+    if !(1970..=2200).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return Err(bad());
+    }
+    Ok(format!("{d}-{}-{y}", M[m - 1]))
+}
+
 fn value_parts(key: &str, v: &str) -> Result<Vec<SPart>, String> {
     if v.is_empty() || v.chars().count() > 100 || v.chars().any(|c| c.is_control()) {
         return Err("Fraza w wyszukiwaniu jest pusta, za długa albo zawiera znaki sterujące.".to_string());
@@ -72,15 +89,15 @@ fn value_parts(key: &str, v: &str) -> Result<Vec<SPart>, String> {
 }
 
 /// Zamienia frazę wyszukiwania na kryteria IMAP SEARCH. Obsługiwane: słowa (cały tekst), `od:`, `do:`, `temat:`
-/// (także `from:`, `to:`, `subject:`), `is:unread`, `is:read`, `is:starred`, fraza w cudzysłowie. Wszystkie warunki
+/// (także `from:`, `to:`, `subject:`), `po:RRRR-MM-DD` i `przed:RRRR-MM-DD` (daty), `is:unread`, `is:read`, `is:starred`, fraza w cudzysłowie. Wszystkie warunki
 /// łączą się spójnikiem „i”. Wartości spoza ASCII idą jako literały UTF-8 (patrz `search_needs_utf8`).
 pub fn search_parts(q: &str) -> Result<Vec<SPart>, String> {
     let terms = split_terms(q)?;
     if terms.is_empty() {
         return Err("Wpisz frazę do wyszukania.".to_string());
     }
-    if terms.len() > 8 {
-        return Err("Za dużo warunków w wyszukiwaniu (najwyżej 8).".to_string());
+    if terms.len() > 12 {
+        return Err("Za dużo warunków w wyszukiwaniu (najwyżej 12).".to_string());
     }
     let mut parts: Vec<SPart> = Vec::new();
     for (i, t) in terms.iter().enumerate() {
@@ -92,6 +109,8 @@ pub fn search_parts(q: &str) -> Result<Vec<SPart>, String> {
             Some(("od" | "from", _)) => value_parts("FROM", &t[t.find(':').unwrap_or(0) + 1..])?,
             Some(("do" | "to", _)) => value_parts("TO", &t[t.find(':').unwrap_or(0) + 1..])?,
             Some(("temat" | "subject", _)) => value_parts("SUBJECT", &t[t.find(':').unwrap_or(0) + 1..])?,
+            Some(("po" | "after" | "since", _)) => vec![SPart::Text(format!("SINCE {}", imap_date(&t[t.find(':').unwrap_or(0) + 1..])?))],
+            Some(("przed" | "before", _)) => vec![SPart::Text(format!("BEFORE {}", imap_date(&t[t.find(':').unwrap_or(0) + 1..])?))],
             Some(("is", "unread")) => vec![SPart::Text("UNSEEN".to_string())],
             Some(("is", "read")) => vec![SPart::Text("SEEN".to_string())],
             Some(("is", "starred")) => vec![SPart::Text("FLAGGED".to_string())],
@@ -682,13 +701,21 @@ mod tests {
     }
 
     #[test]
+    fn search_dates() {
+        assert_eq!(search_parts("po:2026-01-05 przed:2026-11-30").unwrap(), vec![t("SINCE 5-Jan-2026 BEFORE 30-Nov-2026")]);
+        assert_eq!(search_parts("after:2026-02-01").unwrap(), vec![t("SINCE 1-Feb-2026")]);
+    }
+
+    #[test]
     fn search_rejects_bad_input() {
         assert!(search_parts("").is_err());
         assert!(search_parts("   ").is_err());
         assert!(search_parts("\"niezamknięty").is_err());
         assert!(search_parts("is:bogus").is_err());
         assert!(search_parts("od:").is_err());
-        assert!(search_parts("a b c d e f g h i").is_err());
+        assert!(search_parts("a b c d e f g h i j k l m").is_err());
+        assert!(search_parts("po:2026-13-01").is_err());
+        assert!(search_parts("po:wczoraj").is_err());
         assert!(search_parts("a\u{0}b").is_err());
         // wstrzyknięcie: cudzysłów i backslash są zawsze escapowane
         assert_eq!(search_parts("a\\b").unwrap(), vec![t("TEXT \"a\\\\b\"")]);

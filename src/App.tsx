@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prio, usePrioLevels } from "./prio";
 import { gmailPrioKey, sortSearchResults } from "./prioSort";
-import { PrioFlag, PrioMenu } from "./PrioUi";
+import { flagsFirst, useFlagsFirst } from "./listPrefs";
+import { SearchFilters } from "./SearchFilters";
+import { buildQuery, EMPTY_FILTERS, filtersError, flagMatches, hasFilters, type FlagFilter, type Filters } from "./searchQuery";
+import { FlagsFirstToggle, PrioFlag, PrioMenu } from "./PrioUi";
 import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { AuthPanel } from "./AuthPanel";
@@ -112,6 +115,11 @@ export default function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [restore, setRestore] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filtErr, setFiltErr] = useState<string | null>(null);
+  const [optsOpen, setOptsOpen] = useState(false);
+  const flagFilterRef = useRef<FlagFilter>("any");
+  const ffPrev = useRef(false);
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const [listOffline, setListOffline] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
@@ -208,8 +216,9 @@ export default function App() {
       await prio.ensure(page.threads.map((t) => gmailPrioKey(acc, t.id)));
       if (my !== listReq.current) return;
       // Wyszukiwanie: najpierw wiadomości z flagą (bardzo ważne → mniej ważne), potem reszta od najnowszych.
-      const order = (l: ThreadSummary[]) => (q ? sortSearchResults(l, (t) => t.lastDateMs, (t) => prio.get(gmailPrioKey(acc, t.id))) : l);
-      setThreads((prev) => order(append ? [...prev, ...page.threads] : page.threads));
+      const shown = q ? page.threads.filter((t) => flagMatches(prio.get(gmailPrioKey(acc, t.id)), flagFilterRef.current)) : page.threads;
+      const order = (l: ThreadSummary[]) => (q || flagsFirst() ? sortSearchResults(l, (t) => t.lastDateMs, (t) => prio.get(gmailPrioKey(acc, t.id))) : l);
+      setThreads((prev) => order(append ? [...prev, ...shown] : shown));
       if (!append) setSelected(new Set());
       setNextToken(page.nextPageToken);
       setListOffline(Boolean(page.offline));
@@ -223,12 +232,16 @@ export default function App() {
   const email = auth?.email ?? null;
   emailRef.current = email;
   const prioLevels = usePrioLevels();
+  const ff = useFlagsFirst();
   // Zmiana flagi podczas wyszukiwania od razu przestawia wyniki.
   useEffect(() => {
-    if (!searchRef.current || !email) return;
-    setThreads((prev) => sortSearchResults(prev, (t) => t.lastDateMs, (t) => prio.get(gmailPrioKey(email, t.id))));
+    if (!email) return;
+    const flagged = Boolean(searchRef.current) || ff;
+    if (!flagged && !ffPrev.current) return;
+    ffPrev.current = ff;
+    setThreads((prev) => sortSearchResults(prev, (t) => t.lastDateMs, (t) => (flagged ? prio.get(gmailPrioKey(email, t.id)) : 0)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prioLevels]);
+  }, [prioLevels, ff]);
   // Flagi wątków widocznych na liście (poza wyszukiwaniem też je pokazujemy).
   useEffect(() => {
     if (email && threads.length) void prio.ensure(threads.map((t) => gmailPrioKey(email, t.id)));
@@ -668,8 +681,11 @@ export default function App() {
 
   const clearSearch = () => {
     searchRef.current = null;
+    flagFilterRef.current = "any";
     setSearchTerm(null);
     setQuery("");
+    setFilters(EMPTY_FILTERS);
+    setFiltErr(null);
   };
   const pickFolder = (id: FolderId) => {
     const wasSearching = searchRef.current !== null;
@@ -689,11 +705,16 @@ export default function App() {
 
   const doSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const q = query.trim();
+    const err = filtersError(filters);
+    setFiltErr(err);
+    if (err) return;
+    const q = buildQuery(query, filters, "gmail");
     if (!q) {
       if (searchRef.current !== null) { clearSearch(); void loadList(folder, null, false); }
       return;
     }
+    flagFilterRef.current = filters.flag;
+    setOptsOpen(false);
     searchRef.current = q;
     setSearchTerm(q);
     setOpenId(null);
@@ -976,6 +997,7 @@ export default function App() {
         <section className="list" aria-label="Lista konwersacji">
           <header className="list-head">
             <h2>{searchTerm ? `Wyniki: „${searchTerm}”` : folderLabel}</h2>
+            {email && <FlagsFirstToggle />}
             {email && (
               <ReceiveButton busy={loadingList} onClick={() => void loadList(folder, null, false)} />
             )}
@@ -983,9 +1005,12 @@ export default function App() {
           {email && (
             <form className="search" role="search" onSubmit={doSearch}>
               <input type="search" value={query} maxLength={500} placeholder="Szukaj w poczcie (np. from:ala faktura)"
-                aria-label="Szukaj w poczcie" onChange={(e) => setQuery(e.target.value)} />
+                aria-label="Szukaj w poczcie" onFocus={() => setOptsOpen(true)} onChange={(e) => setQuery(e.target.value)} />
+              <button className="small" type="button" aria-expanded={optsOpen} title="Opcje wyszukiwania: nadawca, temat, daty, flaga" aria-label="Opcje wyszukiwania"
+                onClick={() => setOptsOpen((v) => !v)}><ActIcon n="filter" />{hasFilters(filters) && <span className="dot" aria-hidden="true" />}</button>
               <button className="small" title="Szukaj" aria-label="Szukaj" type="submit"><ActIcon n="search"/></button>
               {searchTerm && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { clearSearch(); void loadList(folder, null, false); }}><ActIcon n="clear"/></button>}
+              {optsOpen && <SearchFilters value={filters} onChange={setFilters} error={filtErr} />}
             </form>
           )}
           {email && listOffline && (

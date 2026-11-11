@@ -29,6 +29,9 @@ const PATHS = {
   eraser: "M20 20H9L4 15 14 5l6 6-7 7M8 11l6 6",
   plus: "M12 5v14M5 12h14",
   dict: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM12 8v6M9 11h6",
+  calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  flag: "M5 21V4M5 4h11l-2 4 2 4H5",
+  filter: "M4 5h16M7 12h10M10 19h4",
   collapse: "M7 5l5 5 5-5M7 19l5-5 5 5",
 } as const;
 

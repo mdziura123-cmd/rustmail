@@ -10,7 +10,10 @@ import { ActIcon } from "./ActIcon";
 import { FOLDERS } from "./folders";
 import { imapPrioKey, sortSearchResults } from "./prioSort";
 import { prio, usePrioLevels } from "./prio";
-import { PrioFlag, PrioMenu } from "./PrioUi";
+import { useFlagsFirst, flagsFirst } from "./listPrefs";
+import { SearchFilters } from "./SearchFilters";
+import { buildQuery, EMPTY_FILTERS, filtersError, flagMatches, hasFilters, type FlagFilter, type Filters } from "./searchQuery";
+import { FlagsFirstToggle, PrioFlag, PrioMenu } from "./PrioUi";
 
 const FOLDER_ICON = Object.fromEntries(FOLDERS.map((f) => [f.id, f])) as Record<string, (typeof FOLDERS)[number]>;
 const OTHER_ICON = "M3 7h7l2 2h9v10H3z";
@@ -63,15 +66,18 @@ export function useImapView(account: string | null) {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const seq = useRef(0);
   const levels = usePrioLevels();
+  const ff = useFlagsFirst();
+  const flagRef = useRef<FlagFilter>("any");
 
-  // Wyniki wyszukiwania układają się na nowo, gdy zmieni się flaga.
+  // Wyniki wyszukiwania (albo cała lista przy włączonym „flagi na górze”) układają się na nowo, gdy zmieni się flaga.
   useEffect(() => {
-    if (!term || !account || !folder) return;
+    if (!account || !folder) return;
     setRows((prev) => {
-      const sorted = sortSearchResults(prev, (r) => r.dateMs, (r) => levels[imapPrioKey(account, folder, r.uid)] ?? 0);
+      const flagged = Boolean(term) || ff;
+      const sorted = sortSearchResults(prev, (r) => r.dateMs, (r) => (flagged ? levels[imapPrioKey(account, folder, r.uid)] ?? 0 : 0));
       return sorted.every((r, i) => r === prev[i]) ? prev : sorted;
     });
-  }, [levels, term, account, folder]);
+  }, [levels, term, ff, account, folder]);
 
   const loadCounts = useCallback((acc: string) => {
     api.imapCounts(acc).then((c) => setCounts(Object.fromEntries(c.map((x) => [x.name, x.unseen])))).catch(() => {});
@@ -85,7 +91,9 @@ export function useImapView(account: string | null) {
       if (my !== seq.current) return;
       await prio.ensure(p.rows.map((r) => imapPrioKey(acc, name, r.uid)));
       if (my !== seq.current) return;
-      setRows((prev) => (append ? [...prev, ...p.rows] : p.rows));
+      const lv = (r: ImapRow) => prio.get(imapPrioKey(acc, name, r.uid));
+      const ord = (l: ImapRow[]) => (flagsFirst() ? sortSearchResults(l, (r) => r.dateMs, lv) : l);
+      setRows((prev) => ord(append ? [...prev, ...p.rows] : p.rows));
       setNext(p.next);
     } catch (e) { if (my === seq.current) setErr(errText(e)); }
     finally { if (my === seq.current) setLoading(false); }
@@ -106,8 +114,9 @@ export function useImapView(account: string | null) {
     }).catch((e) => { if (my === seq.current) { setErr(errText(e)); setLoading(false); } });
   }, [account, load, loadCounts]);
 
-  const search = async (q: string) => {
+  const search = async (q: string, flag: FlagFilter = flagRef.current) => {
     if (!account || !folder || !q.trim()) return;
+    flagRef.current = flag;
     const my = ++seq.current;
     setTerm(q.trim()); setLoading(true); setErr(null);
     try {
@@ -115,7 +124,8 @@ export function useImapView(account: string | null) {
       if (my !== seq.current) return;
       await prio.ensure(p.rows.map((r) => imapPrioKey(account, folder, r.uid)));
       if (my !== seq.current) return;
-      setRows(sortSearchResults(p.rows, (r) => r.dateMs, (r) => prio.get(imapPrioKey(account, folder, r.uid)))); setNext(null);
+      const lv = (r: ImapRow) => prio.get(imapPrioKey(account, folder, r.uid));
+      setRows(sortSearchResults(p.rows.filter((r) => flagMatches(lv(r), flag)), (r) => r.dateMs, lv)); setNext(null);
     } catch (e) { if (my === seq.current) setErr(errText(e)); }
     finally { if (my === seq.current) setLoading(false); }
   };
@@ -124,8 +134,8 @@ export function useImapView(account: string | null) {
     account, folders, folder, rows, next, loading, err, term, counts,
     pick: (name: string) => { if (account) { setTerm(""); setFolder(name); void load(account, name, 0, false); } },
     refresh: () => { if (account && folder) { if (term) { void search(term); } else void load(account, folder, 0, false); loadCounts(account); } },
-    search: (q: string) => void search(q),
-    clearSearch: () => { setTerm(""); if (account && folder) void load(account, folder, 0, false); },
+    search: (q: string, flag: FlagFilter = "any") => void search(q, flag),
+    clearSearch: () => { setTerm(""); flagRef.current = "any"; if (account && folder) void load(account, folder, 0, false); },
     more: () => { if (account && folder && next !== null) void load(account, folder, next, true); },
     patch: (uid: number, p: Partial<ImapRow>) => setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...p } : r))),
     remove: (uid: number) => setRows((prev) => prev.filter((r) => r.uid !== uid)),
@@ -158,19 +168,34 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
 }) {
   const label = imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
   const [q, setQ] = useState("");
+  const [fl, setFl] = useState<Filters>(EMPTY_FILTERS);
+  const [flErr, setFlErr] = useState<string | null>(null);
+  const [optsOpen, setOptsOpen] = useState(false);
   const levels = usePrioLevels();
-  useEffect(() => { setQ(""); }, [imap.account, imap.folder]);
+  useEffect(() => { setQ(""); setFl(EMPTY_FILTERS); setFlErr(null); setOptsOpen(false); }, [imap.account, imap.folder]);
   return (
     <section className="list" aria-label="Lista wiadomości">
       <header className="list-head">
         <h2>{label}{imap.account ? ` · ${imap.account}` : ""}</h2>
+        <FlagsFirstToggle />
         <ReceiveButton busy={imap.loading} onClick={imap.refresh} />
       </header>
-      <form className="search" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) imap.search(q); }}>
+      <form className="search" role="search" onSubmit={(e) => {
+        e.preventDefault();
+        const err = filtersError(fl);
+        setFlErr(err);
+        const full = buildQuery(q, fl, "imap");
+        if (err || !full) return;
+        setOptsOpen(false);
+        imap.search(full, fl.flag);
+      }}>
         <input type="search" value={q} maxLength={300} placeholder="Szukaj w tym folderze (np. od:ala temat:faktura is:unread)" aria-label="Szukaj w folderze"
-          onChange={(e) => setQ(e.target.value)} />
+          onFocus={() => setOptsOpen(true)} onChange={(e) => setQ(e.target.value)} />
+        <button className="small" type="button" aria-expanded={optsOpen} title="Opcje wyszukiwania: nadawca, temat, daty, flaga" aria-label="Opcje wyszukiwania"
+          onClick={() => setOptsOpen((v) => !v)}><ActIcon n="filter"/>{hasFilters(fl) && <span className="dot" aria-hidden="true" />}</button>
         <button className="small" title="Szukaj" aria-label="Szukaj" type="submit"><ActIcon n="search"/></button>
-        {imap.term && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { setQ(""); imap.clearSearch(); }}><ActIcon n="clear"/></button>}
+        {imap.term && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { setQ(""); setFl(EMPTY_FILTERS); setFlErr(null); imap.clearSearch(); }}><ActIcon n="clear"/></button>}
+        {optsOpen && <SearchFilters value={fl} onChange={setFl} error={flErr} />}
       </form>
       {imap.err && <p className="error pad" role="alert">{imap.err}</p>}
       {selected.size > 0 && (

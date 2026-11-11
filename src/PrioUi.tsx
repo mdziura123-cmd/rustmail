@@ -1,3 +1,5 @@
+import { ActIcon } from "./ActIcon";
+import { setFlagsFirst, useFlagsFirst } from "./listPrefs";
 import { PRIOS } from "./prioSort";
 import { prio, usePrioLevels } from "./prio";
 
@@ -38,5 +40,15 @@ export function PrioMenu({ itemKey, onError }: { itemKey: string; onError: (msg:
         {cur > 0 && <button role="menuitem" onClick={() => pick(0)}>Usuń flagę</button>}
       </div>
     </details>
+  );
+}
+
+/** Przełącznik „flagi na górze listy”: oflagowane wiadomości (od bardzo ważnych) przed resztą także poza wyszukiwaniem. */
+export function FlagsFirstToggle() {
+  const on = useFlagsFirst();
+  const t = on ? "Flagi na górze listy: włączone (kliknij, aby wrócić do układu wg daty)" : "Pokaż wiadomości z flagami na górze listy";
+  return (
+    <button className={"small flags-first" + (on ? " on" : "")} type="button" aria-pressed={on} title={t} aria-label={t}
+      onClick={() => setFlagsFirst(!on)}><ActIcon n="flag" /></button>
   );
 }

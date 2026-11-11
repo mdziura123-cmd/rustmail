@@ -1,0 +1,44 @@
+name: Audyt zależności
+
+# Sprawdza biblioteki pod kątem znanych luk (RustSec dla Rusta, npm audit dla frontendu).
+# Działa co tydzień, po zmianie plików blokady i na życzenie. Nie blokuje budowania wydań – wynik widać w zakładce Actions.
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "package-lock.json"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - ".github/workflows/audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: npm audit (poziom wysoki i krytyczny)
+        run: npm audit --audit-level=high
+
+  cargo:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - name: Zainstaluj cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: cargo audit
+        working-directory: src-tauri
+        run: cargo audit
