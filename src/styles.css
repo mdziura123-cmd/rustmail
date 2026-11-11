@@ -389,3 +389,18 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 
 .att-preview { display: block; max-width: min(100%, 560px); max-height: 420px; margin-top: 6px; border-radius: 6px; border: 1px solid var(--border, #ccc); object-fit: contain; }
 .rule-box textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); min-width: 0; flex: 1 1 100%; resize: vertical; }
+
+.cal-modal { width: min(760px, 96vw); max-height: 92vh; overflow-y: auto; display: grid; gap: 10px; }
+.cal-head { display: flex; align-items: center; gap: 8px; }
+.cal-head h3 { margin: 0; min-width: 11ch; text-align: center; text-transform: capitalize; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-dow { text-align: center; font-size: 12px; opacity: .7; }
+.cal-day { position: relative; min-height: 44px; display: flex; flex-direction: column; align-items: flex-start; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); cursor: pointer; font: inherit; }
+.cal-day.other { opacity: .45; }
+.cal-day.today { border-color: var(--accent, #3b82f6); font-weight: 700; }
+.cal-day.sel { outline: 2px solid var(--accent, #3b82f6); }
+.cal-dot { position: absolute; right: 6px; bottom: 4px; min-width: 8px; height: 8px; border-radius: 8px; background: var(--accent, #3b82f6); color: #fff; font-size: 9px; line-height: 8px; text-align: center; padding: 0 2px; }
+.cal-side { display: grid; gap: 8px; }
+.cal-form { display: grid; gap: 8px; }
+.cal-form input:not([type=checkbox]), .cal-form select, .cal-form textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); min-width: 0; }
+.cal-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

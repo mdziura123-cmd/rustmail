@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS scheduled (
     draft_id TEXT,
     raw BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    all_day INTEGER NOT NULL DEFAULT 0,
+    remind_min INTEGER NOT NULL DEFAULT -1,
+    reminded INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS events_start ON events (start_ms);
 CREATE TABLE IF NOT EXISTS rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     field TEXT NOT NULL,
@@ -690,6 +701,92 @@ impl Store {
             Ok(c.last_insert_rowid())
         })
         .map_err(|e| if e.contains("za dużo reguł") { "Można mieć najwyżej 100 reguł.".to_string() } else { e })
+    }
+
+    // ---------- kalendarz lokalny ----------
+
+    pub fn event_save(&self, e: &crate::calendar::Event) -> Result<i64, String> {
+        self.with(|c| match e.id {
+            Some(id) => {
+                let n = c.execute(
+                    "UPDATE events SET title=?1, notes=?2, start_ms=?3, end_ms=?4, all_day=?5, remind_min=?6, reminded=0 WHERE id=?7",
+                    params![e.title, e.notes, e.start_ms, e.end_ms, e.all_day as i64, e.remind_min, id],
+                )?;
+                if n == 0 {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
+                }
+                Ok(id)
+            }
+            None => {
+                let n: i64 = c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?;
+                if n >= crate::calendar::MAX_EVENTS {
+                    return Err(rusqlite::Error::InvalidParameterName("za dużo wydarzeń".to_string()));
+                }
+                c.execute(
+                    "INSERT INTO events (title, notes, start_ms, end_ms, all_day, remind_min) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![e.title, e.notes, e.start_ms, e.end_ms, e.all_day as i64, e.remind_min],
+                )?;
+                Ok(c.last_insert_rowid())
+            }
+        })
+        .map_err(|m| if m.contains("za dużo wydarzeń") { format!("Można mieć najwyżej {} wydarzeń.", crate::calendar::MAX_EVENTS) } else { m })
+    }
+
+    pub fn event_delete(&self, id: i64) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM events WHERE id = ?1", [id]).map(|_| ()))
+    }
+
+    fn event_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<crate::calendar::Event> {
+        Ok(crate::calendar::Event {
+            id: Some(r.get(0)?),
+            title: r.get(1)?,
+            notes: r.get(2)?,
+            start_ms: r.get(3)?,
+            end_ms: r.get(4)?,
+            all_day: r.get::<_, i64>(5)? != 0,
+            remind_min: r.get(6)?,
+        })
+    }
+
+    /// Wydarzenia, które zaczynają się lub trwają w podanym przedziale czasu.
+    pub fn event_range(&self, from_ms: i64, to_ms: i64) -> Result<Vec<crate::calendar::Event>, String> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min FROM events \
+                 WHERE start_ms < ?2 AND end_ms >= ?1 ORDER BY start_ms, id LIMIT 2000",
+            )?;
+            let rows = st.query_map(params![from_ms, to_ms], Self::event_from_row)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    pub fn event_all(&self) -> Result<Vec<crate::calendar::Event>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT id, title, notes, start_ms, end_ms, all_day, remind_min FROM events ORDER BY start_ms, id")?;
+            let rows = st.query_map([], Self::event_from_row)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    /// Wydarzenia z przypomnieniem, na które przyszedł czas; oznacza je jako przypomniane.
+    /// Zwraca tylko te, które zaczynają się nie dawniej niż dobę temu (starych nie ogłaszamy po fakcie).
+    pub fn event_due(&self, now_ms: i64) -> Result<Vec<crate::calendar::Event>, String> {
+        self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            let due: Vec<crate::calendar::Event> = {
+                let mut st = tx.prepare(
+                    "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min FROM events \
+                     WHERE remind_min >= 0 AND reminded = 0 AND start_ms - remind_min * 60000 <= ?1 ORDER BY start_ms LIMIT 200",
+                )?;
+                let rows = st.query_map([now_ms], Self::event_from_row)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            for e in &due {
+                tx.execute("UPDATE events SET reminded = 1 WHERE id = ?1", [e.id])?;
+            }
+            tx.commit()?;
+            Ok(due.into_iter().filter(|e| e.start_ms >= now_ms - 86_400_000).collect())
+        })
     }
 
     pub fn rule_delete(&self, id: i64) -> Result<(), String> {

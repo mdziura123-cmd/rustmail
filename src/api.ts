@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanDisplay, stripEmoji } from "./util";
 import type {
+  CalEvent,
   Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, SchedItem, SnoozeItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
   SpamConfig, SpamLogEntry, SpamScanOutcome, SpamStatus, TrainItem,
@@ -142,7 +143,7 @@ export const api = {
   backgroundState: () => invoke<boolean>("background_state"),
   backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),
   backupImport: (json: string) =>
-    invoke<{ contacts: number; flags: number; rules: number; settings: Record<string, string> }>("backup_import", { json }),
+    invoke<{ contacts: number; flags: number; rules: number; events: number; settings: Record<string, string> }>("backup_import", { json }),
   scheduleMessage: (msg: OutgoingMessage, sendAtMs: number) => invoke<number>("schedule_message", { msg, sendAtMs }),
   imapScheduleMessage: (account: string, msg: OutgoingMessage, sendAtMs: number) =>
     invoke<number>("imap_schedule_message", { account, msg, sendAtMs }),
@@ -176,6 +177,10 @@ export const api = {
     invoke<SavedFile>("download_attachment", { messageId, attachmentId, name }),
   imapPoll: (account: string, notifyEnabled: boolean, showContent: boolean) =>
     invoke<{ moved: number; notified: number; newCount: number; unread: number }>("imap_poll", { account, notifyEnabled, showContent }),
+  calRange: (fromMs: number, toMs: number) => invoke<CalEvent[]>("cal_range", { fromMs, toMs }),
+  calSave: (event: CalEvent) => invoke<number>("cal_save", { event }),
+  calDelete: (id: number) => invoke<void>("cal_delete", { id }),
+  calDue: (nowMs: number) => invoke<CalEvent[]>("cal_due", { nowMs }),
   rulesApply: (dryRun: boolean) =>
     invoke<{ checked: number; affected: number; done: number; failed: number }>("rules_apply", { dryRun }),
   previewAttachment: (messageId: string, attachmentId: string) =>

@@ -2,6 +2,7 @@ mod accounts;
 mod auth;
 mod background;
 mod backup;
+mod calendar;
 mod badge;
 mod blocklist;
 mod commands;
@@ -205,6 +206,10 @@ pub fn run() {
             commands::download_attachment,
             commands::preview_attachment,
             commands::rules_apply,
+            calendar::cal_range,
+            calendar::cal_save,
+            calendar::cal_delete,
+            calendar::cal_due,
             commands::get_signature,
             commands::set_signature,
             update::check_update,

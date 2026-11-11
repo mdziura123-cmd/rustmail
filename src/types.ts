@@ -263,3 +263,14 @@ export interface ImapMsg {
   messageId: string; references: string; replyTo: string;
   text: string; html: string; attachments: Attachment[]; unread: boolean; starred: boolean;
 }
+
+export interface CalEvent {
+  id?: number;
+  title: string;
+  notes: string;
+  startMs: number;
+  endMs: number;
+  allDay: boolean;
+  /** Ile minut przed początkiem przypomnieć; -1 = bez przypomnienia. */
+  remindMin: number;
+}

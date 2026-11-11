@@ -6,6 +6,7 @@ interface Props {
   u: Updater;
   outboxCount: number;
   onOutbox: () => void;
+  onCalendar: () => void;
   onSettings: () => void;
 }
 
@@ -20,6 +21,15 @@ function RefreshIcon() {
   );
 }
 
+function CalendarIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" {...stroke}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" {...stroke}>
@@ -30,7 +40,7 @@ function GearIcon() {
 }
 
 /** Dolna belka: nazwa i wersja, ikona sprawdzania aktualizacji, a po prawej koło zębate (ustawienia). */
-export function StatusBar({ info, u, outboxCount, onOutbox, onSettings }: Props) {
+export function StatusBar({ info, u, outboxCount, onOutbox, onCalendar, onSettings }: Props) {
   const { phase } = u;
 
   // Podczas aktualizacji na belce jest tylko pasek postępu.
@@ -79,6 +89,9 @@ export function StatusBar({ info, u, outboxCount, onOutbox, onSettings }: Props)
       )}
       <span className="grow" />
       {outboxCount > 0 && <button className="linklike plain" onClick={onOutbox}>Do wysłania i odłożone ({outboxCount})</button>}
+      <button className="icon-btn gear" title="Kalendarz" aria-label="Kalendarz" onClick={onCalendar}>
+        <CalendarIcon />
+      </button>
       <button className="icon-btn gear" title="Ustawienia" aria-label="Ustawienia" onClick={onSettings}>
         <GearIcon />
       </button>

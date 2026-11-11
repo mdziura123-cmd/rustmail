@@ -35,6 +35,7 @@ pub struct ImportResult {
     contacts: usize,
     flags: usize,
     rules: usize,
+    events: usize,
     settings: BTreeMap<String, String>,
 }
 
@@ -60,6 +61,12 @@ pub fn backup_export(store: State<'_, Store>, settings: BTreeMap<String, String>
         .into_iter()
         .map(|r| json!({ "field": r.field, "needle": r.needle, "action": r.action }))
         .collect();
+    let events: Vec<Value> = store
+        .event_all()?
+        .into_iter()
+        .take(crate::calendar::MAX_EVENTS as usize)
+        .map(|e| json!({ "title": e.title, "notes": e.notes, "startMs": e.start_ms, "endMs": e.end_ms, "allDay": e.all_day, "remindMin": e.remind_min }))
+        .collect();
     let doc = json!({
         "format": FORMAT,
         "version": VERSION,
@@ -67,6 +74,7 @@ pub fn backup_export(store: State<'_, Store>, settings: BTreeMap<String, String>
         "contacts": contacts,
         "flags": flags,
         "rules": rules,
+        "events": events,
     });
     let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())?;
     let path = remote::save_download("rustmail-kopia.json", &bytes)?;
@@ -131,6 +139,24 @@ pub fn backup_import(store: State<'_, Store>, json: String) -> Result<ImportResu
         }
     }
 
+    // Wydarzenia: dopisujemy tylko te, których jeszcze nie ma (ten sam tytuł i czas).
+    let mut n_events = 0usize;
+    if let Some(list) = v.get("events").and_then(Value::as_array) {
+        let mut existing = store.event_all()?;
+        for item in list.iter().take(crate::calendar::MAX_EVENTS as usize) {
+            let Ok(mut e) = serde_json::from_value::<crate::calendar::Event>(item.clone()) else { continue };
+            e.id = None;
+            let Ok(e) = crate::calendar::validate(&e) else { continue };
+            if existing.iter().any(|x| x.title == e.title && x.start_ms == e.start_ms && x.end_ms == e.end_ms) {
+                continue;
+            }
+            if store.event_save(&e).is_ok() {
+                n_events += 1;
+                existing.push(e);
+            }
+        }
+    }
+
     let mut raw: BTreeMap<String, String> = BTreeMap::new();
     if let Some(obj) = v.get("settings").and_then(Value::as_object) {
         for (k, val) in obj {
@@ -139,7 +165,7 @@ pub fn backup_import(store: State<'_, Store>, json: String) -> Result<ImportResu
             }
         }
     }
-    Ok(ImportResult { contacts: n_contacts, flags: n_flags, rules: n_rules, settings: clean_settings(&raw) })
+    Ok(ImportResult { contacts: n_contacts, flags: n_flags, rules: n_rules, events: n_events, settings: clean_settings(&raw) })
 }
 
 #[cfg(test)]

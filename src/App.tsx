@@ -14,6 +14,7 @@ import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
+import { CalendarDialog } from "./Calendar";
 import { ActIcon } from "./ActIcon";
 import { loadSound, playSound, saveSound, type SoundId } from "./sound";
 import { applyCustomKeys, commandFor, customKeys, isTypingTarget, shortcutHelp } from "./shortcuts";
@@ -134,6 +135,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
+  const [calOpen, setCalOpen] = useState(false);
   const [scheduled, setScheduled] = useState<SchedItem[]>([]);
   const [snoozed, setSnoozed] = useState<SnoozeItem[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -571,7 +573,7 @@ export default function App() {
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
-      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen || importOpen || imapLoginOpen) return;
+      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || spamOpen || importOpen || imapLoginOpen) return;
       e.preventDefault();
       setSelected(new Set(threads.map((t) => t.id)));
       return;
@@ -579,7 +581,7 @@ export default function App() {
     const cmd = commandFor(e);
     if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
     if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
-    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || spamOpen || importOpen || imapLoginOpen) {
+    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || spamOpen || importOpen || imapLoginOpen) {
       if (cmd === "escape" && helpOpen) setHelpOpen(false);
       return;
     }
@@ -961,6 +963,23 @@ export default function App() {
     const t = window.setInterval(() => void tick(), 30_000);
     return () => window.clearInterval(t);
   }, [email, imapKey, refreshLater, showToast]);
+  // Przypomnienia z kalendarza lokalnego (działają bez względu na to, czy jakieś konto jest zalogowane).
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const due = await api.calDue(Date.now());
+        for (const e of due) {
+          const when = e.allDay ? "cały dzień" : new Date(e.startMs).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+          showToast(`Wydarzenie: ${e.title} (${when})`);
+          void api.showNotification("Wydarzenie: " + e.title, when).catch(() => undefined);
+        }
+        if (due.length > 0) playSound(soundRef.current);
+      } catch { /* baza może być niedostępna – spróbujemy za chwilę */ }
+    };
+    void check();
+    const t = window.setInterval(() => void check(), 30_000);
+    return () => window.clearInterval(t);
+  }, [showToast]);
   useEffect(() => {
     if (imapTick > 0 && view !== "gmail") void imap.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1555,7 +1574,7 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)}
+      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => setCalOpen(true)}
         onSettings={() => setSettingsOpen(true)} />
 
       {toast && (
@@ -1598,6 +1617,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {calOpen && <CalendarDialog onClose={() => setCalOpen(false)} />}
       {outboxOpen && (
         <OutboxDialog items={outbox} scheduled={scheduled} snoozed={snoozed}
           onCancelScheduled={async (id) => { try { await api.scheduleDelete(imapAccount, id); } catch (e) { showToast(errText(e)); } void refreshLater(); }}

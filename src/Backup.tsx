@@ -34,7 +34,7 @@ export function Backup() {
       for (const [k, v] of Object.entries(r.settings)) {
         try { localStorage.setItem(k, v); } catch { /* pomijamy */ }
       }
-      setNote(`Wczytano: adresy ${r.contacts}, flagi ${r.flags}, reguły ${r.rules}, ustawienia ${Object.keys(r.settings).length}. Za chwilę aplikacja się odświeży.`);
+      setNote(`Wczytano: adresy ${r.contacts}, flagi ${r.flags}, reguły ${r.rules}, wydarzenia ${r.events}, ustawienia ${Object.keys(r.settings).length}. Za chwilę aplikacja się odświeży.`);
       window.setTimeout(() => window.location.reload(), 1800);
     } catch (e) { setNote(errText(e)); } finally { setBusy(false); }
   };
