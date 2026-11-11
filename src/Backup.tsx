@@ -34,7 +34,7 @@ export function Backup() {
       for (const [k, v] of Object.entries(r.settings)) {
         try { localStorage.setItem(k, v); } catch { /* pomijamy */ }
       }
-      setNote(`Wczytano: adresy ${r.contacts}, flagi ${r.flags}, ustawienia ${Object.keys(r.settings).length}. Za chwilę aplikacja się odświeży.`);
+      setNote(`Wczytano: adresy ${r.contacts}, flagi ${r.flags}, reguły ${r.rules}, ustawienia ${Object.keys(r.settings).length}. Za chwilę aplikacja się odświeży.`);
       window.setTimeout(() => window.location.reload(), 1800);
     } catch (e) { setNote(errText(e)); } finally { setBusy(false); }
   };
@@ -42,7 +42,7 @@ export function Backup() {
   return (
     <div className="settings-list">
       <p className="hint">
-        Kopia zawiera dane, których nie ma na serwerze poczty: książkę adresów, flagi ważności i ustawienia wyglądu.
+        Kopia zawiera dane, których nie ma na serwerze poczty: książkę adresów, flagi ważności, reguły automatyczne i ustawienia wyglądu.
         Nie zawiera haseł, kluczy ani treści wiadomości. Wczytanie kopii tylko dopisuje dane, niczego nie usuwa.
       </p>
       <button disabled={busy} onClick={() => void exportAll()}>Zapisz kopię do pliku (folder Pobrane)</button>

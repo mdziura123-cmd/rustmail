@@ -387,12 +387,18 @@ fn date_ms(v: Option<String>) -> i64 {
 }
 
 #[tauri::command]
-pub async fn imap_list(account: String, folder: String, offset: u32) -> Result<Page, String> {
+pub async fn imap_list(store: State<'_, Store>, account: String, folder: String, offset: u32) -> Result<Page, String> {
     let creds = load(&account)?;
     let mut conn = open(&creds).await?;
     let res = list_inner(&mut conn, &folder, offset).await;
     conn.bye().await;
-    res
+    // Odłożone wiadomości są ukryte do swojej pory.
+    let mut page = res?;
+    let hidden = store.imap_snooze_hidden(&account.to_ascii_lowercase(), &folder);
+    if !hidden.is_empty() {
+        page.rows.retain(|r| !hidden.contains(&r.uid));
+    }
+    Ok(page)
 }
 
 async fn fetch_rows(conn: &mut Conn, prefix: &str) -> Result<Vec<Row>, String> {

@@ -643,6 +643,21 @@ pub fn get_signature(app: AppHandle) -> Result<String, String> {
     Ok(signature::read_from(&signature_path(&app)?))
 }
 
+fn signatures_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("signatures.json"))
+}
+
+/// Podpisy własne poszczególnych kont (konta bez wpisu używają podpisu domyślnego).
+#[tauri::command]
+pub fn get_signatures(app: AppHandle) -> Result<std::collections::BTreeMap<String, String>, String> {
+    Ok(signature::read_map(&signatures_path(&app)?))
+}
+
+#[tauri::command]
+pub fn set_signature_for(app: AppHandle, account: String, text: Option<String>) -> Result<(), String> {
+    signature::write_entry(&signatures_path(&app)?, &account, text.as_deref())
+}
+
 #[tauri::command]
 pub fn set_signature(app: AppHandle, text: String) -> Result<(), String> {
     signature::write_to(&signature_path(&app)?, &text)

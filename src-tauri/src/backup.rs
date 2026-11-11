@@ -34,6 +34,7 @@ pub fn clean_settings(input: &BTreeMap<String, String>) -> BTreeMap<String, Stri
 pub struct ImportResult {
     contacts: usize,
     flags: usize,
+    rules: usize,
     settings: BTreeMap<String, String>,
 }
 
@@ -54,12 +55,18 @@ pub fn backup_export(store: State<'_, Store>, settings: BTreeMap<String, String>
         .map(|(email, name)| json!({ "email": email, "name": name }))
         .collect();
     let flags: Vec<Value> = store.prio_list(MAX_ITEMS)?.into_iter().map(|(k, l)| json!([k, l])).collect();
+    let rules: Vec<Value> = store
+        .rules_list()?
+        .into_iter()
+        .map(|r| json!({ "field": r.field, "needle": r.needle, "action": r.action }))
+        .collect();
     let doc = json!({
         "format": FORMAT,
         "version": VERSION,
         "settings": clean_settings(&settings),
         "contacts": contacts,
         "flags": flags,
+        "rules": rules,
     });
     let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())?;
     let path = remote::save_download("rustmail-kopia.json", &bytes)?;
@@ -105,6 +112,25 @@ pub fn backup_import(store: State<'_, Store>, json: String) -> Result<ImportResu
         }
     }
 
+    // Reguły: dopisujemy tylko te, których jeszcze nie ma (bez duplikatów).
+    let mut n_rules = 0usize;
+    if let Some(list) = v.get("rules").and_then(Value::as_array) {
+        let mut existing = store.rules_list()?;
+        for item in list.iter().take(crate::rules::MAX_RULES) {
+            let (Some(f), Some(n), Some(a)) = (
+                item.get("field").and_then(Value::as_str),
+                item.get("needle").and_then(Value::as_str),
+                item.get("action").and_then(Value::as_str),
+            ) else { continue };
+            if let Ok(needle) = crate::rules::validate(f, n, a) {
+                if !existing.iter().any(|r| r.field == f && r.needle == needle && r.action == a) && store.rule_add(f, &needle, a).is_ok() {
+                    n_rules += 1;
+                    existing.push(crate::rules::Rule { id: 0, field: f.to_string(), needle, action: a.to_string() });
+                }
+            }
+        }
+    }
+
     let mut raw: BTreeMap<String, String> = BTreeMap::new();
     if let Some(obj) = v.get("settings").and_then(Value::as_object) {
         for (k, val) in obj {
@@ -113,7 +139,7 @@ pub fn backup_import(store: State<'_, Store>, json: String) -> Result<ImportResu
             }
         }
     }
-    Ok(ImportResult { contacts: n_contacts, flags: n_flags, settings: clean_settings(&raw) })
+    Ok(ImportResult { contacts: n_contacts, flags: n_flags, rules: n_rules, settings: clean_settings(&raw) })
 }
 
 #[cfg(test)]

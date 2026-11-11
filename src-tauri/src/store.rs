@@ -52,6 +52,14 @@ CREATE TABLE IF NOT EXISTS rules (
     needle TEXT NOT NULL,
     action TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS imap_snoozed (
+    account TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    uid INTEGER NOT NULL,
+    subject TEXT NOT NULL,
+    wake_ms INTEGER NOT NULL,
+    PRIMARY KEY (account, folder, uid)
+);
 CREATE TABLE IF NOT EXISTS snoozed (
     account TEXT NOT NULL,
     thread_id TEXT NOT NULL,
@@ -198,6 +206,15 @@ pub struct SnoozeItem {
 const MAX_SCHEDULED: i64 = 100;
 const MAX_SNOOZED: i64 = 500;
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImapSnoozeItem {
+    pub folder: String,
+    pub uid: u32,
+    pub subject: String,
+    pub wake_ms: i64,
+}
+
 pub struct QueuedMail {
     pub id: i64,
     pub raw: Vec<u8>,
@@ -253,6 +270,8 @@ impl Store {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
+        // Kopia pliku bazy przy pierwszym starcie nowej wersji (przed jej otwarciem); błąd nie blokuje startu.
+        let _ = crate::dbsafe::snapshot(dir, DB_FILE, env!("CARGO_PKG_VERSION"));
         let path = dir.join(DB_FILE);
         let conn = match Self::open_encrypted(&path, key) {
             Ok(c) => c,
@@ -703,6 +722,48 @@ impl Store {
             })?;
             rows.collect::<Result<Vec<_>, _>>()
         })
+    }
+
+    // ---------- odłożone wiadomości IMAP (lokalnie ukrywane do wskazanej pory) ----------
+
+    pub fn imap_snooze_add(&self, account: &str, folder: &str, uid: u32, subject: &str, wake_ms: i64) -> Result<(), String> {
+        self.with(|c| {
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM imap_snoozed", [], |r| r.get(0))?;
+            if n >= MAX_SNOOZED {
+                return Err(rusqlite::Error::InvalidParameterName("za dużo odłożonych".to_string()));
+            }
+            c.execute(
+                "INSERT INTO imap_snoozed (account, folder, uid, subject, wake_ms) VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(account, folder, uid) DO UPDATE SET wake_ms = excluded.wake_ms, subject = excluded.subject",
+                params![account, folder, uid as i64, subject, wake_ms],
+            )
+            .map(|_| ())
+        })
+        .map_err(|e| if e.contains("za dużo odłożonych") { "Odłożono już 500 wiadomości.".to_string() } else { e })
+    }
+
+    /// Numery wiadomości ukrytych w danym folderze (do odfiltrowania z listy).
+    pub fn imap_snooze_hidden(&self, account: &str, folder: &str) -> Vec<u32> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT uid FROM imap_snoozed WHERE account = ?1 AND folder = ?2")?;
+            let rows = st.query_map(params![account, folder], |r| r.get::<_, i64>(0))?;
+            rows.map(|r| r.map(|n| n as u32)).collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn imap_snooze_list(&self, account: &str, due_before: Option<i64>) -> Result<Vec<ImapSnoozeItem>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT folder, uid, subject, wake_ms FROM imap_snoozed WHERE account = ?1 AND wake_ms <= ?2 ORDER BY wake_ms")?;
+            let rows = st.query_map(params![account, due_before.unwrap_or(i64::MAX)], |r| {
+                Ok(ImapSnoozeItem { folder: r.get(0)?, uid: r.get::<_, i64>(1)? as u32, subject: r.get(2)?, wake_ms: r.get(3)? })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    pub fn imap_snooze_delete(&self, account: &str, folder: &str, uid: u32) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM imap_snoozed WHERE account = ?1 AND folder = ?2 AND uid = ?3", params![account, folder, uid as i64]).map(|_| ()))
     }
 
     pub fn snooze_delete(&self, account: &str, thread_id: &str) -> Result<(), String> {

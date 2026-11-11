@@ -7,6 +7,7 @@ mod blocklist;
 mod commands;
 mod dbkey;
 mod compose;
+mod dbsafe;
 mod dismissed;
 mod filetype;
 mod gmail;
@@ -176,6 +177,12 @@ pub fn run() {
             later::snooze_list,
             later::snooze_due,
             later::snooze_done,
+            later::imap_snooze_add,
+            later::imap_snooze_list,
+            later::imap_snooze_due,
+            later::imap_snooze_done,
+            commands::get_signatures,
+            commands::set_signature_for,
             rules::rules_list,
             rules::rules_add,
             rules::rules_delete,

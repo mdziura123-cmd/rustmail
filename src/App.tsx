@@ -114,6 +114,9 @@ export default function App() {
   const [autoUpdate, setAutoUpdate] = useState(() => load(LS.auto, "1") === "1");
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [signature, setSignature] = useState("");
+  const [signatures, setSignatures] = useState<Record<string, string>>({});
+  // Podpis konta: własny, a gdy go nie ma – domyślny. Klucz: „gmail” albo „imap:adres”.
+  const sigFor = (id: string) => signatures[id] ?? signature;
   const [sigOpen, setSigOpen] = useState(false);
   const [senderDlg, setSenderDlg] = useState<{ email: string | null } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -373,6 +376,7 @@ export default function App() {
   useEffect(() => {
     if (!email) return;
     api.getSignature().then(setSignature).catch(() => setSignature(""));
+    api.getSignatures().then(setSignatures).catch(() => setSignatures({}));
     // Stara, niezaszyfrowana kopia w localStorage jest usuwana; nowa leży w zaszyfrowanej bazie.
     try { localStorage.removeItem("rm.compose.backup"); } catch { /* ignorujemy */ }
     api.composeBackupGet().then((b) => { if (b) setRestore(b); }).catch(() => { /* ignorujemy */ });
@@ -393,20 +397,20 @@ export default function App() {
 
   const reply = (all: boolean) => {
     if (!detail || !email) return;
-    const init = buildReply(detail.messages, detail.subject, email, all, signature, detail.id);
+    const init = buildReply(detail.messages, detail.subject, email, all, sigFor("gmail"), detail.id);
     if (init) startCompose(init);
   };
   const composeFromImap = (account: string, kind: "reply" | "replyAll" | "forward", m: ImapMsg) => {
     if (compose) { showToast("Najpierw zapisz lub zamknij redagowaną wiadomość."); return; }
     const v = toView(m);
     const init = kind === "forward"
-      ? buildForward([v], m.subject, account, signature, fmtFull)
-      : buildReply([v], m.subject, account, kind === "replyAll", signature, "");
+      ? buildForward([v], m.subject, account, sigFor("imap:" + account), fmtFull)
+      : buildReply([v], m.subject, account, kind === "replyAll", sigFor("imap:" + account), "");
     if (init) startCompose(init, "imap:" + account);
   };
   const forward = () => {
     if (!detail || !email) return;
-    const init = buildForward(detail.messages, detail.subject, email, signature, fmtFull);
+    const init = buildForward(detail.messages, detail.subject, email, sigFor("gmail"), fmtFull);
     if (init) startCompose(init);
   };
 
@@ -555,7 +559,7 @@ export default function App() {
         case "escape": setImapSel(new Set()); break;
         case "help": e.preventDefault(); setHelpOpen((v) => !v); break;
         case "search": e.preventDefault(); (document.querySelector('input[type="search"]') as HTMLInputElement | null)?.focus(); break;
-        case "compose": e.preventDefault(); startCompose(buildNew(signature), "imap:" + imapAccount); break;
+        case "compose": e.preventDefault(); startCompose(buildNew(sigFor("imap:" + imapAccount)), "imap:" + imapAccount); break;
         case "trash": if (sel) bulk(imapRole === "trash" ? "inbox" : "trash"); break;
         case "spam": if (sel) bulk(imapRole === "spam" ? "inbox" : "spam"); break;
         case "archive": if (sel && imapRole === "inbox") bulk("archive"); break;
@@ -606,7 +610,7 @@ export default function App() {
       case "forward": forward(); break;
       case "prio0": case "prio1": case "prio2": case "prio3":
         if (detail) prio.set(gmailPrioKey(email, detail.id), Number(cmd.slice(4))).catch(() => showToast("Nie udało się zapisać flagi.")); break;
-      case "compose": startCompose(buildNew(signature)); break;
+      case "compose": startCompose(buildNew(sigFor("gmail"))); break;
       case "search": (document.querySelector('input[type="search"]') as HTMLInputElement | null)?.focus(); break;
       case "escape": setSelected(new Set()); break;
     }
@@ -858,7 +862,13 @@ export default function App() {
   const refreshLater = useCallback(async () => {
     const acc = imapAccountRef.current;
     try { setScheduled(await api.scheduleList(acc)); } catch { setScheduled([]); }
-    if (acc) { setSnoozed([]); return; }
+    if (acc) {
+      try {
+        const list = await api.imapSnoozeList(acc);
+        setSnoozed(list.map((s) => ({ threadId: `${s.folder}|${s.uid}`, subject: s.subject, wakeMs: s.wakeMs })));
+      } catch { setSnoozed([]); }
+      return;
+    }
     try { setSnoozed(await api.snoozeList()); } catch { setSnoozed([]); }
   }, []);
   const flushRef = useRef(flushQueue);
@@ -912,6 +922,23 @@ export default function App() {
         for (const k of keys) await flushRef.current(false, k);
         if (keys.length > 0) void refreshLater();
       } catch (e) { logEvent("Zaplanowane", "Zaplanowana wysyłka: " + errText(e)); }
+      for (const a of imapRef.current) {
+        try {
+          const dueI = await api.imapSnoozeDue(a.email);
+          let wokeI = 0;
+          for (const s of dueI) {
+            try {
+              await api.imapAct(a.email, s.folder, s.uid, "unread");
+              await api.imapSnoozeDone(a.email, s.folder, s.uid);
+              wokeI += 1;
+              const title = s.subject || "(bez tematu)";
+              showToast(`Wraca odłożona wiadomość: ${title}`);
+              if (settingsRef.current.notify) void api.showNotification("Odłożona wiadomość wróciła", title).catch(() => undefined);
+            } catch (e) { logEvent("Odłożone", "WP " + a.email + ": " + errText(e)); }
+          }
+          if (wokeI > 0) { playSound(soundRef.current); setImapTick((n) => n + 1); void refreshLater(); }
+        } catch (e) { logEvent("Odłożone", "Odłożone wiadomości WP: " + errText(e)); }
+      }
       if (!email) return;
       try {
         const due = await api.snoozeDue();
@@ -1009,7 +1036,39 @@ export default function App() {
     showToast(`Odłożono (${ok}) do ${fmtFull(wakeMs)}.`);
     void refreshLater();
   };
+  const snoozeImap = async (uids: number[], wakeMs: number) => {
+    if (!imapAccount) return;
+    const acc = imapAccount;
+    const folderName = imap.folder;
+    let ok = 0;
+    for (const uid of uids.slice(0, 50)) {
+      const subject = imap.rows.find((r) => r.uid === uid)?.subject ?? "";
+      try {
+        await api.imapAct(acc, folderName, uid, "read");
+        await api.imapSnoozeAdd(acc, folderName, uid, subject, wakeMs);
+        imap.remove(uid);
+        ok += 1;
+      } catch (e) { showToast(errText(e)); }
+    }
+    if (ok === 0) return;
+    if (imapUid !== null && uids.includes(imapUid)) setImapUid(null);
+    setImapSel(new Set());
+    showToast(`Odłożono (${ok}) do ${fmtFull(wakeMs)}.`);
+    void refreshLater();
+  };
   const wakeSnoozed = async (threadId: string) => {
+    if (imapAccount) {
+      const i = threadId.lastIndexOf("|");
+      const folderName = threadId.slice(0, i);
+      const uid = Number(threadId.slice(i + 1));
+      try {
+        await api.imapAct(imapAccount, folderName, uid, "unread");
+        await api.imapSnoozeDone(imapAccount, folderName, uid);
+        void refreshLater();
+        imap.refresh();
+      } catch (e) { showToast(errText(e)); }
+      return;
+    }
     try {
       await api.threadAction(threadId, "unarchive");
       await api.threadAction(threadId, "unread");
@@ -1095,7 +1154,10 @@ export default function App() {
     for (const p of PRIOS) items.push({ label: "Flaga: " + p.label.toLowerCase() + n, swatch: p.color, checked: level === p.level, onClick: () => uids.forEach((u) => prio.set(key(u), p.level).catch(() => showToast("Nie udało się zapisać flagi."))) });
     if (many || level > 0) items.push({ label: "Usuń flagę" + n, icon: "flag", onClick: () => uids.forEach((u) => prio.set(key(u), 0).catch(() => showToast("Nie udało się zapisać flagi."))) });
     items.push("sep");
-    if (imapRole === "inbox") items.push({ label: "Archiwizuj" + n, icon: "archive", onClick: () => void imapBulk("archive", uids) });
+    if (imapRole === "inbox") {
+      items.push({ label: "Archiwizuj" + n, icon: "archive", onClick: () => void imapBulk("archive", uids) });
+      for (const sp of snoozePresets()) items.push({ label: "Odłóż: " + sp.label + n, icon: "clock", onClick: () => void snoozeImap(uids, sp.ms) });
+    }
     if (!["inbox", "trash", "spam"].includes(imapRole)) items.push({ label: "Przenieś do skrzynki odbiorczej" + n, icon: "inbox", onClick: () => void imapBulk("inbox", uids) });
     items.push(imapRole === "spam"
       ? { label: "To nie jest spam" + n, icon: "notspam", onClick: () => void imapBulk("inbox", uids) }
@@ -1228,7 +1290,7 @@ export default function App() {
           </div>
           <button className="primary" disabled={!email || needsReauth}
             title={needsReauth ? "Zaloguj się ponownie, aby wysyłać wiadomości" : undefined}
-            onClick={() => startCompose(buildNew(signature))}>Nowa wiadomość</button>
+            onClick={() => startCompose(buildNew(sigFor("gmail")))}>Nowa wiadomość</button>
           <nav>
             {imapAccount ? <ImapSidebarNav imap={imap} /> : FOLDERS.map((f) => (
               <button key={f.id} className={"folder" + (f.id === folder ? " active" : "")}
@@ -1559,8 +1621,15 @@ export default function App() {
       )}
       {cacheOpen && <CacheDialog onClose={() => setCacheOpen(false)} onChanged={() => void syncOnce()} />}
       {sigOpen && (
-        <SignatureDialog initial={signature} onClose={() => setSigOpen(false)}
-          onSaved={(t) => { setSignature(t); setSigOpen(false); showToast("Podpis zapisany."); }} />
+        <SignatureDialog initial={signature} values={signatures}
+          accounts={[...(email ? [{ id: "gmail", label: email }] : []), ...imapAccs.map((a) => ({ id: "imap:" + a.email, label: a.email }))]}
+          onClose={() => setSigOpen(false)}
+          onSaved={(id, t) => {
+            if (id === null) setSignature(t ?? "");
+            else setSignatures((prev) => { const n = { ...prev }; if (t === null) delete n[id]; else n[id] = t; return n; });
+            setSigOpen(false);
+            showToast("Podpis zapisany.");
+          }} />
       )}
     </div>
   );

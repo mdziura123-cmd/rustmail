@@ -142,7 +142,7 @@ export const api = {
   backgroundState: () => invoke<boolean>("background_state"),
   backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),
   backupImport: (json: string) =>
-    invoke<{ contacts: number; flags: number; settings: Record<string, string> }>("backup_import", { json }),
+    invoke<{ contacts: number; flags: number; rules: number; settings: Record<string, string> }>("backup_import", { json }),
   scheduleMessage: (msg: OutgoingMessage, sendAtMs: number) => invoke<number>("schedule_message", { msg, sendAtMs }),
   imapScheduleMessage: (account: string, msg: OutgoingMessage, sendAtMs: number) =>
     invoke<number>("imap_schedule_message", { account, msg, sendAtMs }),
@@ -188,6 +188,13 @@ export const api = {
   translateText: (text: string, provider: string) => invoke<{ translated: string; truncated: boolean }>("translate_text", { text, provider }),
   getSignature: () => invoke<string>("get_signature"),
   setSignature: (text: string) => invoke<void>("set_signature", { text }),
+  getSignatures: () => invoke<Record<string, string>>("get_signatures"),
+  setSignatureFor: (account: string, text: string | null) => invoke<void>("set_signature_for", { account, text }),
+  imapSnoozeAdd: (account: string, folder: string, uid: number, subject: string, wakeMs: number) =>
+    invoke<void>("imap_snooze_add", { account, folder, uid, subject, wakeMs }),
+  imapSnoozeList: (account: string) => invoke<{ folder: string; uid: number; subject: string; wakeMs: number }[]>("imap_snooze_list", { account }),
+  imapSnoozeDue: (account: string) => invoke<{ folder: string; uid: number; subject: string; wakeMs: number }[]>("imap_snooze_due", { account }),
+  imapSnoozeDone: (account: string, folder: string, uid: number) => invoke<void>("imap_snooze_done", { account, folder, uid }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   installUpdate: () => invoke<string>("install_update"),
   rollbackUpdate: () => invoke<void>("rollback_update"),

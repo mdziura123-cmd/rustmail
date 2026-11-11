@@ -3,7 +3,7 @@
 
 use tauri::State;
 
-use crate::{auth, commands::OutgoingDto, secrets, store::{SchedItem, SnoozeItem, Store}};
+use crate::{auth, commands::OutgoingDto, secrets, store::{ImapSnoozeItem, SchedItem, SnoozeItem, Store}};
 
 const MAX_AHEAD_MS: i64 = 366 * 24 * 3600 * 1000;
 
@@ -89,6 +89,36 @@ pub fn snooze_due(store: State<'_, Store>) -> Result<Vec<SnoozeItem>, String> {
 #[tauri::command]
 pub fn snooze_done(store: State<'_, Store>, thread_id: String) -> Result<(), String> {
     store.snooze_delete(&key_for(None)?, &thread_id)
+}
+
+fn imap_key(account: &str) -> String {
+    account.to_ascii_lowercase()
+}
+
+/// Odkłada wiadomość IMAP: zostaje na serwerze, ale aplikacja ukrywa ją na liście do wskazanej pory.
+#[tauri::command]
+pub fn imap_snooze_add(store: State<'_, Store>, account: String, folder: String, uid: u32, subject: String, wake_ms: i64) -> Result<(), String> {
+    check_time(wake_ms, now_ms())?;
+    if folder.is_empty() || folder.len() > 200 || folder.chars().any(|c| c.is_control()) {
+        return Err("Niepoprawny folder.".to_string());
+    }
+    let subject: String = crate::compose::clean_header_value(&subject).chars().take(200).collect();
+    store.imap_snooze_add(&imap_key(&account), &folder, uid, &subject, wake_ms)
+}
+
+#[tauri::command]
+pub fn imap_snooze_list(store: State<'_, Store>, account: String) -> Result<Vec<ImapSnoozeItem>, String> {
+    store.imap_snooze_list(&imap_key(&account), None)
+}
+
+#[tauri::command]
+pub fn imap_snooze_due(store: State<'_, Store>, account: String) -> Result<Vec<ImapSnoozeItem>, String> {
+    store.imap_snooze_list(&imap_key(&account), Some(now_ms()))
+}
+
+#[tauri::command]
+pub fn imap_snooze_done(store: State<'_, Store>, account: String, folder: String, uid: u32) -> Result<(), String> {
+    store.imap_snooze_delete(&imap_key(&account), &folder, uid)
 }
 
 #[cfg(test)]
