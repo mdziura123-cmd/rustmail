@@ -39,6 +39,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: Zainstaluj cargo-audit
         run: cargo install cargo-audit --locked
+      # RUSTSEC-2026-0459 (SQLite < 3.54, odczyt niezainicjowanej pamięci przez spreparowany plik bazy z WAL): aplikacja
+      # otwiera wyłącznie własną bazę, nigdy pliku od użytkownika ani z sieci, więc ryzyko jest znikome. Naprawa wymaga skoku
+      # rusqlite 0.32 → 0.39 (zmiany niezgodne wstecz); do zrobienia osobno i z testami. Usuń wyjątek po aktualizacji.
       - name: cargo audit
         working-directory: src-tauri
-        run: cargo audit
+        run: cargo audit --ignore RUSTSEC-2026-0459
