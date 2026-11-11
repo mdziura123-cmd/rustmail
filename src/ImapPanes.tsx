@@ -7,6 +7,7 @@ import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./ty
 import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
 import { ActIcon } from "./ActIcon";
+import { useContextMenu, type MenuEntry } from "./ContextMenu";
 import { FOLDERS } from "./folders";
 import { imapPrioKey, sortSearchResults } from "./prioSort";
 import { prio, usePrioLevels } from "./prio";
@@ -194,10 +195,13 @@ export function ImapSidebarNav({ imap }: { imap: ImapView }) {
   );
 }
 
-export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSelectAll, onClear, onBulk }: {
+export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSelectAll, onClear, onBulk, rowMenu }: {
   imap: ImapView; role: string; openUid: number | null; selected: Set<number>;
   onRowClick: (e: React.MouseEvent, r: ImapRow) => void; onSelectAll: () => void; onClear: () => void; onBulk: (action: string) => void;
+  /** Pozycje menu prawego przycisku dla wiadomości. */
+  rowMenu: (r: ImapRow) => MenuEntry[];
 }) {
+  const cm = useContextMenu();
   const label = imap.unreadView ? "Nieprzeczytane" : imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
   const levels = usePrioLevels();
   return (
@@ -225,7 +229,7 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
         {imap.rows.map((r) => (
           <li key={r.uid} className={selected.has(r.uid) ? "picked" : ""}>
             <button className={"row" + (r.uid === openUid ? " active" : "") + (r.unread ? " unread" : "")}
-              aria-pressed={selected.has(r.uid)} onClick={(e) => onRowClick(e, r)}>
+              aria-pressed={selected.has(r.uid)} onClick={(e) => onRowClick(e, r)} {...cm.bind(() => rowMenu(r))}>
               <span className="who">{r.from}</span>
               <span className="when"><PrioFlag level={levels[imapPrioKey(imap.account ?? "", imap.folder, r.uid)] ?? 0} />{r.starred ? "★ " : ""}{fmtDate(r.dateMs)}</span>
               <span className="subj">{r.subject || "(bez tematu)"}</span>
@@ -234,6 +238,7 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
         ))}
       </ul>
       {imap.next !== null && <button className="more" disabled={imap.loading} onClick={imap.more}>{imap.loading ? "Wczytywanie…" : "Wczytaj więcej"}</button>}
+      {cm.menu}
     </section>
   );
 }
@@ -251,14 +256,21 @@ interface ReaderProps {
   onMoved?: (info: { action: string; folder: string; uid: number; out: ImapActOut }) => void;
   /** Otwarcie wersji roboczej do dalszej edycji. */
   onEditDraft?: (msg: ImapMsg) => void;
+  /** Polecenie z menu prawego przycisku do wykonania, gdy wiadomość się wczyta (odpowiedz, przekaż dalej). */
+  pending?: { uid: number; cmd: "reply" | "replyAll" | "forward" } | null;
+  onPendingDone?: () => void;
   /** Wywoływane po zmianie wiadomości (przeczytana, gwiazdka, usunięta…). */
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onMoved, onEditDraft, keys = true }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onMoved, onEditDraft, pending, onPendingDone, keys = true }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (pending && msg && msg.uid === pending.uid) { onCompose(pending.cmd, msg); onPendingDone?.(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, msg]);
   const changed = useRef(onChanged);
   changed.current = onChanged;
   const onMovedRef = useRef(onMoved);

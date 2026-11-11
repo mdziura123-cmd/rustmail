@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { prio, usePrioLevels } from "./prio";
-import { gmailPrioKey, sortSearchResults } from "./prioSort";
+import { gmailPrioKey, imapPrioKey, PRIOS, sortSearchResults } from "./prioSort";
 import { flagsFirst, useFlagsFirst } from "./listPrefs";
 import { TitleSearch } from "./TitleSearch";
+import { useContextMenu, type MenuEntry } from "./ContextMenu";
+import { textMenuFor } from "./textMenu";
 import { buildQuery, EMPTY_FILTERS, filtersError, flagMatches, type FlagFilter, type Filters } from "./searchQuery";
 import { FlagsFirstToggle, PrioFlag, PrioMenu } from "./PrioUi";
 import { api, errText } from "./api";
@@ -435,8 +437,8 @@ export default function App() {
     if (selected.size > 0) setSelected(new Set());
     void openThread(t);
   };
-  const bulkRun = async (action: ThreadAction) => {
-    const ids = [...selected].slice(0, 50);
+  const bulkRun = async (action: ThreadAction, only?: string[]) => {
+    const ids = (only ?? [...selected]).slice(0, 50);
     if (ids.length === 0) return;
     const done: string[] = [];
     let failed = 0;
@@ -453,7 +455,8 @@ export default function App() {
       if (openId && gone.has(openId)) { setOpenId(null); setDetail(null); }
     } else {
       const unread = action === "unread" ? true : action === "read" ? false : undefined;
-      setThreads((prev) => prev.map((t) => (gone.has(t.id) && unread !== undefined ? { ...t, unread } : t)));
+      const starred = action === "star" ? true : action === "unstar" ? false : undefined;
+      setThreads((prev) => prev.map((t) => (gone.has(t.id) ? { ...t, unread: unread ?? t.unread, starred: starred ?? t.starred } : t)));
       setDetail((d) => (d && gone.has(d.id) && unread !== undefined ? { ...d, unread } : d));
     }
     setSelected(new Set());
@@ -861,6 +864,117 @@ export default function App() {
 
   // ---------- Konto IMAP: zaznaczanie wielu wiadomości i akcje hurtowe ----------
   const imapRole = imap.folders.find((f) => f.name === imap.folder)?.role ?? "other";
+  // ---------- Menu prawego przycisku ----------
+  const gm = useContextMenu();
+  const tm = useContextMenu();
+  const ctxPending = useRef<{ id: string; cmd: "reply" | "replyAll" | "forward" } | null>(null);
+  const [imapPending, setImapPending] = useState<{ uid: number; cmd: "reply" | "replyAll" | "forward" } | null>(null);
+  useEffect(() => {
+    const p = ctxPending.current;
+    if (p && detail && detail.id === p.id) {
+      ctxPending.current = null;
+      if (p.cmd === "forward") forward(); else reply(p.cmd === "replyAll");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail]);
+
+  const gmailRowMenu = (t: ThreadSummary): MenuEntry[] => {
+    const many = selected.has(t.id) && selected.size > 1;
+    const ids = many ? [...selected] : [t.id];
+    const n = many ? ` (${ids.length})` : "";
+    const off = needsReauth;
+    const key = (id: string) => gmailPrioKey(email ?? "", id);
+    const level = many ? 0 : prio.get(key(t.id));
+    const items: MenuEntry[] = [];
+    if (!many) {
+      const go = (cmd: "reply" | "replyAll" | "forward") => () => {
+        ctxPending.current = { id: t.id, cmd };
+        if (detail?.id === t.id) { setDetail({ ...detail }); } else void openThread(t);
+      };
+      items.push(
+        { label: "Odpowiedz", icon: "reply", disabled: off, onClick: go("reply") },
+        { label: "Odpowiedz wszystkim", icon: "replyAll", disabled: off, onClick: go("replyAll") },
+        { label: "Przekaż dalej", icon: "forward", disabled: off, onClick: go("forward") },
+        "sep",
+      );
+    }
+    items.push(
+      t.unread
+        ? { label: "Oznacz jako przeczytaną" + n, icon: "read", disabled: off, onClick: () => void bulkRun("read", ids) }
+        : { label: "Oznacz jako nieprzeczytaną" + n, icon: "unread", disabled: off, onClick: () => void bulkRun("unread", ids) },
+      t.starred
+        ? { label: "Usuń gwiazdkę" + n, icon: "star", disabled: off, onClick: () => void bulkRun("unstar", ids) }
+        : { label: "Dodaj gwiazdkę" + n, icon: "star", disabled: off, onClick: () => void bulkRun("star", ids) },
+      "sep",
+    );
+    for (const p of PRIOS) items.push({ label: "Flaga: " + p.label.toLowerCase() + n, swatch: p.color, checked: level === p.level, onClick: () => ids.forEach((id) => prio.set(key(id), p.level).catch(() => showToast("Nie udało się zapisać flagi."))) });
+    if (many || level > 0) items.push({ label: "Usuń flagę" + n, icon: "flag", onClick: () => ids.forEach((id) => prio.set(key(id), 0).catch(() => showToast("Nie udało się zapisać flagi."))) });
+    items.push("sep");
+    if (folder === "inbox" || folder === "unread") items.push({ label: "Archiwizuj" + n, icon: "archive", disabled: off, onClick: () => void bulkRun("archive", ids) });
+    if (folder === "archive") items.push({ label: "Przenieś do skrzynki odbiorczej" + n, icon: "inbox", disabled: off, onClick: () => void bulkRun("unarchive", ids) });
+    items.push(folder === "spam"
+      ? { label: "To nie jest spam" + n, icon: "notspam", disabled: off, onClick: () => void bulkRun("notspam", ids) }
+      : { label: "Oznacz jako spam" + n, icon: "spam", disabled: off, onClick: () => void bulkRun("spam", ids) });
+    items.push(folder === "trash"
+      ? { label: "Przywróć z kosza" + n, icon: "restore", disabled: off, onClick: () => void bulkRun("untrash", ids) }
+      : { label: "Usuń" + n, icon: "trash", danger: true, disabled: off, onClick: () => void bulkRun("trash", ids) });
+    return items;
+  };
+
+  const imapRowMenu = (r: ImapRow): MenuEntry[] => {
+    const acc = imapAccount;
+    if (!acc) return [];
+    const many = imapSel.has(r.uid) && imapSel.size > 1;
+    const uids = many ? [...imapSel] : [r.uid];
+    const n = many ? ` (${uids.length})` : "";
+    const key = (uid: number) => imapPrioKey(acc, imap.folder, uid);
+    const level = many ? 0 : prio.get(key(r.uid));
+    const items: MenuEntry[] = [];
+    if (!many) {
+      const go = (cmd: "reply" | "replyAll" | "forward") => () => { setImapPending({ uid: r.uid, cmd }); setImapUid(r.uid); };
+      items.push(
+        { label: "Odpowiedz", icon: "reply", onClick: go("reply") },
+        { label: "Odpowiedz wszystkim", icon: "replyAll", onClick: go("replyAll") },
+        { label: "Przekaż dalej", icon: "forward", onClick: go("forward") },
+        "sep",
+      );
+    }
+    items.push(
+      r.unread
+        ? { label: "Oznacz jako przeczytaną" + n, icon: "read", onClick: () => void imapBulk("read", uids) }
+        : { label: "Oznacz jako nieprzeczytaną" + n, icon: "unread", onClick: () => void imapBulk("unread", uids) },
+      r.starred
+        ? { label: "Usuń gwiazdkę" + n, icon: "star", onClick: () => void imapBulk("unstar", uids) }
+        : { label: "Dodaj gwiazdkę" + n, icon: "star", onClick: () => void imapBulk("star", uids) },
+      "sep",
+    );
+    for (const p of PRIOS) items.push({ label: "Flaga: " + p.label.toLowerCase() + n, swatch: p.color, checked: level === p.level, onClick: () => uids.forEach((u) => prio.set(key(u), p.level).catch(() => showToast("Nie udało się zapisać flagi."))) });
+    if (many || level > 0) items.push({ label: "Usuń flagę" + n, icon: "flag", onClick: () => uids.forEach((u) => prio.set(key(u), 0).catch(() => showToast("Nie udało się zapisać flagi."))) });
+    items.push("sep");
+    if (imapRole === "inbox") items.push({ label: "Archiwizuj" + n, icon: "archive", onClick: () => void imapBulk("archive", uids) });
+    if (!["inbox", "trash", "spam"].includes(imapRole)) items.push({ label: "Przenieś do skrzynki odbiorczej" + n, icon: "inbox", onClick: () => void imapBulk("inbox", uids) });
+    items.push(imapRole === "spam"
+      ? { label: "To nie jest spam" + n, icon: "notspam", onClick: () => void imapBulk("inbox", uids) }
+      : { label: "Oznacz jako spam" + n, icon: "spam", onClick: () => void imapBulk("spam", uids) });
+    items.push(imapRole === "trash"
+      ? { label: "Przywróć z kosza" + n, icon: "restore", onClick: () => void imapBulk("inbox", uids) }
+      : { label: "Usuń" + n, icon: "trash", danger: true, onClick: () => void imapBulk("trash", uids) });
+    return items;
+  };
+
+  // Polskie menu dla pól tekstowych, zaznaczonego tekstu i linków; domyślnego (angielskiego) menu przeglądarki nie pokazujemy.
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      const items = textMenuFor(e.target, (t) => showToast(t));
+      if (items.length > 0) tm.show(e.clientX, e.clientY, items);
+    };
+    window.addEventListener("contextmenu", h);
+    return () => window.removeEventListener("contextmenu", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showToast]);
+
   const imapRowClick = (e: React.MouseEvent, r: ImapRow) => {
     const toggle = (uid: number) => setImapSel((prev) => { const n = new Set(prev); if (n.has(uid)) n.delete(uid); else n.add(uid); return n; });
     if (e.ctrlKey || e.metaKey) { toggle(r.uid); imapAnchor.current = r.uid; return; }
@@ -904,11 +1018,11 @@ export default function App() {
       note: m.attachments.length > 0 ? "Załączniki z tej wersji roboczej trzeba dodać ponownie." : undefined,
     }, "imap:" + account);
   };
-  const imapBulk = async (action: string) => {
+  const imapBulk = async (action: string, only?: number[]) => {
     if (!imapAccount) return;
     const account = imapAccount;
     const folderName = imap.folder;
-    const uids = [...imapSel].slice(0, 50);
+    const uids = (only ?? [...imapSel]).slice(0, 50);
     if (uids.length === 0) return;
     const done: { uid: number; out: ImapActOut }[] = [];
     let failed = 0;
@@ -922,7 +1036,10 @@ export default function App() {
       for (const d of done) imap.remove(d.uid);
       if (imapUid !== null && done.some((d) => d.uid === imapUid)) setImapUid(null);
     } else {
-      for (const d of done) imap.patch(d.uid, { unread: action === "unread" });
+      for (const d of done) {
+        if (action === "star" || action === "unstar") imap.patch(d.uid, { starred: action === "star" });
+        else imap.patch(d.uid, { unread: action === "unread" });
+      }
     }
     setImapSel(new Set());
     const text = `Gotowe (${done.length}).` + (failed ? ` Błędy: ${failed} – ${lastError}` : "");
@@ -937,6 +1054,8 @@ export default function App() {
 
   return (
     <div className="app">
+      {gm.menu}
+      {tm.menu}
       <Titlebar center={email ? (
         <TitleSearch query={query} onQuery={setQuery} filters={filters} onFilters={setFilters} error={filtErr}
           open={optsOpen} onOpen={setOptsOpen} onSubmit={doSearch}
@@ -1008,9 +1127,9 @@ export default function App() {
           <>
             <ImapListPane imap={imap} role={imapRole} openUid={imapUid} selected={imapSel} onRowClick={imapRowClick}
               onSelectAll={() => setImapSel(new Set(imap.rows.map((r) => r.uid)))} onClear={() => setImapSel(new Set())}
-              onBulk={(a) => void imapBulk(a)} />
+              onBulk={(a) => void imapBulk(a)} rowMenu={imapRowMenu} />
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
-            {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0}
+            {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0} pending={imapPending} onPendingDone={() => setImapPending(null)}
               onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
               onEditDraft={(m) => editImapDraft(imapAccount, m)}
               onMoved={(i) => imapMoved(imapAccount, i.folder, [{ uid: i.uid, out: i.out }], MOVE_TEXT[i.action] ?? "Gotowe.")}
@@ -1077,7 +1196,7 @@ export default function App() {
                     <button data-thread={t.id}
                       className={"row" + (t.id === openId ? " active" : "") + (t.unread ? " unread" : "")}
                       aria-pressed={selected.has(t.id)}
-                      onClick={(e) => onRowClick(e, t)}>
+                      onClick={(e) => onRowClick(e, t)} {...gm.bind(() => gmailRowMenu(t))}>
                       <span className="who">{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
                       <span className="when">
                         {email && <PrioFlag level={prioLevels[gmailPrioKey(email, t.id)] ?? 0} />} {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
