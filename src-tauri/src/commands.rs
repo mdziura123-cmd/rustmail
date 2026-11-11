@@ -599,21 +599,145 @@ pub async fn download_attachment(
     save_scanned(&app, &name, &bytes).await
 }
 
+/// Skanuje bajty ClamAV przez krótko żyjący plik tymczasowy (usuwany zaraz po skanie).
+async fn scan_bytes(app: &AppHandle, bytes: &[u8]) -> Result<scan::ScanStatus, String> {
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    crate::privfs::ensure_private_dir(&cache).map_err(|e| format!("Nie można utworzyć katalogu tymczasowego: {e}"))?;
+    let nonce: String = auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let tmp = cache.join(format!("scan-{nonce}.bin"));
+    scan::write_private(&tmp, bytes).map_err(|e| format!("Nie można utworzyć pliku do skanowania: {e}"))?;
+    let tmp2 = tmp.clone();
+    let status = tokio::task::spawn_blocking(move || scan::scan_file(&tmp2)).await.map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&tmp);
+    status
+}
+
+/// Podgląd obrazu: tylko PNG/JPEG/GIF (typ z zawartości), do 8 MB, po skanie ClamAV.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preview {
+    pub data_url: String,
+}
+
+const PREVIEW_MAX: usize = 8 * 1024 * 1024;
+
+pub(crate) async fn preview_bytes(app: &AppHandle, bytes: &[u8]) -> Result<Preview, String> {
+    if bytes.len() > PREVIEW_MAX {
+        return Err("Obraz jest za duży na podgląd (powyżej 8 MB) – pobierz go.".to_string());
+    }
+    let mime = match filetype::sniff(bytes) {
+        filetype::Kind::Png => "image/png",
+        filetype::Kind::Jpeg => "image/jpeg",
+        filetype::Kind::Gif => "image/gif",
+        _ => return Err("Podgląd jest dostępny tylko dla obrazów PNG, JPEG i GIF.".to_string()),
+    };
+    match scan_bytes(app, bytes).await? {
+        scan::ScanStatus::Infected(sig) => return Err(format!("Skaner wykrył zagrożenie ({sig}) – podgląd zablokowany.")),
+        _ => {}
+    }
+    Ok(Preview { data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)) })
+}
+
+#[tauri::command]
+pub async fn preview_attachment(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    message_id: String,
+    attachment_id: String,
+) -> Result<Preview, String> {
+    let bytes = gmail::download_attachment(&state, &message_id, &attachment_id).await?;
+    preview_bytes(&app, &bytes).await
+}
+
+/// Wynik zastosowania reguł do wiadomości, które już są w skrzynce.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyReport {
+    /// Ile wiadomości sprawdzono.
+    pub checked: usize,
+    /// Ile z nich pasuje do jakiejś reguły (i wymaga zmiany).
+    pub affected: usize,
+    /// Ile zmian faktycznie wykonano (0 przy podglądzie).
+    pub done: usize,
+    /// Ile zmian się nie udało.
+    pub failed: usize,
+}
+
+const APPLY_GMAIL_PAGES: usize = 10;
+
+/// Stosuje reguły do skrzynki odbiorczej: Gmail (do ok. 200 najnowszych wątków) i pierwsza strona
+/// każdego konta IMAP. Przy `dry_run` tylko liczy, nic nie zmienia.
+#[tauri::command]
+pub async fn rules_apply(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    store: State<'_, Store>,
+    dry_run: bool,
+) -> Result<ApplyReport, String> {
+    let rules = store.rules_list().unwrap_or_default();
+    let mut rep = ApplyReport::default();
+    if rules.is_empty() {
+        return Ok(rep);
+    }
+    if let Some(email) = secrets::get(auth::KEY_EMAIL)? {
+        let safe = dismissed::load(&dismissed_path(&app)?);
+        let block = load_rules(&app)?;
+        let mut token: Option<String> = None;
+        let mut threads: Vec<gmail::ThreadSummary> = Vec::new();
+        for _ in 0..APPLY_GMAIL_PAGES {
+            let page = match gmail::list_threads(&state, "inbox", token.clone(), &email, &gmail::Filters { dismissed: &safe, rules: &block }).await {
+                Ok(p) => p,
+                Err(_) => break,
+            };
+            if page.offline {
+                break;
+            }
+            threads.extend(page.threads);
+            token = page.next_page_token;
+            if token.is_none() {
+                break;
+            }
+        }
+        rep.checked += threads.len();
+        for t in &threads {
+            let from = format!("{} {}", t.participants, t.senders);
+            let acts: Vec<&str> = crate::rules::actions_for(&rules, &from, &t.subject)
+                .into_iter()
+                .filter(|a| *a != "read" || t.unread)
+                .collect();
+            if acts.is_empty() {
+                continue;
+            }
+            rep.affected += 1;
+            if dry_run {
+                continue;
+            }
+            let mut ok = true;
+            for a in acts {
+                if let Some(level) = crate::rules::flag_level(a) {
+                    ok &= store.prio_set(&format!("g:{email}:{}", t.id), level).is_ok();
+                } else {
+                    ok &= gmail::thread_action(&state, &t.id, a).await.is_ok();
+                }
+            }
+            if ok { rep.done += 1 } else { rep.failed += 1 }
+        }
+    }
+    let imap = crate::imap_io::apply_rules_all(&app, &store, &rules, dry_run).await;
+    rep.checked += imap.checked;
+    rep.affected += imap.affected;
+    rep.done += imap.done;
+    rep.failed += imap.failed;
+    Ok(rep)
+}
+
 /// Wspólna część pobierania: typ po zawartości, skan ClamAV, zapis w Pobranych.
 pub(crate) async fn save_scanned(app: &AppHandle, name: &str, bytes: &[u8]) -> Result<SavedFile, String> {
     let (name, bytes) = (name.to_string(), bytes.to_vec());
     let risky = safety::risky_extension(&name);
     let type_warning = filetype::mismatch(&name, &bytes);
 
-    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    crate::privfs::ensure_private_dir(&cache).map_err(|e| format!("Nie można utworzyć katalogu tymczasowego: {e}"))?;
-    let nonce: String = auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    let tmp = cache.join(format!("scan-{nonce}.bin"));
-    scan::write_private(&tmp, &bytes).map_err(|e| format!("Nie można utworzyć pliku do skanowania: {e}"))?;
-    let tmp2 = tmp.clone();
-    let status = tokio::task::spawn_blocking(move || scan::scan_file(&tmp2)).await.map_err(|e| e.to_string());
-    let _ = std::fs::remove_file(&tmp);
-    let status = status?;
+    let status = scan_bytes(app, &bytes).await?;
 
     let (scan_label, detail) = match &status {
         scan::ScanStatus::Clean => ("clean", String::new()),

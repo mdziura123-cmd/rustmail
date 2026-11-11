@@ -372,6 +372,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
                 m={{ ...toView(msg), attachments: msg.attachments }}
                 strict={false}
                 dl={(a) => api.imapDownload(account, folder, msg.uid, Number(a.id), a.name)}
+                pv={(a) => api.imapPreview(account, folder, msg.uid, Number(a.id))}
               />
             </article>
           </div>

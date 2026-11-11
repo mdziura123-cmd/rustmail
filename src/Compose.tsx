@@ -8,6 +8,8 @@ import type { ComposeInit } from "./replyLogic";
 import { sanitizeHtml } from "./sanitize";
 import type { OutAttachment, OutgoingMessage } from "./types";
 import { getUndo } from "./display";
+import { useContextMenu } from "./ContextMenu";
+import { loadTemplates } from "./templates";
 import { fmtSize } from "./util";
 
 const MAX_ATTACH_BYTES = 20 * 1024 * 1024;
@@ -88,6 +90,7 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
   const draftRef = useRef<string | null>(init.draftId);
   const fileRef = useRef<HTMLInputElement>(null);
   const editorApi = useRef<EditorApi | null>(null);
+  const tplMenu = useContextMenu();
   const [spellTick, setSpellTick] = useState(0);
 
   const build = useCallback((): OutgoingMessage => ({
@@ -386,6 +389,13 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
       <footer className="compose-foot">
         <button className="primary" disabled={sending} title={sending ? "Wysyłanie…" : "Wyślij"} aria-label={sending ? "Wysyłanie…" : "Wyślij"} aria-busy={sending} onClick={send}><ActIcon n="send" /></button>
         <button disabled={sending} title="Zaplanuj wysyłkę" aria-label="Zaplanuj wysyłkę" aria-expanded={schedOpen} onClick={() => { setSchedOpen((o) => !o); if (!schedAt) setSchedAt(toLocalInput(addHours(new Date(), 1))); }}><ActIcon n="clock" /></button>
+        <button disabled={sending} title="Wstaw szablon odpowiedzi" aria-label="Wstaw szablon odpowiedzi" onMouseDown={(e) => e.preventDefault()} onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          const list = loadTemplates();
+          tplMenu.show(r.left, r.top - 8 - Math.min(list.length, 8) * 34, list.length === 0
+            ? [{ label: "Brak szablonów (Ustawienia → Poczta)", disabled: true, onClick: () => undefined }]
+            : list.map((t) => ({ label: t.name, onClick: () => editorApi.current?.insertText(t.text) })));
+        }}><ActIcon n="list" /></button>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => void addFiles(e.target.files)} />
         <button disabled={sending} title="Dodaj załącznik" aria-label="Dodaj załącznik" onClick={() => fileRef.current?.click()}><ActIcon n="attach" /></button>
         <span className="grow" />
@@ -393,6 +403,7 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
           <ActIcon n="trash" />
         </button>
       </footer>
+      {tplMenu.menu}
     </section>
   );
 }

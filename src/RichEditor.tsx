@@ -8,6 +8,8 @@ export interface EditorApi {
   replaceWord: (from: string, to: string) => void;
   /** Podkreśla podane słowa (jeśli przeglądarka obsługuje CSS Custom Highlight API). */
   highlight: (words: string[]) => void;
+  /** Wstawia zwykły tekst w miejscu kursora (np. szablon odpowiedzi). */
+  insertText: (text: string) => void;
 }
 
 interface Props {
@@ -73,6 +75,18 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
           if (re.test(v)) { re.lastIndex = 0; t.nodeValue = v.replace(re, () => to); }
         }
         onChange(ref.current?.innerHTML ?? "");
+      },
+      insertText: (text) => {
+        const el = ref.current;
+        if (!el) return;
+        el.focus();
+        const sel = window.getSelection();
+        if (sel && savedRange.current && el.contains(savedRange.current.startContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(savedRange.current);
+        }
+        document.execCommand("insertText", false, text);
+        onChange(el.innerHTML);
       },
       highlight: (words) => {
         const css = (typeof CSS !== "undefined" ? (CSS as unknown as HighlightApi) : null);
@@ -198,7 +212,7 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
       )}
       <div ref={ref} className="editable" contentEditable={!disabled} suppressContentEditableWarning
         role="textbox" aria-multiline="true" aria-label="Treść wiadomości"
-        onInput={emit} onPaste={onPaste} onDrop={(e) => e.preventDefault()} />
+        onInput={emit} onBlur={rememberSelection} onPaste={onPaste} onDrop={(e) => e.preventDefault()} />
     </div>
   );
 }

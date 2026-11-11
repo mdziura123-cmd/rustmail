@@ -386,3 +386,6 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 @media (prefers-reduced-motion: no-preference) { .addr-dot { animation: udot-in .25s ease; } }
 .addr-harvest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .addr-harvest .hint { margin: 0; }
+
+.att-preview { display: block; max-width: min(100%, 560px); max-height: 420px; margin-top: 6px; border-radius: 6px; border: 1px solid var(--border, #ccc); object-fit: contain; }
+.rule-box textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); min-width: 0; flex: 1 1 100%; resize: vertical; }

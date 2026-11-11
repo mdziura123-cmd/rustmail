@@ -13,12 +13,12 @@ const FORMAT: &str = "rustmail-backup";
 const VERSION: u64 = 1;
 const MAX_ITEMS: usize = 5000;
 const MAX_BYTES: usize = 5_000_000;
-const MAX_SETTING_LEN: usize = 20_000;
+const MAX_SETTING_LEN: usize = 80_000;
 
 /// Ustawienia, które wolno zapisać w kopii i przywrócić (tylko wygląd i zachowanie, nic wrażliwego).
-pub const SETTING_KEYS: [&str; 15] = [
+pub const SETTING_KEYS: [&str; 16] = [
     "rm.theme", "rm.notify", "rm.notifycontent", "rm.sound", "rm.activeonly", "rm.background", "rm.flagsfirst",
-    "rm.keys", "rm.scale", "rm.labels", "rm.autoupdate", "rm.left", "rm.mid", "rm.spell", "rm.undo",
+    "rm.keys", "rm.scale", "rm.labels", "rm.autoupdate", "rm.left", "rm.mid", "rm.spell", "rm.undo", "rm.templates",
 ];
 
 /// Zostawia tylko dozwolone klucze z rozsądnie krótkimi wartościami.

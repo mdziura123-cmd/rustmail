@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
 import { AddressBook } from "./AddressBook";
+import { Templates } from "./Templates";
 import { Backup } from "./Backup";
 import { Rules } from "./Rules";
 import { clearLog, useLog } from "./eventLog";
@@ -335,6 +336,7 @@ export function SettingsDialog(p: Props) {
                 <button onClick={() => p.onOpen("import")}>Import poczty z pliku…</button>
                 <AddressBook />
                 <Rules />
+                <Templates />
                 <Backup />
               </div>
             )}

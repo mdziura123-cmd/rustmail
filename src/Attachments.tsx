@@ -28,14 +28,33 @@ function ScanResult({ r }: { r: SavedFile }) {
 }
 
 type Downloader = (a: Attachment) => Promise<SavedFile>;
+type Previewer = (a: Attachment) => Promise<{ dataUrl: string }>;
 
-function Row({ m, a, strict, dl }: { m: MessageView; a: Attachment; strict: boolean; dl?: Downloader }) {
+const isImage = (name: string) => /\.(png|jpe?g|gif)$/i.test(name);
+
+function Row({ m, a, strict, dl, pv }: { m: MessageView; a: Attachment; strict: boolean; dl?: Downloader; pv?: Previewer }) {
   const risky = riskyFile(a.name);
   const needsConfirm = risky || strict;
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SavedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [img, setImg] = useState<string | null>(null);
+
+  const preview = async () => {
+    if (!a.id) return;
+    if (img) { setImg(null); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await (pv ? pv(a) : api.previewAttachment(m.id, a.id));
+      setImg(r.dataUrl);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const download = async () => {
     if (!a.id) return;
@@ -70,17 +89,21 @@ function Row({ m, a, strict, dl }: { m: MessageView; a: Attachment; strict: bool
       ) : (
         <span className="note">brak możliwości pobrania</span>
       )}
+      {a.id && !risky && !strict && isImage(a.name) && (
+        <button className="small" disabled={busy} onClick={() => void preview()}>{img ? "Ukryj podgląd" : "Podgląd"}</button>
+      )}
+      {img && <img className="att-preview" src={img} alt={a.name} />}
       {result && <ScanResult r={result} />}
       {error && <span className="error">{error}</span>}
     </div>
   );
 }
 
-export function Attachments({ m, strict, dl }: { m: MessageView; strict: boolean; dl?: Downloader }) {
+export function Attachments({ m, strict, dl, pv }: { m: MessageView; strict: boolean; dl?: Downloader; pv?: Previewer }) {
   if (m.attachments.length === 0) return null;
   return (
     <div className="attachments" aria-label="Załączniki">
-      {m.attachments.map((a, i) => <Row key={a.name + i} m={m} a={a} strict={strict} dl={dl} />)}
+      {m.attachments.map((a, i) => <Row key={a.name + i} m={m} a={a} strict={strict} dl={dl} pv={pv} />)}
     </div>
   );
 }

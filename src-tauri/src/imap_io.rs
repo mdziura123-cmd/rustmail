@@ -625,6 +625,80 @@ pub async fn imap_download(
     crate::commands::save_scanned(&app, &name, &bytes).await
 }
 
+#[tauri::command]
+pub async fn imap_preview(
+    app: tauri::AppHandle,
+    account: String,
+    folder: String,
+    uid: u32,
+    index: u32,
+) -> Result<crate::commands::Preview, String> {
+    if uid == 0 {
+        return Err("Niepoprawny numer wiadomości.".to_string());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = fetch_raw(&mut conn, &folder, uid).await;
+    conn.bye().await;
+    let raw = res?;
+    let mail = mailparse::parse_mail(&raw).map_err(|e| format!("Nie udało się odczytać wiadomości: {e}"))?;
+    let mut counter = 0usize;
+    let bytes = find_att(&mail, &mut counter, index as usize).ok_or("Nie znaleziono załącznika w tej wiadomości.")?;
+    crate::commands::preview_bytes(&app, &bytes).await
+}
+
+/// Reguły dla starszych wiadomości IMAP: pierwsza strona skrzynki odbiorczej każdego konta.
+pub(crate) async fn apply_rules_all(
+    app: &tauri::AppHandle,
+    store: &Store,
+    rules: &[crate::rules::Rule],
+    dry_run: bool,
+) -> crate::commands::ApplyReport {
+    let mut rep = crate::commands::ApplyReport::default();
+    let accounts = match all() {
+        Ok(a) => a,
+        Err(_) => return rep,
+    };
+    let _ = app;
+    for creds in accounts {
+        let mut conn = match open(&creds).await {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let inbox = match list_folders(&mut conn).await {
+            Ok(f) => f.iter().find(|f| f.role == "inbox").map(|f| f.name.clone()).unwrap_or_else(|| "INBOX".to_string()),
+            Err(_) => "INBOX".to_string(),
+        };
+        if let Ok(page) = list_inner(&mut conn, &inbox, 0).await {
+            rep.checked += page.rows.len();
+            for r in &page.rows {
+                let acts: Vec<&str> = crate::rules::actions_for(rules, &r.from, &r.subject)
+                    .into_iter()
+                    .filter(|a| *a != "read" || r.unread)
+                    .collect();
+                if acts.is_empty() {
+                    continue;
+                }
+                rep.affected += 1;
+                if dry_run {
+                    continue;
+                }
+                let mut ok = true;
+                for a in acts {
+                    if let Some(level) = crate::rules::flag_level(a) {
+                        ok &= store.prio_set(&format!("i:{}:{inbox}:{}", creds.email, r.uid), level).is_ok();
+                    } else {
+                        ok &= act_inner(&mut conn, &inbox, r.uid, a).await.is_ok();
+                    }
+                }
+                if ok { rep.done += 1 } else { rep.failed += 1 }
+            }
+        }
+        conn.bye().await;
+    }
+    rep
+}
+
 async fn fetch_raw(conn: &mut Conn, folder: &str, uid: u32) -> Result<Vec<u8>, String> {
     conn.select(folder).await?;
     let r = conn.ok(&format!("UID FETCH {uid} (BODY.PEEK[])")).await?;

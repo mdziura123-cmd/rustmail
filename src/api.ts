@@ -176,6 +176,12 @@ export const api = {
     invoke<SavedFile>("download_attachment", { messageId, attachmentId, name }),
   imapPoll: (account: string, notifyEnabled: boolean, showContent: boolean) =>
     invoke<{ moved: number; notified: number; newCount: number; unread: number }>("imap_poll", { account, notifyEnabled, showContent }),
+  rulesApply: (dryRun: boolean) =>
+    invoke<{ checked: number; affected: number; done: number; failed: number }>("rules_apply", { dryRun }),
+  previewAttachment: (messageId: string, attachmentId: string) =>
+    invoke<{ dataUrl: string }>("preview_attachment", { messageId, attachmentId }),
+  imapPreview: (account: string, folder: string, uid: number, index: number) =>
+    invoke<{ dataUrl: string }>("imap_preview", { account, folder, uid, index }),
   imapDownload: (account: string, folder: string, uid: number, index: number, name: string) =>
     invoke<SavedFile>("imap_download", { account, folder, uid, index, name }),
   translateKeys: () => invoke<{ deepl: boolean; google: boolean; microsoft: boolean }>("translate_keys"),
