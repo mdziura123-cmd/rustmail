@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanDisplay, stripEmoji } from "./util";
 import type {
-  Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
+  Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, SchedItem, SnoozeItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
   SpamConfig, SpamLogEntry, SpamScanOutcome, SpamStatus, TrainItem,
   ImapAccount, ImapActOut, ImapFolder, ImapMsg, ImapPage,
@@ -143,6 +143,17 @@ export const api = {
   backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),
   backupImport: (json: string) =>
     invoke<{ contacts: number; flags: number; settings: Record<string, string> }>("backup_import", { json }),
+  scheduleMessage: (msg: OutgoingMessage, sendAtMs: number) => invoke<number>("schedule_message", { msg, sendAtMs }),
+  imapScheduleMessage: (account: string, msg: OutgoingMessage, sendAtMs: number) =>
+    invoke<number>("imap_schedule_message", { account, msg, sendAtMs }),
+  scheduleList: (account: string | null) => invoke<SchedItem[]>("schedule_list", { account }),
+  scheduleDelete: (account: string | null, id: number) => invoke<void>("schedule_delete", { account, id }),
+  scheduleRelease: () => invoke<(string | null)[]>("schedule_release"),
+  snoozeAdd: (threadId: string, subject: string, wakeMs: number) => invoke<void>("snooze_add", { threadId, subject, wakeMs }),
+  snoozeList: () => invoke<SnoozeItem[]>("snooze_list"),
+  snoozeDue: () => invoke<SnoozeItem[]>("snooze_due"),
+  snoozeDone: (threadId: string) => invoke<void>("snooze_done", { threadId }),
+  showNotification: (title: string, body: string) => invoke<void>("show_notification", { title, body }),
   setUnread: (count: number) => invoke<void>("set_unread", { count }),
   cacheStatus: () => invoke<CacheStatus>("cache_status"),
   setOfflineEnabled: (enabled: boolean) => invoke<CacheStatus>("set_offline_enabled", { enabled }),

@@ -4,7 +4,7 @@ import { api, errText } from "./api";
 // Te same klucze co w backup.rs (SETTING_KEYS) – tylko wygląd i zachowanie, nic wrażliwego.
 const KEYS = [
   "rm.theme", "rm.notify", "rm.notifycontent", "rm.sound", "rm.activeonly", "rm.background", "rm.flagsfirst",
-  "rm.keys", "rm.scale", "rm.labels", "rm.autoupdate", "rm.left", "rm.mid", "rm.spell",
+  "rm.keys", "rm.scale", "rm.labels", "rm.autoupdate", "rm.left", "rm.mid", "rm.spell", "rm.undo",
 ];
 
 export function Backup() {

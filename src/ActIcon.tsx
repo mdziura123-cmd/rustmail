@@ -31,6 +31,7 @@ const PATHS = {
   dict: "M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM12 8v6M9 11h6",
   calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
   flag: "M5 21V4M5 4h11l-2 4 2 4H5",
+  clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 7v5l3 2",
   filter: "M4 5h16M7 12h10M10 19h4",
   copy: "M9 9h11v11H9zM5 15V4h11",
   paste: "M9 4h6v3H9zM7 5H5v16h14V5h-2M9 13h6M9 17h4",
@@ -45,7 +46,7 @@ const LABELS: Partial<Record<ActIconName, string>> = {
   spam: "Spam", notspam: "Nie spam", trash: "Usuń", restore: "Przywróć", read: "Przeczytana", unread: "Nieprzeczytana",
   star: "Gwiazdka", label: "Etykieta", edit: "Edytuj", expand: "Rozwiń", collapse: "Zwiń", selectAll: "Zaznacz",
   clear: "Zamknij", save: "Zapisz", send: "Wyślij", attach: "Załącznik", flag: "Flaga", filter: "Filtr", copy: "Kopiuj",
-  paste: "Wklej", plus: "Dodaj", calendar: "Data", search: "Szukaj", dict: "Słownik", user: "Konto",
+  paste: "Wklej", clock: "Zaplanuj", plus: "Dodaj", calendar: "Data", search: "Szukaj", dict: "Słownik", user: "Konto",
 };
 
 export function ActIcon({ n, filled }: { n: ActIconName; filled?: boolean }) {

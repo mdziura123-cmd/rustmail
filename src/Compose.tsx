@@ -7,6 +7,7 @@ import { SpellBar } from "./SpellBar";
 import type { ComposeInit } from "./replyLogic";
 import { sanitizeHtml } from "./sanitize";
 import type { OutAttachment, OutgoingMessage } from "./types";
+import { getUndo } from "./display";
 import { fmtSize } from "./util";
 
 const MAX_ATTACH_BYTES = 20 * 1024 * 1024;
@@ -19,11 +20,29 @@ interface Props {
   from?: string;
   senders?: { id: string; label: string }[];
   onQueued: () => void;
+  onScheduled: (atMs: number) => void;
   onClose: (draftSaved: boolean) => void;
 }
 
 interface Att extends OutAttachment {
   size: number;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** Wartość dla pola datetime-local (czas lokalny). */
+function toLocalInput(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function addHours(d: Date, h: number): Date {
+  return new Date(d.getTime() + h * 3600_000);
+}
+/** Najbliższy ranek o 8:00: jutro (0) albo najbliższy poniedziałek po dzisiejszym dniu (1). */
+function nextMorning(kind: 0 | 1): Date {
+  const d = new Date();
+  d.setHours(8, 0, 0, 0);
+  d.setDate(d.getDate() + 1);
+  if (kind === 1) while (d.getDay() !== 1) d.setDate(d.getDate() + 1);
+  return d;
 }
 
 const MODE_TITLE: Record<ComposeInit["mode"], string> = {
@@ -48,7 +67,7 @@ function backup(value: unknown | null) {
   p.catch(() => { /* kopia lokalna jest dodatkiem */ });
 }
 
-export function Compose({ init, onSent, onQueued, onClose, from: fromProp, senders }: Props) {
+export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fromProp, senders }: Props) {
   const [from, setFrom] = useState(fromProp ?? "gmail");
   const imapAcc = from.startsWith("imap:") ? from.slice(5) : null;
   const [to, setTo] = useState(init.to);
@@ -133,7 +152,45 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
     await new Promise((r) => window.setTimeout(r, 1150));
   };
 
-  const send = async () => {
+  // Cofnięcie wysyłki: po kliknięciu „Wyślij” wiadomość czeka kilka sekund w oknie, a „Cofnij” wraca do edycji.
+  const [undoLeft, setUndoLeft] = useState<number | null>(null);
+  const hasRecipient = () => Boolean(to.trim() || cc.trim() || bcc.trim());
+  const send = () => {
+    setError(null);
+    if (!hasRecipient()) { setError("Podaj co najmniej jednego odbiorcę."); return; }
+    const d = getUndo();
+    if (d > 0) setUndoLeft(d); else void doSend();
+  };
+  useEffect(() => {
+    if (undoLeft === null) return;
+    if (undoLeft <= 0) { setUndoLeft(null); void doSend(); return; }
+    const t = window.setTimeout(() => setUndoLeft((n) => (n === null ? null : n - 1)), 1000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undoLeft]);
+
+  // Zaplanowana wysyłka: wiadomość czeka w zaszyfrowanej bazie lokalnej do wskazanej godziny.
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [schedAt, setSchedAt] = useState("");
+  const schedule = async (atMs: number) => {
+    setError(null);
+    if (!hasRecipient()) { setError("Podaj co najmniej jednego odbiorcę."); return; }
+    if (!Number.isFinite(atMs)) { setError("Wybierz datę i godzinę."); return; }
+    setSending(true);
+    try {
+      if (imapAcc) await api.imapScheduleMessage(imapAcc, build(), atMs);
+      else await api.scheduleMessage(build(), atMs);
+      remember();
+      dirty.current = false;
+      backup(null);
+      onScheduled(atMs);
+    } catch (e) {
+      setError(errText(e));
+      setSending(false);
+    }
+  };
+
+  const doSend = async () => {
     setError(null);
     setSending(true);
     try {
@@ -298,6 +355,26 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
         </div>
       )}
 
+      {schedOpen && !sending && (
+        <div className="sched-panel" role="group" aria-label="Zaplanuj wysyłkę">
+          <span className="hint">Wyślij:</span>
+          <button className="small" onClick={() => void schedule(addHours(new Date(), 1).getTime())}>za godzinę</button>
+          <button className="small" onClick={() => void schedule(nextMorning(0).getTime())}>jutro o 8:00</button>
+          <button className="small" onClick={() => void schedule(nextMorning(1).getTime())}>w poniedziałek o 8:00</button>
+          <input type="datetime-local" value={schedAt} onChange={(e) => setSchedAt(e.target.value)} aria-label="Data i godzina wysyłki" />
+          <button className="small primary" onClick={() => void schedule(new Date(schedAt).getTime())}>Zaplanuj</button>
+        </div>
+      )}
+
+      {undoLeft !== null && (
+        <div className="undo-send" role="alertdialog" aria-live="assertive">
+          <div className="undo-card">
+            <strong>Wysyłanie za {undoLeft} s</strong>
+            <button className="primary" onClick={() => setUndoLeft(null)}>Cofnij</button>
+          </div>
+        </div>
+      )}
+
       {sentAnim && (
         <div className="sent-anim" role="status" aria-live="polite">
           <div className="sent-card">
@@ -307,7 +384,8 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
         </div>
       )}
       <footer className="compose-foot">
-        <button className="primary" disabled={sending} title={sending ? "Wysyłanie…" : "Wyślij"} aria-label={sending ? "Wysyłanie…" : "Wyślij"} aria-busy={sending} onClick={() => void send()}><ActIcon n="send" /></button>
+        <button className="primary" disabled={sending} title={sending ? "Wysyłanie…" : "Wyślij"} aria-label={sending ? "Wysyłanie…" : "Wyślij"} aria-busy={sending} onClick={send}><ActIcon n="send" /></button>
+        <button disabled={sending} title="Zaplanuj wysyłkę" aria-label="Zaplanuj wysyłkę" aria-expanded={schedOpen} onClick={() => { setSchedOpen((o) => !o); if (!schedAt) setSchedAt(toLocalInput(addHours(new Date(), 1))); }}><ActIcon n="clock" /></button>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => void addFiles(e.target.files)} />
         <button disabled={sending} title="Dodaj załącznik" aria-label="Dodaj załącznik" onClick={() => fileRef.current?.click()}><ActIcon n="attach" /></button>
         <span className="grow" />

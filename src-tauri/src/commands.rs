@@ -809,6 +809,12 @@ pub async fn set_thread_label(state: State<'_, AppState>, id: String, label: Str
     gmail::set_thread_label(&state, &id, &label, add).await
 }
 
+/// Własne powiadomienie z interfejsu (np. powrót odłożonej wiadomości).
+#[tauri::command]
+pub fn show_notification(title: String, body: String) -> Result<(), String> {
+    notify::send(&title, &body)
+}
+
 #[tauri::command]
 pub fn test_notification() -> Result<(), String> {
     notify::send("RustMail", "Powiadomienia działają.")

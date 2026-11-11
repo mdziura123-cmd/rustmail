@@ -34,7 +34,7 @@ import { FOLDERS, type FolderId } from "./folders";
 import { StatusBar } from "./StatusBar";
 import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
-import type { Account, AppInfo, AuthStatus, ImapAccount, ImapActOut, ImapMsg, ImapRow, LabelInfo, OutboxItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
+import type { Account, AppInfo, AuthStatus, ImapAccount, ImapActOut, ImapMsg, ImapRow, LabelInfo, OutboxItem, SchedItem, SnoozeItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import { isThemeId, resolveTheme, type ThemeId } from "./themes";
 import Titlebar from "./Titlebar";
 import "./themes.css";
@@ -129,6 +129,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
+  const [scheduled, setScheduled] = useState<SchedItem[]>([]);
+  const [snoozed, setSnoozed] = useState<SnoozeItem[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [spamOpen, setSpamOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -622,6 +624,11 @@ export default function App() {
     showToast("Zapisano w kolejce – wiadomość wyśle się, gdy wróci połączenie.");
     void flushQueue(false);
   };
+  const onScheduled = (atMs: number) => {
+    setCompose(null);
+    showToast(`Zaplanowano wysyłkę na ${fmtFull(atMs)}.`);
+    void refreshLater();
+  };
   const onComposeClosed = (draftSaved: boolean) => {
     setCompose(null);
     if (draftSaved) showToast("Wersja robocza zapisana.");
@@ -817,6 +824,15 @@ export default function App() {
       }
     } catch (e) { if (manual) showToast(errText(e)); }
   };
+  // Zaplanowane wiadomości i odłożone konwersacje bieżącego widoku (lista w oknie „Do wysłania”).
+  const refreshLater = useCallback(async () => {
+    const acc = imapAccountRef.current;
+    try { setScheduled(await api.scheduleList(acc)); } catch { setScheduled([]); }
+    if (acc) { setSnoozed([]); return; }
+    try { setSnoozed(await api.snoozeList()); } catch { setSnoozed([]); }
+  }, []);
+  const flushRef = useRef(flushQueue);
+  flushRef.current = flushQueue;
   // Po zmianie widoku pokazujemy kolejkę właściwego konta (tylko odczyt, bez wysyłania).
   useEffect(() => {
     setOutbox([]);
@@ -855,6 +871,39 @@ export default function App() {
     const t = window.setInterval(() => void imapPollOnce(), 60_000);
     return () => window.clearInterval(t);
   }, [imapKey, imapPollOnce, view, activeOnly]);
+  useEffect(() => { void refreshLater(); }, [view, email, refreshLater]);
+  // Co 30 s: zaplanowane wiadomości, którym minął czas, trafiają do kolejki i są wysyłane;
+  // odłożone konwersacje wracają do skrzynki jako nieprzeczytane.
+  useEffect(() => {
+    if (!email && !imapKey) return;
+    const tick = async () => {
+      try {
+        const keys = await api.scheduleRelease();
+        for (const k of keys) await flushRef.current(false, k);
+        if (keys.length > 0) void refreshLater();
+      } catch { /* baza lokalna niedostępna */ }
+      if (!email) return;
+      try {
+        const due = await api.snoozeDue();
+        let woke = 0;
+        for (const s of due) {
+          try {
+            await api.threadAction(s.threadId, "unarchive");
+            await api.threadAction(s.threadId, "unread");
+            await api.snoozeDone(s.threadId);
+            woke += 1;
+            const title = s.subject || "(bez tematu)";
+            showToast(`Wraca odłożona wiadomość: ${title}`);
+            if (settingsRef.current.notify) void api.showNotification("Odłożona wiadomość wróciła", title).catch(() => undefined);
+          } catch { /* spróbujemy przy następnym sprawdzeniu */ }
+        }
+        if (woke > 0) { playSound(soundRef.current); void refreshLater(); void pollRef.current(); }
+      } catch { /* brak sieci albo bazy – spróbujemy za chwilę */ }
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 30_000);
+    return () => window.clearInterval(t);
+  }, [email, imapKey, refreshLater, showToast]);
   useEffect(() => {
     if (imapTick > 0 && view !== "gmail") void imap.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -898,6 +947,48 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
+  // Odkładanie (tylko Gmail): konwersacja trafia do archiwum i wraca do skrzynki o wybranej porze.
+  const snoozePresets = (): { label: string; ms: number }[] => {
+    const now = new Date();
+    const at = (d: Date, h: number) => { const x = new Date(d); x.setHours(h, 0, 0, 0); return x.getTime(); };
+    const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+    const monday = new Date(now); monday.setDate(now.getDate() + 1);
+    while (monday.getDay() !== 1) monday.setDate(monday.getDate() + 1);
+    const list = [{ label: "za 3 godziny", ms: now.getTime() + 3 * 3600_000 }];
+    if (now.getHours() < 17) list.push({ label: "dziś o 18:00", ms: at(now, 18) });
+    list.push({ label: "jutro o 8:00", ms: at(tomorrow, 8) }, { label: "w poniedziałek o 8:00", ms: at(monday, 8) });
+    return list;
+  };
+  const snoozeThreads = async (ids: string[], wakeMs: number) => {
+    let ok = 0;
+    const done: string[] = [];
+    for (const id of ids.slice(0, 50)) {
+      const subject = threads.find((t) => t.id === id)?.subject ?? detail?.subject ?? "";
+      try {
+        await api.threadAction(id, "archive");
+        await api.snoozeAdd(id, subject, wakeMs);
+        ok += 1;
+        done.push(id);
+      } catch (e) { showToast(errText(e)); }
+    }
+    if (ok === 0) return;
+    const gone = new Set(done);
+    setThreads((prev) => prev.filter((t) => !gone.has(t.id)));
+    if (openId && gone.has(openId)) { setOpenId(null); setDetail(null); }
+    setSelected(new Set());
+    showToast(`Odłożono (${ok}) do ${fmtFull(wakeMs)}.`);
+    void refreshLater();
+  };
+  const wakeSnoozed = async (threadId: string) => {
+    try {
+      await api.threadAction(threadId, "unarchive");
+      await api.threadAction(threadId, "unread");
+      await api.snoozeDone(threadId);
+      void refreshLater();
+      void pollRef.current();
+    } catch (e) { showToast(errText(e)); }
+  };
+
   const gmailRowMenu = (t: ThreadSummary): MenuEntry[] => {
     const many = selected.has(t.id) && selected.size > 1;
     const ids = many ? [...selected] : [t.id];
@@ -931,6 +1022,9 @@ export default function App() {
     if (many || level > 0) items.push({ label: "Usuń flagę" + n, icon: "flag", onClick: () => ids.forEach((id) => prio.set(key(id), 0).catch(() => showToast("Nie udało się zapisać flagi."))) });
     items.push("sep");
     if (folder === "inbox" || folder === "unread") items.push({ label: "Archiwizuj" + n, icon: "archive", disabled: off, onClick: () => void bulkRun("archive", ids) });
+    if (folder === "inbox" || folder === "unread") {
+      for (const sp of snoozePresets()) items.push({ label: "Odłóż: " + sp.label + n, icon: "clock", disabled: off, onClick: () => void snoozeThreads(ids, sp.ms) });
+    }
     if (folder === "archive") items.push({ label: "Przenieś do skrzynki odbiorczej" + n, icon: "inbox", disabled: off, onClick: () => void bulkRun("unarchive", ids) });
     items.push(folder === "spam"
       ? { label: "To nie jest spam" + n, icon: "notspam", disabled: off, onClick: () => void bulkRun("notspam", ids) }
@@ -1068,7 +1162,7 @@ export default function App() {
   };
 
   const composeNode = compose ? (
-    <Compose key={compose.key} init={compose.init} from={compose.from} onSent={onSent} onQueued={onQueued} onClose={onComposeClosed}
+    <Compose key={compose.key} init={compose.init} from={compose.from} onSent={onSent} onQueued={onQueued} onScheduled={onScheduled} onClose={onComposeClosed}
       senders={email ? [{ id: "gmail", label: email }, ...imapAccs.map((a) => ({ id: "imap:" + a.email, label: a.email }))] : undefined} />
   ) : null;
 
@@ -1297,6 +1391,8 @@ export default function App() {
                   <button title="Odpowiedz wszystkim (a)" aria-label="Odpowiedz wszystkim (a)" disabled={needsReauth} onClick={() => reply(true)}><ActIcon n="replyAll"/></button>
                   <button title="Przekaż dalej (f)" aria-label="Przekaż dalej (f)" disabled={needsReauth} onClick={forward}><ActIcon n="forward"/></button>
                   <span className="sep" />
+                  {detail.inInbox && <button title="Odłóż na później" aria-label="Odłóż na później" disabled={needsReauth}
+                    onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); gm.show(r.left, r.bottom + 4, snoozePresets().map((sp) => ({ label: "Odłóż: " + sp.label, icon: "clock" as const, onClick: () => void snoozeThreads([detail.id], sp.ms) }))); }}><ActIcon n="clock"/></button>}
                   {detail.inInbox && <button title="Archiwizuj (e)" aria-label="Archiwizuj (e)" disabled={needsReauth} onClick={() => void runAction("archive")}><ActIcon n="archive"/></button>}
                   {!detail.inInbox && !detail.inTrash && !detail.inSpam && (
                     <button title="Przenieś do skrzynki odbiorczej" aria-label="Przenieś do skrzynki odbiorczej" disabled={needsReauth} onClick={() => void runAction("unarchive")}><ActIcon n="inbox"/></button>
@@ -1367,7 +1463,7 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length : 0} onOutbox={() => setOutboxOpen(true)}
+      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)}
         onSettings={() => setSettingsOpen(true)} />
 
       {toast && (
@@ -1411,7 +1507,9 @@ export default function App() {
         </div>
       )}
       {outboxOpen && (
-        <OutboxDialog items={outbox} onClose={() => setOutboxOpen(false)} onSendNow={() => void flushQueue(true)}
+        <OutboxDialog items={outbox} scheduled={scheduled} snoozed={snoozed}
+          onCancelScheduled={async (id) => { try { await api.scheduleDelete(imapAccount, id); } catch (e) { showToast(errText(e)); } void refreshLater(); }}
+          onWake={(id) => void wakeSnoozed(id)} onClose={() => setOutboxOpen(false)} onSendNow={() => void flushQueue(true)}
           onRetry={async (id) => { try { await outboxOps(imapAccount).retry(id); } catch (e) { showToast(errText(e)); } await flushQueue(true); }}
           onDelete={async (id) => { try { await outboxOps(imapAccount).del(id); } catch (e) { showToast(errText(e)); } await flushQueue(false); }} />
       )}

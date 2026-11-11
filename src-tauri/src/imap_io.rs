@@ -1162,6 +1162,29 @@ pub async fn imap_outbox_queue(store: State<'_, Store>, account: String, msg: cr
 }
 
 #[tauri::command]
+pub fn imap_schedule_message(
+    store: State<'_, Store>,
+    account: String,
+    msg: crate::commands::OutgoingDto,
+    send_at_ms: i64,
+) -> Result<i64, String> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    crate::later::check_time(send_at_ms, now)?;
+    let creds = load(&account)?;
+    let raw = crate::commands::prepare(&msg, &creds.email, true)?;
+    let subject: String = crate::compose::clean_header_value(&msg.subject).chars().take(200).collect();
+    store.sched_add(
+        &outbox_key(&account),
+        send_at_ms,
+        &crate::commands::recipients_summary(&msg),
+        &subject,
+        None,
+        msg.draft_id.as_deref().filter(|d| !d.is_empty()),
+        &raw,
+    )
+}
+
+#[tauri::command]
 pub fn imap_outbox_list(store: State<'_, Store>, account: String) -> Result<Vec<OutboxItem>, String> {
     store.list_outbox(&outbox_key(&account))
 }

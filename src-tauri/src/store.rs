@@ -36,6 +36,23 @@ CREATE TABLE IF NOT EXISTS outbox (
     state TEXT NOT NULL DEFAULT 'queued',
     error TEXT
 );
+CREATE TABLE IF NOT EXISTS scheduled (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    send_at INTEGER NOT NULL,
+    account TEXT NOT NULL,
+    to_summary TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    thread_id TEXT,
+    draft_id TEXT,
+    raw BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS snoozed (
+    account TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    wake_ms INTEGER NOT NULL,
+    PRIMARY KEY (account, thread_id)
+);
 "#;
 
 /// Po awarii w trakcie wysyłania nie wiadomo, czy wiadomość wyszła – nie wysyłamy jej drugi raz sami.
@@ -154,6 +171,26 @@ pub struct OutboxItem {
     pub state: String,
     pub error: Option<String>,
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedItem {
+    pub id: i64,
+    pub send_at_ms: i64,
+    pub to: String,
+    pub subject: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnoozeItem {
+    pub thread_id: String,
+    pub subject: String,
+    pub wake_ms: i64,
+}
+
+const MAX_SCHEDULED: i64 = 100;
+const MAX_SNOOZED: i64 = 500;
 
 pub struct QueuedMail {
     pub id: i64,
@@ -530,6 +567,114 @@ impl Store {
             Ok(c.last_insert_rowid())
         })
         .map_err(|e| if e.contains("kolejka pełna") { "Kolejka wysyłania jest pełna (50 wiadomości).".to_string() } else { e })
+    }
+
+    // ---------- zaplanowana wysyłka ----------
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn sched_add(
+        &self,
+        account: &str,
+        send_at_ms: i64,
+        to: &str,
+        subject: &str,
+        thread_id: Option<&str>,
+        draft_id: Option<&str>,
+        raw: &[u8],
+    ) -> Result<i64, String> {
+        if raw.len() > MAX_OUTBOX_BYTES {
+            return Err("Wiadomość jest za duża, aby czekać na wysłanie.".to_string());
+        }
+        self.with(|c| {
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM scheduled", [], |r| r.get(0))?;
+            if n >= MAX_SCHEDULED {
+                return Err(rusqlite::Error::InvalidParameterName("za dużo zaplanowanych".to_string()));
+            }
+            c.execute(
+                "INSERT INTO scheduled (send_at, account, to_summary, subject, thread_id, draft_id, raw) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![send_at_ms, account, to, subject, thread_id, draft_id, raw],
+            )?;
+            Ok(c.last_insert_rowid())
+        })
+        .map_err(|e| if e.contains("za dużo zaplanowanych") { "Zaplanowano już 100 wiadomości.".to_string() } else { e })
+    }
+
+    pub fn sched_list(&self, account: &str) -> Result<Vec<SchedItem>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT id, send_at, to_summary, subject FROM scheduled WHERE account = ?1 ORDER BY send_at, id")?;
+            let rows = st.query_map([account], |r| Ok(SchedItem { id: r.get(0)?, send_at_ms: r.get(1)?, to: r.get(2)?, subject: r.get(3)? }))?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    pub fn sched_delete(&self, account: &str, id: i64) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM scheduled WHERE id = ?1 AND account = ?2", params![id, account]).map(|_| ()))
+    }
+
+    /// Przenosi zaplanowane wiadomości, którym minął czas, do zwykłej kolejki wysyłania (jedna transakcja).
+    /// Zwraca klucze kont, do których coś trafiło.
+    pub fn sched_release(&self, now: i64) -> Result<Vec<String>, String> {
+        self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            let mut keys: Vec<String> = Vec::new();
+            {
+                let mut st = tx.prepare("SELECT id, account, to_summary, subject, thread_id, draft_id, raw FROM scheduled WHERE send_at <= ?1 ORDER BY send_at, id")?;
+                let due = st
+                    .query_map([now], |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                            r.get::<_, String>(3)?,
+                            r.get::<_, Option<String>>(4)?,
+                            r.get::<_, Option<String>>(5)?,
+                            r.get::<_, Vec<u8>>(6)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (id, account, to, subject, thread, draft, raw) in due {
+                    tx.execute(ENQUEUE, params![now, account, to, subject, thread, draft, raw])?;
+                    tx.execute("DELETE FROM scheduled WHERE id = ?1", [id])?;
+                    if !keys.contains(&account) {
+                        keys.push(account);
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok(keys)
+        })
+    }
+
+    // ---------- odłożone wiadomości (Gmail) ----------
+
+    pub fn snooze_add(&self, account: &str, thread_id: &str, subject: &str, wake_ms: i64) -> Result<(), String> {
+        self.with(|c| {
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM snoozed", [], |r| r.get(0))?;
+            if n >= MAX_SNOOZED {
+                return Err(rusqlite::Error::InvalidParameterName("za dużo odłożonych".to_string()));
+            }
+            c.execute(
+                "INSERT INTO snoozed (account, thread_id, subject, wake_ms) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(account, thread_id) DO UPDATE SET wake_ms = excluded.wake_ms, subject = excluded.subject",
+                params![account, thread_id, subject, wake_ms],
+            )
+            .map(|_| ())
+        })
+        .map_err(|e| if e.contains("za dużo odłożonych") { "Odłożono już 500 wiadomości.".to_string() } else { e })
+    }
+
+    pub fn snooze_list(&self, account: &str, due_before: Option<i64>) -> Result<Vec<SnoozeItem>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT thread_id, subject, wake_ms FROM snoozed WHERE account = ?1 AND wake_ms <= ?2 ORDER BY wake_ms")?;
+            let rows = st.query_map(params![account, due_before.unwrap_or(i64::MAX)], |r| {
+                Ok(SnoozeItem { thread_id: r.get(0)?, subject: r.get(1)?, wake_ms: r.get(2)? })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    pub fn snooze_delete(&self, account: &str, thread_id: &str) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM snoozed WHERE account = ?1 AND thread_id = ?2", params![account, thread_id]).map(|_| ()))
     }
 
     pub fn list_outbox(&self, account: &str) -> Result<Vec<OutboxItem>, String> {

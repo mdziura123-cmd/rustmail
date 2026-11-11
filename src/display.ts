@@ -1,6 +1,16 @@
 // Wygląd: skala interfejsu (powiększenie całego widoku) i podpisy pod ikonami (przydatne na dotyku).
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
+const KEY_UNDO = "rm.undo";
+export const UNDO_DELAYS = [0, 5, 10, 20, 30] as const;
+export function getUndo(): number {
+  const n = Number(read(KEY_UNDO));
+  return (UNDO_DELAYS as readonly number[]).includes(n) ? n : 5;
+}
+export function setUndo(n: number) {
+  write(KEY_UNDO, String((UNDO_DELAYS as readonly number[]).includes(n) ? n : 5));
+}
+
 export const SCALES = [0.9, 1, 1.1, 1.25, 1.5] as const;
 const KEY_SCALE = "rm.scale";
 const KEY_LABELS = "rm.labels";

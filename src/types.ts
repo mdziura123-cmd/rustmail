@@ -231,6 +231,9 @@ export interface DraftContent {
   references: string;
 }
 
+export interface SchedItem { id: number; sendAtMs: number; to: string; subject: string }
+export interface SnoozeItem { threadId: string; subject: string; wakeMs: number }
+
 export type ThreadAction =
   | "archive" | "unarchive" | "read" | "unread" | "star" | "unstar"
   | "spam" | "notspam" | "trash" | "untrash";

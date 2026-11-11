@@ -11,6 +11,7 @@ mod dismissed;
 mod filetype;
 mod gmail;
 mod labels;
+mod later;
 mod launcher;
 mod notify;
 mod offline;
@@ -159,11 +160,21 @@ pub fn run() {
             commands::import_label,
             commands::import_message,
             commands::test_notification,
+            commands::show_notification,
             background::set_background,
             background::background_state,
             background::set_unread,
             backup::backup_export,
             backup::backup_import,
+            later::schedule_message,
+            later::schedule_list,
+            later::schedule_delete,
+            later::schedule_release,
+            imap_io::imap_schedule_message,
+            later::snooze_add,
+            later::snooze_list,
+            later::snooze_due,
+            later::snooze_done,
             commands::set_thread_label,
             commands::cache_status,
             commands::set_offline_enabled,

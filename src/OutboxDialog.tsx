@@ -1,8 +1,12 @@
-import type { OutboxItem } from "./types";
+import type { OutboxItem, SchedItem, SnoozeItem } from "./types";
 import { cleanDisplay, fmtFull } from "./util";
 
 interface Props {
   items: OutboxItem[];
+  scheduled: SchedItem[];
+  snoozed: SnoozeItem[];
+  onCancelScheduled: (id: number) => void | Promise<void>;
+  onWake: (threadId: string) => void;
   onSendNow: () => void;
   onRetry: (id: number) => void | Promise<void>;
   onDelete: (id: number) => void | Promise<void>;
@@ -16,13 +20,13 @@ const STATE: Record<string, string> = {
   uncertain: "nie wiadomo, czy wyszła",
 };
 
-export function OutboxDialog({ items, onSendNow, onRetry, onDelete, onClose }: Props) {
+export function OutboxDialog({ items, scheduled, snoozed, onCancelScheduled, onWake, onSendNow, onRetry, onDelete, onClose }: Props) {
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-label="Do wysłania">
       <div className="modal">
         <h3>Do wysłania</h3>
         {items.length === 0 ? (
-          <p className="hint">Kolejka jest pusta.</p>
+          <p className="hint">Kolejka wysyłania jest pusta.</p>
         ) : (
           <ul className="outbox-list">
             {items.map((i) => (
@@ -45,6 +49,35 @@ export function OutboxDialog({ items, onSendNow, onRetry, onDelete, onClose }: P
               </li>
             ))}
           </ul>
+        )}
+        {scheduled.length > 0 && (
+          <>
+            <h4>Zaplanowane do wysłania</h4>
+            <ul className="outbox-list">
+              {scheduled.map((s) => (
+                <li key={s.id}>
+                  <strong>{cleanDisplay(s.subject, 80) || "(bez tematu)"}</strong>
+                  <span className="hint"> do: {cleanDisplay(s.to, 120)} · wyśle się {fmtFull(s.sendAtMs)}</span>
+                  <span className="outbox-actions"><button className="small" onClick={() => void onCancelScheduled(s.id)}>Anuluj wysyłkę</button></span>
+                </li>
+              ))}
+            </ul>
+            <p className="hint">Zaplanowane wiadomości wysyłają się, gdy aplikacja działa (także w tle). Jeśli była wyłączona o tej porze, wyślą się po jej uruchomieniu.</p>
+          </>
+        )}
+        {snoozed.length > 0 && (
+          <>
+            <h4>Odłożone wiadomości</h4>
+            <ul className="outbox-list">
+              {snoozed.map((s) => (
+                <li key={s.threadId}>
+                  <strong>{cleanDisplay(s.subject, 80) || "(bez tematu)"}</strong>
+                  <span className="hint"> wróci {fmtFull(s.wakeMs)}</span>
+                  <span className="outbox-actions"><button className="small" onClick={() => onWake(s.threadId)}>Przywróć teraz</button></span>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
         <p className="hint">
           Wiadomości w kolejce leżą na dysku w szyfrowanej bazie lokalnej do czasu wysłania. Wysyłają się automatycznie co minutę,

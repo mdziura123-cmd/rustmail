@@ -78,7 +78,7 @@ export function StatusBar({ info, u, outboxCount, onOutbox, onSettings }: Props)
         </>
       )}
       <span className="grow" />
-      {outboxCount > 0 && <button className="linklike plain" onClick={onOutbox}>Do wysłania ({outboxCount})</button>}
+      {outboxCount > 0 && <button className="linklike plain" onClick={onOutbox}>Do wysłania i odłożone ({outboxCount})</button>}
       <button className="icon-btn gear" title="Ustawienia" aria-label="Ustawienia" onClick={onSettings}>
         <GearIcon />
       </button>
