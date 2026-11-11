@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { prio, usePrioLevels } from "./prio";
 import { gmailPrioKey, sortSearchResults } from "./prioSort";
 import { flagsFirst, useFlagsFirst } from "./listPrefs";
-import { SearchFilters } from "./SearchFilters";
-import { buildQuery, EMPTY_FILTERS, filtersError, flagMatches, hasFilters, type FlagFilter, type Filters } from "./searchQuery";
+import { TitleSearch } from "./TitleSearch";
+import { buildQuery, EMPTY_FILTERS, filtersError, flagMatches, type FlagFilter, type Filters } from "./searchQuery";
 import { FlagsFirstToggle, PrioFlag, PrioMenu } from "./PrioUi";
 import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
@@ -119,6 +119,7 @@ export default function App() {
   const [filtErr, setFiltErr] = useState<string | null>(null);
   const [optsOpen, setOptsOpen] = useState(false);
   const flagFilterRef = useRef<FlagFilter>("any");
+  const pollRef = useRef<() => Promise<void>>(async () => {});
   const ffPrev = useRef(false);
   const [searchTerm, setSearchTerm] = useState<string | null>(null);
   const [listOffline, setListOffline] = useState(false);
@@ -277,6 +278,7 @@ export default function App() {
       if (d.unread && !needsReauth && !d.offline) {
         // jak w Outlooku: otwarcie konwersacji oznacza ją jako przeczytaną
         api.threadAction(id, "read").then(() => {
+          void pollRef.current();
           setDetail((cur) => (cur && cur.id === id ? { ...cur, unread: false } : cur));
           setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, unread: false } : t)));
         }).catch(() => { /* brak uprawnień lub sieci – konwersacja zostaje nieprzeczytana */ });
@@ -392,6 +394,7 @@ export default function App() {
       });
       return;
     }
+    void pollRef.current();
     const patch = {
       unread: action === "unread" ? true : action === "read" ? false : undefined,
       starred: action === "star" ? true : action === "unstar" ? false : undefined,
@@ -703,11 +706,17 @@ export default function App() {
     showToast(`Wylogowano konto ${a}.`);
   };
 
-  const doSearch = (e: React.FormEvent) => {
-    e.preventDefault();
+  const doSearch = () => {
     const err = filtersError(filters);
     setFiltErr(err);
     if (err) return;
+    if (imapAccount) {
+      const full = buildQuery(query, filters, "imap");
+      if (!full) return;
+      setOptsOpen(false);
+      imap.search(full, filters.flag);
+      return;
+    }
     const q = buildQuery(query, filters, "gmail");
     if (!q) {
       if (searchRef.current !== null) { clearSearch(); void loadList(folder, null, false); }
@@ -757,6 +766,12 @@ export default function App() {
       await flushQueue(false, null);
     } catch { /* brak sieci – spróbujemy za minutę */ }
   }, []);
+  pollRef.current = pollOnce;
+  // Wyszukiwanie na koncie IMAP jest per folder: zmiana konta lub folderu czyści pole i opcje.
+  useEffect(() => {
+    if (!imapAccount) return;
+    setQuery(""); setFilters(EMPTY_FILTERS); setFiltErr(null); setOptsOpen(false);
+  }, [imapAccount, imap.folder]);
   // Kolejka „Do wysłania” działa osobno dla Gmaila (account = null) i dla każdego konta IMAP.
   const outboxOps = (account: string | null) => account
     ? {
@@ -922,7 +937,16 @@ export default function App() {
 
   return (
     <div className="app">
-      <Titlebar>
+      <Titlebar center={email ? (
+        <TitleSearch query={query} onQuery={setQuery} filters={filters} onFilters={setFilters} error={filtErr}
+          open={optsOpen} onOpen={setOptsOpen} onSubmit={doSearch}
+          active={imapAccount ? Boolean(imap.term) : searchTerm !== null}
+          onClear={() => {
+            if (imapAccount) { imap.clearSearch(); setQuery(""); setFilters(EMPTY_FILTERS); setFiltErr(null); }
+            else { clearSearch(); void loadList(folder, null, false); }
+          }}
+          placeholder={imapAccount ? "Szukaj w tym folderze…" : "Szukaj w poczcie…"} />
+      ) : undefined}>
         {email && (
           <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
             label={imapAccount ?? email} busy={signingIn}
@@ -1002,17 +1026,6 @@ export default function App() {
               <ReceiveButton busy={loadingList} onClick={() => void loadList(folder, null, false)} />
             )}
           </header>
-          {email && (
-            <form className="search" role="search" onSubmit={doSearch}>
-              <input type="search" value={query} maxLength={500} placeholder="Szukaj w poczcie (np. from:ala faktura)"
-                aria-label="Szukaj w poczcie" onFocus={() => setOptsOpen(true)} onChange={(e) => setQuery(e.target.value)} />
-              <button className="small" type="button" aria-expanded={optsOpen} title="Opcje wyszukiwania: nadawca, temat, daty, flaga" aria-label="Opcje wyszukiwania"
-                onClick={() => setOptsOpen((v) => !v)}><ActIcon n="filter" />{hasFilters(filters) && <span className="dot" aria-hidden="true" />}</button>
-              <button className="small" title="Szukaj" aria-label="Szukaj" type="submit"><ActIcon n="search"/></button>
-              {searchTerm && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { clearSearch(); void loadList(folder, null, false); }}><ActIcon n="clear"/></button>}
-              {optsOpen && <SearchFilters value={filters} onChange={setFilters} error={filtErr} />}
-            </form>
-          )}
           {email && listOffline && (
             <p className="offline-note" role="status">
               Brak połączenia z Gmail – pokazuję wiadomości zapisane na tym komputerze (mogą być nieaktualne).

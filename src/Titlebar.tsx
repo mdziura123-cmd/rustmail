@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** Własny pasek tytułu w kolorach motywu (systemowy pasek jest wyłączony w tauri.conf.json). */
-export default function Titlebar({ children }: { children?: ReactNode }) {
+export default function Titlebar({ children, center }: { children?: ReactNode; center?: ReactNode }) {
   const [max, setMax] = useState(false);
 
   useEffect(() => {
@@ -33,6 +33,7 @@ export default function Titlebar({ children }: { children?: ReactNode }) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <span className="tb-title" data-tauri-drag-region>RustMail</span>
+      <div className="tb-center">{center}</div>
       <div className="tb-right">
         {children}
       <div className="tb-btns">

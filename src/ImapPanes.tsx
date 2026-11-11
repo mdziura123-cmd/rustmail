@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { ReceiveButton } from "./ReceiveButton";
@@ -11,12 +11,13 @@ import { FOLDERS } from "./folders";
 import { imapPrioKey, sortSearchResults } from "./prioSort";
 import { prio, usePrioLevels } from "./prio";
 import { useFlagsFirst, flagsFirst } from "./listPrefs";
-import { SearchFilters } from "./SearchFilters";
-import { buildQuery, EMPTY_FILTERS, filtersError, flagMatches, hasFilters, type FlagFilter, type Filters } from "./searchQuery";
+import { flagMatches, type FlagFilter } from "./searchQuery";
 import { FlagsFirstToggle, PrioFlag, PrioMenu } from "./PrioUi";
 
 const FOLDER_ICON = Object.fromEntries(FOLDERS.map((f) => [f.id, f])) as Record<string, (typeof FOLDERS)[number]>;
 const OTHER_ICON = "M3 7h7l2 2h9v10H3z";
+
+const UNREAD_ICON = "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z";
 
 function Icon({ d }: { d: string }) {
   return (
@@ -68,6 +69,10 @@ export function useImapView(account: string | null) {
   const levels = usePrioLevels();
   const ff = useFlagsFirst();
   const flagRef = useRef<FlagFilter>("any");
+  const [unreadView, setUnreadView] = useState(false);
+  const rowsRef = useRef<ImapRow[]>([]);
+  rowsRef.current = rows;
+  const countsTimer = useRef(0);
 
   // Wyniki wyszukiwania (albo cała lista przy włączonym „flagi na górze”) układają się na nowo, gdy zmieni się flaga.
   useEffect(() => {
@@ -79,6 +84,12 @@ export function useImapView(account: string | null) {
     });
   }, [levels, term, ff, account, folder]);
 
+  // Licznik nieprzeczytanych zmienia się od razu, a po chwili jest odświeżany z serwera (prawdziwa wartość).
+  const bumpCount = (name: string, d: number) => {
+    setCounts((c) => (name in c ? { ...c, [name]: Math.max(0, c[name] + d) } : c));
+    window.clearTimeout(countsTimer.current);
+    if (account) countsTimer.current = window.setTimeout(() => loadCounts(account), 1500);
+  };
   const loadCounts = useCallback((acc: string) => {
     api.imapCounts(acc).then((c) => setCounts(Object.fromEntries(c.map((x) => [x.name, x.unseen])))).catch(() => {});
   }, []);
@@ -114,31 +125,44 @@ export function useImapView(account: string | null) {
     }).catch((e) => { if (my === seq.current) { setErr(errText(e)); setLoading(false); } });
   }, [account, load, loadCounts]);
 
-  const search = async (q: string, flag: FlagFilter = flagRef.current) => {
-    if (!account || !folder || !q.trim()) return;
+  const search = async (q: string, flag: FlagFilter = flagRef.current, inFolder: string = folder, unreadTab = false) => {
+    if (!account || !inFolder || !q.trim()) return;
     flagRef.current = flag;
+    setUnreadView(unreadTab);
     const my = ++seq.current;
     setTerm(q.trim()); setLoading(true); setErr(null);
     try {
-      const p = await api.imapSearch(account, folder, q.trim());
+      const p = await api.imapSearch(account, inFolder, q.trim());
       if (my !== seq.current) return;
-      await prio.ensure(p.rows.map((r) => imapPrioKey(account, folder, r.uid)));
+      await prio.ensure(p.rows.map((r) => imapPrioKey(account, inFolder, r.uid)));
       if (my !== seq.current) return;
-      const lv = (r: ImapRow) => prio.get(imapPrioKey(account, folder, r.uid));
+      const lv = (r: ImapRow) => prio.get(imapPrioKey(account, inFolder, r.uid));
       setRows(sortSearchResults(p.rows.filter((r) => flagMatches(lv(r), flag)), (r) => r.dateMs, lv)); setNext(null);
     } catch (e) { if (my === seq.current) setErr(errText(e)); }
     finally { if (my === seq.current) setLoading(false); }
   };
 
   return {
-    account, folders, folder, rows, next, loading, err, term, counts,
-    pick: (name: string) => { if (account) { setTerm(""); setFolder(name); void load(account, name, 0, false); } },
+    account, folders, folder, rows, next, loading, err, term, counts, unreadView,
+    pickUnread: () => {
+      const inbox = folders.find((x) => x.role === "inbox");
+      if (account && inbox) { setFolder(inbox.name); void search("is:unread", "any", inbox.name, true); }
+    },
+    pick: (name: string) => { if (account) { setUnreadView(false); setTerm(""); setFolder(name); void load(account, name, 0, false); } },
     refresh: () => { if (account && folder) { if (term) { void search(term); } else void load(account, folder, 0, false); loadCounts(account); } },
     search: (q: string, flag: FlagFilter = "any") => void search(q, flag),
-    clearSearch: () => { setTerm(""); flagRef.current = "any"; if (account && folder) void load(account, folder, 0, false); },
+    clearSearch: () => { setTerm(""); setUnreadView(false); flagRef.current = "any"; if (account && folder) void load(account, folder, 0, false); },
     more: () => { if (account && folder && next !== null) void load(account, folder, next, true); },
-    patch: (uid: number, p: Partial<ImapRow>) => setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...p } : r))),
-    remove: (uid: number) => setRows((prev) => prev.filter((r) => r.uid !== uid)),
+    patch: (uid: number, p: Partial<ImapRow>) => {
+      const old = rowsRef.current.find((r) => r.uid === uid);
+      setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, ...p } : r)));
+      if (old && p.unread !== undefined && p.unread !== old.unread) bumpCount(folder, p.unread ? 1 : -1);
+    },
+    remove: (uid: number) => {
+      const old = rowsRef.current.find((r) => r.uid === uid);
+      setRows((prev) => prev.filter((r) => r.uid !== uid));
+      if (old?.unread) bumpCount(folder, -1);
+    },
   };
 }
 export type ImapView = ReturnType<typeof useImapView>;
@@ -148,13 +172,21 @@ export function ImapSidebarNav({ imap }: { imap: ImapView }) {
     <>
       {imap.folders.map((f) => {
         const d = folderDisplay(imap.folders)[f.name];
+        const here = f.name === imap.folder && !imap.unreadView;
         return (
-          <button key={f.name} className={"folder" + (f.name === imap.folder ? " active" : "")} onClick={() => imap.pick(f.name)}
-            aria-current={f.name === imap.folder}>
-            <Icon d={d.icon} />
-            <span>{d.label}</span>
-            {(imap.counts[f.name] ?? 0) > 0 && <span className={"badge" + (f.role === "inbox" ? "" : " muted")}>{imap.counts[f.name]}</span>}
-          </button>
+          <Fragment key={f.name}>
+            <button className={"folder" + (here ? " active" : "")} onClick={() => imap.pick(f.name)} aria-current={here}>
+              <Icon d={d.icon} />
+              <span>{d.label}</span>
+              {(imap.counts[f.name] ?? 0) > 0 && <span className={"badge" + (f.role === "inbox" ? "" : " muted")}>{imap.counts[f.name]}</span>}
+            </button>
+            {f.role === "inbox" && (
+              <button className={"folder" + (imap.unreadView ? " active" : "")} onClick={imap.pickUnread} aria-current={imap.unreadView}>
+                <Icon d={UNREAD_ICON} />
+                <span>Nieprzeczytane</span>
+              </button>
+            )}
+          </Fragment>
         );
       })}
       {imap.folders.length === 0 && !imap.loading && !imap.err && <p className="hint pad">Brak folderów.</p>}
@@ -166,13 +198,8 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
   imap: ImapView; role: string; openUid: number | null; selected: Set<number>;
   onRowClick: (e: React.MouseEvent, r: ImapRow) => void; onSelectAll: () => void; onClear: () => void; onBulk: (action: string) => void;
 }) {
-  const label = imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
-  const [q, setQ] = useState("");
-  const [fl, setFl] = useState<Filters>(EMPTY_FILTERS);
-  const [flErr, setFlErr] = useState<string | null>(null);
-  const [optsOpen, setOptsOpen] = useState(false);
+  const label = imap.unreadView ? "Nieprzeczytane" : imap.term ? `Wyniki: „${imap.term}”` : (folderDisplay(imap.folders)[imap.folder]?.label ?? "");
   const levels = usePrioLevels();
-  useEffect(() => { setQ(""); setFl(EMPTY_FILTERS); setFlErr(null); setOptsOpen(false); }, [imap.account, imap.folder]);
   return (
     <section className="list" aria-label="Lista wiadomości">
       <header className="list-head">
@@ -180,23 +207,6 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
         <FlagsFirstToggle />
         <ReceiveButton busy={imap.loading} onClick={imap.refresh} />
       </header>
-      <form className="search" role="search" onSubmit={(e) => {
-        e.preventDefault();
-        const err = filtersError(fl);
-        setFlErr(err);
-        const full = buildQuery(q, fl, "imap");
-        if (err || !full) return;
-        setOptsOpen(false);
-        imap.search(full, fl.flag);
-      }}>
-        <input type="search" value={q} maxLength={300} placeholder="Szukaj w tym folderze (np. od:ala temat:faktura is:unread)" aria-label="Szukaj w folderze"
-          onFocus={() => setOptsOpen(true)} onChange={(e) => setQ(e.target.value)} />
-        <button className="small" type="button" aria-expanded={optsOpen} title="Opcje wyszukiwania: nadawca, temat, daty, flaga" aria-label="Opcje wyszukiwania"
-          onClick={() => setOptsOpen((v) => !v)}><ActIcon n="filter"/>{hasFilters(fl) && <span className="dot" aria-hidden="true" />}</button>
-        <button className="small" title="Szukaj" aria-label="Szukaj" type="submit"><ActIcon n="search"/></button>
-        {imap.term && <button className="small" title="Wyczyść wyszukiwanie" aria-label="Wyczyść wyszukiwanie" type="button" onClick={() => { setQ(""); setFl(EMPTY_FILTERS); setFlErr(null); imap.clearSearch(); }}><ActIcon n="clear"/></button>}
-        {optsOpen && <SearchFilters value={fl} onChange={setFl} error={flErr} />}
-      </form>
       {imap.err && <p className="error pad" role="alert">{imap.err}</p>}
       {selected.size > 0 && (
         <div className="bulkbar" role="toolbar" aria-label="Akcje na zaznaczonych">
