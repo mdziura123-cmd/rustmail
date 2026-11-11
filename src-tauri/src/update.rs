@@ -290,6 +290,8 @@ pub fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     ] {
         cmd.env_remove(k);
     }
+    // Nowa kopia przejmuje gniazdo „jednej kopii” bez pytania starej, która za chwilę się zamknie.
+    cmd.env("RUSTMAIL_RESTART", "1");
     cmd.spawn().map_err(|e| format!("Nie udało się uruchomić nowej wersji: {e}"))?;
     app.exit(0);
     Ok(())

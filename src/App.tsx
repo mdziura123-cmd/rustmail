@@ -42,7 +42,7 @@ import "./styles.css";
 import "./compose.css";
 
 type Theme = ThemeId;
-const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent", view: "rm.view", keys: "rm.keys", active: "rm.activeonly" };
+const LS = { theme: "rm.theme", left: "rm.left", mid: "rm.mid", auto: "rm.autoupdate", notify: "rm.notify", content: "rm.notifycontent", view: "rm.view", keys: "rm.keys", active: "rm.activeonly", bg: "rm.background" };
 try { applyCustomKeys(JSON.parse(localStorage.getItem("rm.keys") ?? "null")); } catch { /* zapisane skróty są nieczytelne – zostają domyślne */ }
 const STAR = "M12 3l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.8 6.1 21l1.2-6.5L2.5 9.9 9.1 9z";
 
@@ -175,7 +175,10 @@ export default function App() {
   const [notifyOn, setNotifyOn] = useState(() => load(LS.notify, "0") === "1");
   // Domyślnie poczta jest sprawdzana w tle tylko dla konta, na którym pracujesz.
   const [activeOnly, setActiveOnly] = useState(() => load(LS.active, "1") === "1");
-  const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "0") === "1");
+  const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "1") === "1");
+  // Domyślnie zamknięcie okna zostawia aplikację w zasobniku (poczta i powiadomienia działają dalej).
+  const [background, setBackground] = useState(() => load(LS.bg, "1") === "1");
+  useEffect(() => { void api.setBackground(background).catch(() => undefined); }, [background]);
   const [stats, setStats] = useState<{ inbox: number; spam: number; labels: LabelInfo[] }>({ inbox: 0, spam: 0, labels: [] });
   const [newLabel, setNewLabel] = useState<string | null>(null);
   const searchRef = useRef<string | null>(null);
@@ -1408,7 +1411,7 @@ export default function App() {
           onDelete={async (id) => { try { await outboxOps(imapAccount).del(id); } catch (e) { showToast(errText(e)); } await flushQueue(false); }} />
       )}
       {settingsOpen && (
-        <SettingsDialog notify={notifyOn} content={notifyContent} gmail={accounts.length ? accounts : email ? [{ email, active: true }] : []} imap={imapAccs} busy={signingIn}
+        <SettingsDialog notify={notifyOn} content={notifyContent} background={background} onBackground={(on) => { setBackground(on); save(LS.bg, on ? "1" : "0"); }} gmail={accounts.length ? accounts : email ? [{ email, active: true }] : []} imap={imapAccs} busy={signingIn}
           activeOnly={activeOnly} onActiveOnly={(on) => { setActiveOnly(on); save(LS.active, on ? "1" : "0"); }}
           onSignOut={() => { setSettingsOpen(false); void signOut(); }} onSignOutImap={(a) => { setSettingsOpen(false); void signOutImap(a); }}
           autoUpdate={autoUpdate} onAutoUpdate={toggleAuto} hasPrevious={!!updater.state?.hasPrevious}

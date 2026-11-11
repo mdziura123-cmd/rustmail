@@ -54,9 +54,22 @@ pub fn build_text(items: &[Item<'_>], show_content: bool) -> Option<(String, Str
         return None;
     }
     let n = items.len();
-    let title = if n == 1 { "Nowa wiadomość".to_string() } else { format!("Nowe wiadomości: {n}") };
     if !show_content {
+        let title = if n == 1 { "Nowa wiadomość".to_string() } else { format!("Nowe wiadomości: {n}") };
         return Some((title, "Otwórz RustMail, aby je przeczytać.".to_string()));
+    }
+    // Jedna wiadomość: nadawca jako tytuł (pogrubiony w dymku), temat pod nim – do dwóch linii.
+    if n == 1 {
+        let i = &items[0];
+        if i.risky {
+            return Some(("Nowa wiadomość".to_string(), "Wiadomość z ostrzeżeniem – otwórz RustMail".to_string()));
+        }
+        let sender = clean_text(i.sender, 60);
+        let subject = clean_text(i.subject, 140);
+        return Some((
+            if sender.is_empty() { "Nowa wiadomość".to_string() } else { sender },
+            if subject.is_empty() { "(bez tematu)".to_string() } else { subject },
+        ));
     }
     let lines: Vec<String> = items
         .iter()
@@ -65,7 +78,7 @@ pub fn build_text(items: &[Item<'_>], show_content: bool) -> Option<(String, Str
             if i.risky {
                 "Wiadomość z ostrzeżeniem – otwórz RustMail".to_string()
             } else {
-                format!("{}: {}", clean_text(i.sender, 40), clean_text(i.subject, 70))
+                format!("{} — {}", clean_text(i.sender, 30), clean_text(i.subject, 80))
             }
         })
         .collect();
@@ -73,14 +86,18 @@ pub fn build_text(items: &[Item<'_>], show_content: bool) -> Option<(String, Str
     if n > 3 {
         body.push_str(&format!("\n… i {} więcej", n - 3));
     }
-    Some((title, body))
+    Some((format!("Nowe wiadomości: {n}"), body))
 }
 
 /// Pokazuje powiadomienie przez `notify-send`. Brak programu lub błąd nie przerywają pracy aplikacji.
 pub fn send(title: &str, body: &str) -> Result<(), String> {
     let mut cmd = std::process::Command::new("notify-send");
     // `--` kończy opcje, więc tekst z wiadomości nigdy nie zostanie wzięty za opcję.
-    cmd.arg("--app-name=RustMail").arg("--").arg(clean_text(title, 80)).arg(clean_text(body, 400));
+    cmd.arg("--app-name=RustMail")
+        .arg("--icon=pl.rustmail.app")
+        .arg("--hint=string:desktop-entry:pl.rustmail.app")
+        .arg("--expire-time=8000")
+        .arg("--").arg(clean_text(title, 80)).arg(clean_text(body, 400));
     for k in ["LD_LIBRARY_PATH", "LD_PRELOAD", "APPDIR", "GDK_PIXBUF_MODULE_FILE"] {
         cmd.env_remove(k);
     }
@@ -133,14 +150,18 @@ mod tests {
         let (t, b) = build_text(&items, false).unwrap();
         assert_eq!(t, "Nowa wiadomość");
         assert!(!b.contains("Ala") && !b.contains("Faktura"));
-        let (_, b) = build_text(&items, true).unwrap();
-        assert_eq!(b, "Ala: Faktura");
+        let (t, b) = build_text(&items, true).unwrap();
+        assert_eq!((t.as_str(), b.as_str()), ("Ala", "Faktura"));
         let risky = [Item { sender: "Bank", subject: "Pilne!", risky: true }];
-        let (_, b) = build_text(&risky, true).unwrap();
-        assert!(!b.contains("Bank") && !b.contains("Pilne"));
+        let (t, b) = build_text(&risky, true).unwrap();
+        assert!(!t.contains("Bank") && !b.contains("Bank") && !b.contains("Pilne"));
+        let empty = [Item { sender: "", subject: "", risky: false }];
+        let (t, b) = build_text(&empty, true).unwrap();
+        assert_eq!((t.as_str(), b.as_str()), ("Nowa wiadomość", "(bez tematu)"));
         let many: Vec<Item> = (0..5).map(|_| Item { sender: "A", subject: "B", risky: false }).collect();
         let (t, b) = build_text(&many, true).unwrap();
         assert_eq!(t, "Nowe wiadomości: 5");
         assert!(b.ends_with("… i 2 więcej"));
+        assert!(b.starts_with("A — B\n"));
     }
 }

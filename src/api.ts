@@ -138,6 +138,8 @@ export const api = {
   setThreadLabel: (id: string, label: string, add: boolean) =>
     invoke<void>("set_thread_label", { id, label, add }),
   testNotification: () => invoke<void>("test_notification"),
+  setBackground: (enabled: boolean) => invoke<void>("set_background", { enabled }),
+  backgroundState: () => invoke<boolean>("background_state"),
   cacheStatus: () => invoke<CacheStatus>("cache_status"),
   setOfflineEnabled: (enabled: boolean) => invoke<CacheStatus>("set_offline_enabled", { enabled }),
   clearCache: () => invoke<CacheStatus>("clear_cache"),

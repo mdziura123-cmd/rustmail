@@ -38,7 +38,7 @@
 .toast .small:hover { background: color-mix(in srgb, var(--bg) 20%, transparent); }
 
 .modal-back { position: fixed; inset: 0; background: var(--backdrop); display: grid; place-items: center; z-index: 30; padding: 16px; }
-.modal { background: var(--panel); border-radius: 12px; padding: 20px; width: min(520px, 100%); display: grid; gap: 12px; box-shadow: var(--shadow); }
+.modal { background: var(--panel); border-radius: 12px; padding: 20px; width: min(520px, 100%); display: grid; gap: 12px; box-shadow: var(--shadow); max-height: calc(100vh - 32px); overflow-y: auto; }
 .modal h3 { font-size: 16px; }
 .modal .hint { font-size: 12px; color: var(--muted); }
 .modal textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); resize: vertical; }
@@ -168,11 +168,15 @@ kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; backg
 .imap-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 
 /* Ustawienia z kategoriami */
-.settings-modal { width: min(760px, 94vw); }
-.settings-cols { display: grid; grid-template-columns: 150px 1fr; gap: 14px; min-height: 280px; }
-.settings-tabs { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; border-right: 1px solid var(--line); padding-right: 10px; }
+.settings-modal { width: min(760px, 94vw); height: min(640px, calc(100vh - 32px)); overflow: hidden; grid-template-rows: auto minmax(0, 1fr) auto; }
+.settings-cols { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; min-height: 0; overflow: hidden; }
+.settings-tabs { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; border-right: 1px solid var(--line); padding-right: 10px; }
 .settings-tabs .active { font-weight: 700; }
-.settings-body { display: grid; gap: 10px; align-content: start; }
+.settings-body { display: grid; gap: 10px; align-content: start; min-height: 0; overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
+@media (max-width: 640px) {
+  .settings-cols { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .settings-tabs { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 8px; }
+}
 .settings-list { display: grid; gap: 8px; justify-items: start; }
 .acc-title { padding: 6px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .65; border-top: 1px solid var(--line); }
 .acc-title:first-child { border-top: 0; }

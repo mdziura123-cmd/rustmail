@@ -19,6 +19,8 @@ interface Props {
   onSignOutImap: (email: string) => void;
   notify: boolean;
   content: boolean;
+  background: boolean;
+  onBackground: (on: boolean) => void;
   onNotify: (on: boolean) => void;
   theme: ThemeId;
   onTheme: (t: ThemeId) => void;
@@ -180,6 +182,8 @@ export function SettingsDialog(p: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmRollback, setConfirmRollback] = useState(false);
   const [confirmOut, setConfirmOut] = useState<string | null>(null);
+  const [trayOk, setTrayOk] = useState<boolean | null>(null);
+  useEffect(() => { void api.backgroundState().then(setTrayOk).catch(() => setTrayOk(null)); }, []);
   const test = async () => {
     setMsg(null);
     try {
@@ -230,6 +234,13 @@ export function SettingsDialog(p: Props) {
                   <input type="checkbox" checked={p.activeOnly} onChange={(e) => p.onActiveOnly(e.target.checked)} />
                   Sprawdzaj pocztę w tle tylko na koncie, na którym pracuję
                 </label>
+                <label className="check">
+                  <input type="checkbox" checked={p.background} onChange={(e) => p.onBackground(e.target.checked)} />
+                  Po zamknięciu okna zostaw RustMail w tle (ikona w zasobniku)
+                </label>
+                {p.background && trayOk === false && (
+                  <p className="hint">Ikona w zasobniku nie jest dostępna w tym środowisku, więc zamknięcie okna zamknie program.</p>
+                )}
                 <div className="check sound-row">
                   <label htmlFor="sound-pick">Dźwięk nowej wiadomości</label>
                   <select id="sound-pick" value={p.sound} onChange={(e) => { const s = e.target.value as SoundId; p.onSound(s); playSound(s); }}>
@@ -238,8 +249,9 @@ export function SettingsDialog(p: Props) {
                   <button type="button" disabled={p.sound === "off"} onClick={() => playSound(p.sound)}>Odtwórz</button>
                 </div>
                 <p className="hint">
-                  Domyślnie powiadomienie mówi tylko, że przyszła nowa poczta. Treść wiadomości z ostrzeżeniem nigdy nie jest pokazywana.
-                  Poczta jest sprawdzana co minutę, gdy aplikacja jest uruchomiona; powiadomienia wymagają programu
+                  Powiadomienie pokazuje nadawcę i temat (bez tej opcji tylko informację, że przyszła nowa poczta). Treść wiadomości z ostrzeżeniem nigdy nie jest pokazywana.
+                  Poczta jest sprawdzana co minutę, także gdy aplikacja działa w tle (w zasobniku, po zamknięciu okna). Aby zakończyć program całkiem, wybierz „Zakończ RustMail” z menu ikony w zasobniku.
+                  Powiadomienia wymagają programu
                   <code> notify-send</code> w systemie. Wiadomość, która dojdzie do już nieprzeczytanego wątku, nie wywoła powiadomienia.
                 </p>
                 <div className="modal-actions">

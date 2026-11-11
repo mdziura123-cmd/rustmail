@@ -1,5 +1,6 @@
 mod accounts;
 mod auth;
+mod background;
 mod blocklist;
 mod commands;
 mod dbkey;
@@ -8,6 +9,7 @@ mod dismissed;
 mod filetype;
 mod gmail;
 mod labels;
+mod launcher;
 mod notify;
 mod offline;
 mod phishing;
@@ -37,13 +39,30 @@ pub fn run() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
 
+    // Jedna kopia aplikacji: drugie uruchomienie (np. z przypiętego skrótu) tylko pokazuje okno pierwszej.
+    let instance = background::single_instance();
+
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            // Zamknięcie okna zostawia aplikację w zasobniku (poczta i powiadomienia działają dalej).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && background::should_hide_on_close() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .manage(auth::AppState::new())
         .manage(notify::Notifier::default())
         .manage(notify::ImapSeen::default())
         .manage(spam_io::SpamState::default())
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::Manager;
+            if let Some(l) = instance {
+                background::serve(app.handle().clone(), l);
+            }
+            background::init_tray(app.handle());
+            background::install_launcher(app.handle());
             // Katalogi aplikacji (konfiguracja, dane, pamięć podręczna) są dostępne tylko dla właściciela.
             for d in [app.path().app_config_dir(), app.path().app_data_dir(), app.path().app_cache_dir()].into_iter().flatten() {
                 let _ = privfs::ensure_private_dir(&d);
@@ -138,6 +157,8 @@ pub fn run() {
             commands::import_label,
             commands::import_message,
             commands::test_notification,
+            background::set_background,
+            background::background_state,
             commands::set_thread_label,
             commands::cache_status,
             commands::set_offline_enabled,
