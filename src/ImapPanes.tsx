@@ -230,7 +230,7 @@ export function ImapListPane({ imap, role, openUid, selected, onRowClick, onSele
           <li key={r.uid} className={selected.has(r.uid) ? "picked" : ""}>
             <button className={"row" + (r.uid === openUid ? " active" : "") + (r.unread ? " unread" : "")}
               aria-pressed={selected.has(r.uid)} onClick={(e) => onRowClick(e, r)} {...cm.bind(() => rowMenu(r))}>
-              <span className="who">{r.from}</span>
+              <span className="who">{r.unread && <i className="udot" role="img" aria-label="Nieprzeczytana" />}{r.from}</span>
               <span className="when"><PrioFlag level={levels[imapPrioKey(imap.account ?? "", imap.folder, r.uid)] ?? 0} />{r.starred ? "★ " : ""}{fmtDate(r.dateMs)}</span>
               <span className="subj">{r.subject || "(bez tematu)"}</span>
             </button>

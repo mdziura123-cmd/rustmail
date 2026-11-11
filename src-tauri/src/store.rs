@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS threads (
 );
 CREATE INDEX IF NOT EXISTS threads_date ON threads (last_date_ms DESC);
 CREATE TABLE IF NOT EXISTS prio (key TEXT PRIMARY KEY, level INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS contacts (email TEXT PRIMARY KEY, name TEXT NOT NULL, uses INTEGER NOT NULL, last_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_ms INTEGER NOT NULL,
@@ -570,6 +571,65 @@ impl Store {
     }
 
     // ---------- Flagi ważności (lokalne, w zaszyfrowanej bazie) ----------
+
+    /// Zapamiętuje adresy, do których wysłano wiadomość (licznik użyć rośnie, nazwa uzupełnia się, gdy jej brakowało).
+    pub fn contacts_remember(&self, addrs: &[crate::contacts::Addr], now_ms: i64) -> Result<(), String> {
+        if addrs.is_empty() {
+            return Ok(());
+        }
+        self.with(|c| {
+            for a in addrs {
+                c.execute(
+                    "INSERT INTO contacts (email, name, uses, last_ms) VALUES (?1, ?2, 1, ?3) \
+                     ON CONFLICT(email) DO UPDATE SET uses = uses + 1, last_ms = excluded.last_ms, \
+                     name = CASE WHEN excluded.name <> '' THEN excluded.name ELSE contacts.name END",
+                    params![a.email, a.name, now_ms],
+                )?;
+            }
+            c.execute(
+                "DELETE FROM contacts WHERE email IN (SELECT email FROM contacts ORDER BY uses ASC, last_ms ASC \
+                 LIMIT MAX(0, (SELECT COUNT(*) FROM contacts) - ?1))",
+                [crate::contacts::MAX_CONTACTS],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Podpowiedzi adresów: najpierw te zaczynające się od wpisanego tekstu, potem najczęściej i ostatnio używane.
+    pub fn contacts_suggest(&self, q: &str, limit: usize) -> Result<Vec<(String, String)>, String> {
+        let q = q.trim().to_lowercase();
+        if q.is_empty() || q.chars().count() > 100 {
+            return Ok(Vec::new());
+        }
+        let esc = crate::contacts::like_escape(&q);
+        let (any, prefix) = (format!("%{esc}%"), format!("{esc}%"));
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT email, name FROM contacts \
+                 WHERE email LIKE ?1 ESCAPE '\\' OR lower(name) LIKE ?1 ESCAPE '\\' \
+                 ORDER BY (CASE WHEN email LIKE ?2 ESCAPE '\\' OR lower(name) LIKE ?2 ESCAPE '\\' OR lower(name) LIKE ?3 ESCAPE '\\' THEN 0 ELSE 1 END), \
+                          uses DESC, last_ms DESC LIMIT ?4",
+            )?;
+            let rows = st.query_map(params![any, prefix, format!("% {esc}%"), limit.clamp(1, 20) as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            rows.collect()
+        })
+    }
+
+    pub fn contacts_list(&self) -> Result<Vec<(String, String)>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT email, name FROM contacts ORDER BY lower(CASE WHEN name <> '' THEN name ELSE email END) LIMIT 3000")?;
+            let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            rows.collect()
+        })
+    }
+
+    pub fn contacts_delete(&self, email: &str) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM contacts WHERE email = ?1", [email.trim().to_lowercase()]).map(|_| ()))
+    }
+
+    pub fn contacts_clear(&self) -> Result<(), String> {
+        self.with(|c| c.execute("DELETE FROM contacts", []).map(|_| ()))
+    }
 
     /// Ustawia flagę (1 = bardzo ważne, 2 = ważne, 3 = mniej ważne); 0 usuwa flagę.
     pub fn prio_set(&self, key: &str, level: u8) -> Result<(), String> {

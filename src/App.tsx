@@ -1197,7 +1197,7 @@ export default function App() {
                       className={"row" + (t.id === openId ? " active" : "") + (t.unread ? " unread" : "")}
                       aria-pressed={selected.has(t.id)}
                       onClick={(e) => onRowClick(e, t)} {...gm.bind(() => gmailRowMenu(t))}>
-                      <span className="who">{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
+                      <span className="who">{t.unread && <i className="udot" role="img" aria-label="Nieprzeczytana" />}{t.participants}{t.count > 1 ? ` (${t.count})` : ""}</span>
                       <span className="when">
                         {email && <PrioFlag level={prioLevels[gmailPrioKey(email, t.id)] ?? 0} />} {t.starred && <Icon d={STAR} />} {fmtDate(t.lastDateMs)}
                       </span>

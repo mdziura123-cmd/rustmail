@@ -1009,3 +1009,43 @@ pub async fn spam_restore(app: AppHandle, state: State<'_, AppState>, spam: Stat
 pub async fn spam_move(app: AppHandle, state: State<'_, AppState>, spam: State<'_, SpamState>, item: spam_io::TrainItem) -> Result<(), String> {
     spam_io::move_to_spam(&app, &spam, &state, &item).await
 }
+
+#[derive(serde::Serialize)]
+pub struct ContactOut {
+    pub email: String,
+    pub name: String,
+}
+
+fn contact_out(v: Vec<(String, String)>) -> Vec<ContactOut> {
+    v.into_iter().map(|(email, name)| ContactOut { email, name }).collect()
+}
+
+/// Podpowiedzi adresów z książki adresów dla wpisywanego tekstu.
+#[tauri::command]
+pub fn contacts_suggest(store: State<'_, Store>, query: String) -> Result<Vec<ContactOut>, String> {
+    Ok(contact_out(store.contacts_suggest(&query, 8)?))
+}
+
+/// Zapamiętuje adresy z pola (np. „Jan <jan@x.pl>, ala@y.pl”). Niepoprawne wpisy są pomijane.
+#[tauri::command]
+pub fn contacts_remember(store: State<'_, Store>, list: String) -> Result<usize, String> {
+    let addrs = crate::contacts::parse_list(&list);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    store.contacts_remember(&addrs, now)?;
+    Ok(addrs.len())
+}
+
+#[tauri::command]
+pub fn contacts_list(store: State<'_, Store>) -> Result<Vec<ContactOut>, String> {
+    Ok(contact_out(store.contacts_list()?))
+}
+
+#[tauri::command]
+pub fn contacts_delete(store: State<'_, Store>, email: String) -> Result<(), String> {
+    store.contacts_delete(&email)
+}
+
+#[tauri::command]
+pub fn contacts_clear(store: State<'_, Store>) -> Result<(), String> {
+    store.contacts_clear()
+}

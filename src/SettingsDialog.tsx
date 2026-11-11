@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
+import { AddressBook } from "./AddressBook";
 import { BINDINGS, customKeys, keyLabel, keyOf, keysVersion, resetKeys, setKey, subscribeKeys } from "./shortcuts";
 import { isThemeId, THEMES, type ThemeId } from "./themes";
 import { getProvider, PROVIDERS, setProvider, type Provider } from "./translateProviders";
@@ -278,6 +279,7 @@ export function SettingsDialog(p: Props) {
                 <button onClick={() => p.onOpen("senders")}>Listy nadawców…</button>
                 <button onClick={() => p.onOpen("offline")}>Tryb offline…</button>
                 <button onClick={() => p.onOpen("import")}>Import poczty z pliku…</button>
+                <AddressBook />
               </div>
             )}
             {tab === "spam" && (

@@ -24,6 +24,7 @@ mod store;
 mod privfs;
 mod blobmig;
 mod prio;
+mod contacts;
 mod consent;
 mod translate;
 mod update;
@@ -89,6 +90,11 @@ pub fn run() {
             commands::spam_log,
             commands::prio_set,
             commands::prio_get,
+            commands::contacts_suggest,
+            commands::contacts_remember,
+            commands::contacts_list,
+            commands::contacts_delete,
+            commands::contacts_clear,
             commands::compose_backup_set,
             commands::compose_backup_get,
             commands::compose_backup_clear,

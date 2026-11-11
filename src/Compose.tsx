@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActIcon } from "./ActIcon";
 import { api, errText } from "./api";
+import { AddressInput } from "./AddressInput";
 import { RichEditor, type EditorApi } from "./RichEditor";
 import { SpellBar } from "./SpellBar";
 import type { ComposeInit } from "./replyLogic";
@@ -122,21 +123,35 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
     return () => clearInterval(t);
   }, [saveDraft, sending]);
 
+  // Zapamiętuje adresy odbiorców w książce adresów (po udanej wysyłce lub zapisie w kolejce).
+  const remember = () => { api.contactsRemember([to, cc, bcc].filter(Boolean).join(", ")).catch(() => {}); };
+  // Krótka animacja „wysłano” przed zamknięciem okna (pomijana przy ograniczeniu ruchu w systemie).
+  const [sentAnim, setSentAnim] = useState(false);
+  const celebrate = async () => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    setSentAnim(true);
+    await new Promise((r) => window.setTimeout(r, 1150));
+  };
+
   const send = async () => {
     setError(null);
     setSending(true);
     try {
       if (imapAcc) {
         const res = await api.imapSend(imapAcc, build());
+        remember();
         if (draftRef.current) api.imapDeleteDraft(imapAcc, Number(draftRef.current)).catch(() => {});
         dirty.current = false;
         backup(null);
+        await celebrate();
         onSent({ threadId: "", warning: res.warning });
         return;
       }
       const info = await api.sendMessage(build());
+      remember();
       dirty.current = false;
       backup(null);
+      await celebrate();
       onSent({ threadId: info.threadId || init.threadId || "" });
     } catch (e) {
       const m = errText(e);
@@ -155,6 +170,7 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
     try {
       if (imapAcc) await api.imapOutboxQueue(imapAcc, build());
       else await api.queueMessage(build());
+      remember();
       dirty.current = false;
       backup(null);
       onQueued();
@@ -235,15 +251,15 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
           </label>
         )}
         <label><span>Do</span>
-          <input value={to} onChange={(e) => { setTo(e.target.value); markDirty(); }} placeholder="adres@example.com, drugi@example.com" disabled={sending} />
+          <AddressInput label="Do" value={to} onChange={(v) => { setTo(v); markDirty(); }} placeholder="adres@example.com, drugi@example.com" disabled={sending} />
         </label>
         {showCc ? (
           <>
             <label><span>DW</span>
-              <input value={cc} onChange={(e) => { setCc(e.target.value); markDirty(); }} disabled={sending} />
+              <AddressInput label="DW" value={cc} onChange={(v) => { setCc(v); markDirty(); }} disabled={sending} />
             </label>
             <label><span>UDW</span>
-              <input value={bcc} onChange={(e) => { setBcc(e.target.value); markDirty(); }} disabled={sending} />
+              <AddressInput label="UDW" value={bcc} onChange={(v) => { setBcc(v); markDirty(); }} disabled={sending} />
             </label>
           </>
         ) : (
@@ -282,6 +298,14 @@ export function Compose({ init, onSent, onQueued, onClose, from: fromProp, sende
         </div>
       )}
 
+      {sentAnim && (
+        <div className="sent-anim" role="status" aria-live="polite">
+          <div className="sent-card">
+            <span className="sent-plane"><ActIcon n="send" /></span>
+            <span className="sent-text">Wiadomość wysłana</span>
+          </div>
+        </div>
+      )}
       <footer className="compose-foot">
         <button className="primary" disabled={sending} title={sending ? "Wysyłanie…" : "Wyślij"} aria-label={sending ? "Wysyłanie…" : "Wyślij"} aria-busy={sending} onClick={() => void send()}><ActIcon n="send" /></button>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => void addFiles(e.target.files)} />
