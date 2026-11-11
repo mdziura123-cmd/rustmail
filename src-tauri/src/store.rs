@@ -681,6 +681,15 @@ impl Store {
         })
     }
 
+    /// Wszystkie flagi (do kopii zapasowej); najwyżej `limit` wpisów.
+    pub fn prio_list(&self, limit: usize) -> Result<Vec<(String, u8)>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT key, level FROM prio ORDER BY key LIMIT ?1")?;
+            let rows = st.query_map([limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.clamp(0, 3) as u8)))?;
+            rows.collect()
+        })
+    }
+
     /// Flagi dla podanych kluczy (brakujące klucze oznaczają brak flagi).
     pub fn prio_get(&self, keys: &[String]) -> Result<Vec<(String, u8)>, String> {
         self.with(|c| {

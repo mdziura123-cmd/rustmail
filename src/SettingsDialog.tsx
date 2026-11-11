@@ -2,6 +2,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
 import { AddressBook } from "./AddressBook";
+import { Backup } from "./Backup";
+import { getLabels, getScale, setLabels, setScale, SCALES } from "./display";
 import { BINDINGS, customKeys, keyLabel, keyOf, keysVersion, resetKeys, setKey, subscribeKeys } from "./shortcuts";
 import { isThemeId, THEMES, type ThemeId } from "./themes";
 import { getProvider, PROVIDERS, setProvider, type Provider } from "./translateProviders";
@@ -182,6 +184,8 @@ export function SettingsDialog(p: Props) {
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmRollback, setConfirmRollback] = useState(false);
   const [confirmOut, setConfirmOut] = useState<string | null>(null);
+  const [scale, setScaleState] = useState(getScale);
+  const [labels, setLabelsState] = useState(getLabels);
   const [trayOk, setTrayOk] = useState<boolean | null>(null);
   useEffect(() => { void api.backgroundState().then(setTrayOk).catch(() => setTrayOk(null)); }, []);
   const test = async () => {
@@ -222,6 +226,16 @@ export function SettingsDialog(p: Props) {
                     {THEMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                   </select>
                 </div>
+                <div className="check sound-row">
+                  <label htmlFor="scale-pick">Skala interfejsu</label>
+                  <select id="scale-pick" value={scale} onChange={(e) => { const n = Number(e.target.value); setScaleState(n); setScale(n); }}>
+                    {SCALES.map((s) => <option key={s} value={s}>{Math.round(s * 100)}%</option>)}
+                  </select>
+                </div>
+                <label className="check">
+                  <input type="checkbox" checked={labels} onChange={(e) => { setLabelsState(e.target.checked); setLabels(e.target.checked); }} />
+                  Podpisy pod ikonami (wygodne na ekranie dotykowym)
+                </label>
                 <label className="check">
                   <input type="checkbox" checked={p.notify} onChange={(e) => p.onNotify(e.target.checked)} />
                   Powiadomienia pulpitowe o nowych wiadomościach
@@ -292,6 +306,7 @@ export function SettingsDialog(p: Props) {
                 <button onClick={() => p.onOpen("offline")}>Tryb offline…</button>
                 <button onClick={() => p.onOpen("import")}>Import poczty z pliku…</button>
                 <AddressBook />
+                <Backup />
               </div>
             )}
             {tab === "spam" && (

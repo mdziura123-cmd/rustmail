@@ -1,6 +1,7 @@
 mod accounts;
 mod auth;
 mod background;
+mod backup;
 mod badge;
 mod blocklist;
 mod commands;
@@ -161,6 +162,8 @@ pub fn run() {
             background::set_background,
             background::background_state,
             background::set_unread,
+            backup::backup_export,
+            backup::backup_import,
             commands::set_thread_label,
             commands::cache_status,
             commands::set_offline_enabled,

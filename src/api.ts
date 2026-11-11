@@ -140,6 +140,9 @@ export const api = {
   testNotification: () => invoke<void>("test_notification"),
   setBackground: (enabled: boolean) => invoke<void>("set_background", { enabled }),
   backgroundState: () => invoke<boolean>("background_state"),
+  backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),
+  backupImport: (json: string) =>
+    invoke<{ contacts: number; flags: number; settings: Record<string, string> }>("backup_import", { json }),
   setUnread: (count: number) => invoke<void>("set_unread", { count }),
   cacheStatus: () => invoke<CacheStatus>("cache_status"),
   setOfflineEnabled: (enabled: boolean) => invoke<CacheStatus>("set_offline_enabled", { enabled }),

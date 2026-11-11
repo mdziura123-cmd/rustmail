@@ -39,9 +39,18 @@ const PATHS = {
 
 export type ActIconName = keyof typeof PATHS;
 
+// Podpisy pokazywane pod ikonami po włączeniu opcji „Podpisy pod ikonami” (patrz styles.css).
+const LABELS: Partial<Record<ActIconName, string>> = {
+  reply: "Odpowiedz", replyAll: "Odpowiedz wszystkim", forward: "Przekaż", archive: "Archiwizuj", inbox: "Odebrane",
+  spam: "Spam", notspam: "Nie spam", trash: "Usuń", restore: "Przywróć", read: "Przeczytana", unread: "Nieprzeczytana",
+  star: "Gwiazdka", label: "Etykieta", edit: "Edytuj", expand: "Rozwiń", collapse: "Zwiń", selectAll: "Zaznacz",
+  clear: "Zamknij", save: "Zapisz", send: "Wyślij", attach: "Załącznik", flag: "Flaga", filter: "Filtr", copy: "Kopiuj",
+  paste: "Wklej", plus: "Dodaj", calendar: "Data", search: "Szukaj", dict: "Słownik", user: "Konto",
+};
+
 export function ActIcon({ n, filled }: { n: ActIconName; filled?: boolean }) {
   return (
-    <span className={"ai ai-" + n} aria-hidden="true">
+    <span className={"ai ai-" + n} data-l={LABELS[n]} aria-hidden="true">
       <svg viewBox="0 0 24 24" width="15" height="15" fill={filled ? "currentColor" : "none"} stroke="currentColor"
         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d={PATHS[n]} />

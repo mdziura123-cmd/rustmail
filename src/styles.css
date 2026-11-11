@@ -351,6 +351,11 @@ button, .row, summary, select, input { touch-action: manipulation; }
 .addr-list li > button { margin-left: auto; }
 @media (pointer: coarse) { .addr-opt { padding: 12px 12px; font-size: 15px; } }
 
+/* Podpisy pod ikonami (Ustawienia → Ogólne) */
+html.show-labels .tools .ai, html.show-labels .compose .small .ai { width: auto; gap: 5px; align-items: center; }
+html.show-labels .tools .ai::after, html.show-labels .compose .small .ai::after { content: attr(data-l); font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--ink); }
+html.show-labels .tools button, html.show-labels .compose .small { width: auto; }
+
 /* Animacja wysłanej wiadomości */
 .compose { position: relative; }
 .sent-anim { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--panel) 88%, transparent); animation: sent-fade 1.15s ease forwards; }
