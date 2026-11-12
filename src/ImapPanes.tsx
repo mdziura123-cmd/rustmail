@@ -133,7 +133,8 @@ export function useImapView(account: string | null) {
     const my = ++seq.current;
     setTerm(q.trim()); setLoading(true); setErr(null);
     try {
-      const p = await api.imapSearch(account, inFolder, q.trim());
+      const att = q.trim().match(/^za[łl]acznik:\s*(.+)$/i);
+      const p = att ? await api.imapSearchAttachments(account, inFolder, att[1]) : await api.imapSearch(account, inFolder, q.trim());
       if (my !== seq.current) return;
       await prio.ensure(p.rows.map((r) => imapPrioKey(account, inFolder, r.uid)));
       if (my !== seq.current) return;
@@ -250,6 +251,8 @@ interface ReaderProps {
   role: string;
   uid: number | null;
   onCompose: (kind: "reply" | "replyAll" | "forward", msg: ImapMsg) => void;
+  /** „Do kalendarza”: temat i treść wiadomości. */
+  onCalendar?: (subject: string, text: string) => void;
   /** Czy skróty klawiszowe otwartej wiadomości są włączone (wyłączone, gdy na liście są zaznaczone wiadomości). */
   keys?: boolean;
   /** Po przeniesieniu wiadomości do innego folderu (kosz, spam, archiwum, skrzynka) – do komunikatu „Cofnij”. */
@@ -263,7 +266,7 @@ interface ReaderProps {
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onMoved, onEditDraft, pending, onPendingDone, keys = true }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onCalendar, onMoved, onEditDraft, pending, onPendingDone, keys = true }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -350,6 +353,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
               <button title="Odpowiedz nadawcy (r)" aria-label="Odpowiedz nadawcy (r)" className={role === "drafts" ? "" : "primary"} onClick={() => onCompose("reply", msg)}><ActIcon n="reply"/></button>
               <button title="Odpowiedz wszystkim (a)" aria-label="Odpowiedz wszystkim (a)" onClick={() => onCompose("replyAll", msg)}><ActIcon n="replyAll"/></button>
               <button title="Przekaż dalej (f)" aria-label="Przekaż dalej (f)" onClick={() => onCompose("forward", msg)}><ActIcon n="forward"/></button>
+              {onCalendar && <button title="Dodaj do kalendarza" aria-label="Dodaj do kalendarza" onClick={() => onCalendar(msg.subject, msg.text || "")}><ActIcon n="calendar"/></button>}
               <span className="sep" />
               <button title={msg.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} aria-label={msg.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} onClick={() => void act(msg.unread ? "read" : "unread")}><ActIcon n={msg.unread ? "read" : "unread"} /></button>
               <button title={msg.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} aria-label={msg.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} onClick={() => void act(msg.starred ? "unstar" : "star")}><ActIcon n="star" filled={msg.starred} /></button>

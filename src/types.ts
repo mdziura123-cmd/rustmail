@@ -273,4 +273,9 @@ export interface CalEvent {
   allDay: boolean;
   /** Ile minut przed początkiem przypomnieć; -1 = bez przypomnienia. */
   remindMin: number;
+  /** none | daily | weekly | monthly | yearly */
+  repeat: string;
+  /** Początek ostatniego wystąpienia (ms); 0 = bez końca. */
+  untilMs: number;
+  reminded?: number;
 }

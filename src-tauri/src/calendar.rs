@@ -28,7 +28,22 @@ pub struct Event {
     /// Ile minut przed początkiem przypomnieć; -1 = bez przypomnienia.
     #[serde(default = "no_remind")]
     pub remind_min: i64,
+    /// Powtarzanie: none, daily, weekly, monthly, yearly.
+    #[serde(default = "no_repeat")]
+    pub repeat: String,
+    /// Do kiedy się powtarza (początek ostatniego możliwego wystąpienia, ms); 0 = bez końca.
+    #[serde(default)]
+    pub until_ms: i64,
+    /// Początek ostatniego wystąpienia, o którym przypomniano (dla serii); dla pojedynczych 0/1.
+    #[serde(default)]
+    pub reminded: i64,
 }
+
+fn no_repeat() -> String {
+    "none".to_string()
+}
+
+pub const REPEATS: [&str; 5] = ["none", "daily", "weekly", "monthly", "yearly"];
 
 fn no_remind() -> i64 {
     -1
@@ -55,6 +70,12 @@ pub fn validate(e: &Event) -> Result<Event, String> {
     if e.remind_min < -1 || e.remind_min > MAX_REMIND_MIN {
         return Err("Niepoprawny czas przypomnienia.".to_string());
     }
+    if !REPEATS.contains(&e.repeat.as_str()) {
+        return Err("Niepoprawny sposób powtarzania.".to_string());
+    }
+    if e.until_ms < 0 || (e.until_ms != 0 && e.until_ms < e.start_ms) {
+        return Err("Powtarzanie nie może kończyć się przed początkiem wydarzenia.".to_string());
+    }
     Ok(Event {
         id: e.id,
         title,
@@ -63,6 +84,9 @@ pub fn validate(e: &Event) -> Result<Event, String> {
         end_ms: e.end_ms,
         all_day: e.all_day,
         remind_min: e.remind_min,
+        repeat: e.repeat.clone(),
+        until_ms: if e.repeat == "none" { 0 } else { e.until_ms },
+        reminded: 0,
     })
 }
 
@@ -81,7 +105,19 @@ pub fn cal_delete(store: State<'_, Store>, id: i64) -> Result<(), String> {
     store.event_delete(id)
 }
 
-/// Przypomnienia, na które przyszedł czas (każde zwracane tylko raz).
+/// Wydarzenia cykliczne z przypomnieniem (rozwijanie wystąpień robi interfejs, bo zna strefę czasową).
+#[tauri::command]
+pub fn cal_recurring(store: State<'_, Store>) -> Result<Vec<Event>, String> {
+    store.event_recurring()
+}
+
+/// Zapamiętuje, że o wystąpieniu zaczynającym się o `occ_ms` już przypomniano.
+#[tauri::command]
+pub fn cal_mark(store: State<'_, Store>, id: i64, occ_ms: i64) -> Result<(), String> {
+    store.event_mark(id, occ_ms)
+}
+
+/// Przypomnienia pojedynczych wydarzeń, na które przyszedł czas (każde zwracane tylko raz).
 #[tauri::command]
 pub fn cal_due(store: State<'_, Store>, now_ms: i64) -> Result<Vec<Event>, String> {
     store.event_due(now_ms)
@@ -92,7 +128,7 @@ mod tests {
     use super::*;
 
     fn ev() -> Event {
-        Event { id: None, title: "  Wizyta ".into(), notes: "a\nb\u{7}".into(), start_ms: 1000, end_ms: 2000, all_day: false, remind_min: 15 }
+        Event { id: None, title: "  Wizyta ".into(), notes: "a\nb\u{7}".into(), start_ms: 1000, end_ms: 2000, all_day: false, remind_min: 15, repeat: "none".into(), until_ms: 0, reminded: 0 }
     }
 
     #[test]
@@ -100,6 +136,21 @@ mod tests {
         let v = validate(&ev()).unwrap();
         assert_eq!(v.title, "Wizyta");
         assert_eq!(v.notes, "a\nb");
+    }
+
+    #[test]
+    fn repeat_rules() {
+        let mut e = ev();
+        e.repeat = "weekly".into();
+        e.until_ms = 5000;
+        assert_eq!(validate(&e).unwrap().until_ms, 5000);
+        e.until_ms = 10;
+        assert!(validate(&e).is_err());
+        e.repeat = "hourly".into();
+        assert!(validate(&e).is_err());
+        let mut e = ev();
+        e.until_ms = 9999;
+        assert_eq!(validate(&e).unwrap().until_ms, 0);
     }
 
     #[test]

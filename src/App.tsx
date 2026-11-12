@@ -14,7 +14,9 @@ import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
-import { CalendarDialog } from "./Calendar";
+import { CalendarDialog, type CalPrefill } from "./Calendar";
+import { dueOccurrence } from "./recur";
+import { findDate } from "./dateFind";
 import { ActIcon } from "./ActIcon";
 import { loadSound, playSound, saveSound, type SoundId } from "./sound";
 import { applyCustomKeys, commandFor, customKeys, isTypingTarget, shortcutHelp } from "./shortcuts";
@@ -136,6 +138,12 @@ export default function App() {
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
+  const [calPrefill, setCalPrefill] = useState<CalPrefill | null>(null);
+  const calFromMail = (subject: string, text: string) => {
+    const f = findDate(subject + "\n" + text);
+    setCalPrefill({ title: subject.slice(0, 120), notes: f.found ? "" : "Nie znaleziono terminu w wiadomości – ustaw datę.", date: f.date, time: f.time });
+    setCalOpen(true);
+  };
   const [scheduled, setScheduled] = useState<SchedItem[]>([]);
   const [snoozed, setSnoozed] = useState<SnoozeItem[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -963,6 +971,20 @@ export default function App() {
     const t = window.setInterval(() => void tick(), 30_000);
     return () => window.clearInterval(t);
   }, [email, imapKey, refreshLater, showToast]);
+  // Synchronizacja danych lokalnych przez wybrany folder: przy starcie i co 15 minut (jeśli folder jest ustawiony).
+  useEffect(() => {
+    const run = async () => {
+      try {
+        if (await api.syncGet()) {
+          const r = await api.syncRun();
+          if (r.contacts + r.flags + r.rules + r.events > 0) logEvent("Synchronizacja", `Dopisano z pliku: adresy ${r.contacts}, flagi ${r.flags}, reguły ${r.rules}, wydarzenia ${r.events}.`);
+        }
+      } catch (e) { logEvent("Synchronizacja", errText(e)); }
+    };
+    void run();
+    const t = window.setInterval(() => void run(), 15 * 60_000);
+    return () => window.clearInterval(t);
+  }, []);
   // Przypomnienia z kalendarza lokalnego (działają bez względu na to, czy jakieś konto jest zalogowane).
   useEffect(() => {
     const check = async () => {
@@ -973,7 +995,17 @@ export default function App() {
           showToast(`Wydarzenie: ${e.title} (${when})`);
           void api.showNotification("Wydarzenie: " + e.title, when).catch(() => undefined);
         }
-        if (due.length > 0) playSound(soundRef.current);
+        let fired = due.length;
+        for (const e of await api.calRecurring()) {
+          const occ = e.id === undefined ? null : dueOccurrence(e, Date.now());
+          if (occ === null || e.id === undefined) continue;
+          await api.calMark(e.id, occ);
+          const when = e.allDay ? "cały dzień" : new Date(occ).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+          showToast(`Wydarzenie: ${e.title} (${when})`);
+          void api.showNotification("Wydarzenie: " + e.title, when).catch(() => undefined);
+          fired += 1;
+        }
+        if (fired > 0) playSound(soundRef.current);
       } catch { /* baza może być niedostępna – spróbujemy za chwilę */ }
     };
     void check();
@@ -1356,6 +1388,7 @@ export default function App() {
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
             {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0} pending={imapPending} onPendingDone={() => setImapPending(null)}
               onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
+              onCalendar={calFromMail}
               onEditDraft={(m) => editImapDraft(imapAccount, m)}
               onMoved={(i) => imapMoved(imapAccount, i.folder, [{ uid: i.uid, out: i.out }], MOVE_TEXT[i.action] ?? "Gotowe.")}
               onChanged={(uid, p) => { if (p === "removed") { imap.remove(uid); setImapUid(null); } else imap.patch(uid, p); }} />}
@@ -1501,6 +1534,7 @@ export default function App() {
                   <button title="Odpowiedz nadawcy (r)" aria-label="Odpowiedz nadawcy (r)" className="primary" disabled={needsReauth} onClick={() => reply(false)}><ActIcon n="reply"/></button>
                   <button title="Odpowiedz wszystkim (a)" aria-label="Odpowiedz wszystkim (a)" disabled={needsReauth} onClick={() => reply(true)}><ActIcon n="replyAll"/></button>
                   <button title="Przekaż dalej (f)" aria-label="Przekaż dalej (f)" disabled={needsReauth} onClick={forward}><ActIcon n="forward"/></button>
+                  <button title="Dodaj do kalendarza" aria-label="Dodaj do kalendarza" onClick={() => calFromMail(detail.subject, detail.messages[detail.messages.length - 1]?.body ?? "")}><ActIcon n="calendar"/></button>
                   <span className="sep" />
                   {detail.inInbox && <button title="Odłóż na później" aria-label="Odłóż na później" disabled={needsReauth}
                     onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); gm.show(r.left, r.bottom + 4, snoozePresets().map((sp) => ({ label: "Odłóż: " + sp.label, icon: "clock" as const, onClick: () => void snoozeThreads([detail.id], sp.ms) }))); }}><ActIcon n="clock"/></button>}
@@ -1574,7 +1608,7 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => setCalOpen(true)}
+      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => { setCalPrefill(null); setCalOpen(true); }}
         onSettings={() => setSettingsOpen(true)} />
 
       {toast && (
@@ -1613,11 +1647,15 @@ export default function App() {
               </tbody>
             </table>
             <p className="hint">Skróty nie działają podczas pisania w polu tekstowym ani w otwartym oknie.</p>
+            <p className="hint">
+              Wyszukiwanie w Gmailu obejmuje także treść załączników (np. PDF, dokumenty, pliki tekstowe); przydatne: has:attachment, filename:faktura.pdf.
+              Dla kont WP wpisz załącznik:fraza, aby przeszukać pliki tekstowe (txt, csv, json…) w 25 najnowszych wiadomościach folderu.
+            </p>
             <div className="modal-actions"><button className="primary" onClick={() => setHelpOpen(false)}>Zamknij</button></div>
           </div>
         </div>
       )}
-      {calOpen && <CalendarDialog onClose={() => setCalOpen(false)} />}
+      {calOpen && <CalendarDialog prefill={calPrefill} onClose={() => { setCalOpen(false); setCalPrefill(null); }} />}
       {outboxOpen && (
         <OutboxDialog items={outbox} scheduled={scheduled} snoozed={snoozed}
           onCancelScheduled={async (id) => { try { await api.scheduleDelete(imapAccount, id); } catch (e) { showToast(errText(e)); } void refreshLater(); }}

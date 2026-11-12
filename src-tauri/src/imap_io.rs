@@ -699,6 +699,69 @@ pub(crate) async fn apply_rules_all(
     rep
 }
 
+const ATT_SEARCH_MESSAGES: u32 = 25;
+const ATT_SEARCH_MAX_BYTES: usize = 2 * 1024 * 1024;
+const ATT_SEARCH_BUDGET: Duration = Duration::from_secs(45);
+
+fn is_text_attachment(name: &str, ctype: &str) -> bool {
+    let n = name.to_lowercase();
+    ctype.starts_with("text/")
+        || ["txt", "csv", "tsv", "md", "log", "json", "xml", "html", "htm", "ini", "ics", "yml", "yaml"]
+            .iter()
+            .any(|e| n.ends_with(&format!(".{e}")))
+}
+
+/// Czy któryś tekstowy załącznik (txt, csv, json…) zawiera frazę (małe/duże litery bez znaczenia).
+fn attachments_contain(part: &ParsedMail, needle: &str) -> bool {
+    if !part.subparts.is_empty() {
+        return part.subparts.iter().any(|s| attachments_contain(s, needle));
+    }
+    let Some(name) = att_name(part) else { return false };
+    if !is_text_attachment(&name, &part.ctype.mimetype) {
+        return false;
+    }
+    let Ok(raw) = part.get_body_raw() else { return false };
+    if raw.len() > ATT_SEARCH_MAX_BYTES {
+        return false;
+    }
+    let text = part.get_body().unwrap_or_else(|_| String::from_utf8_lossy(&raw).into_owned());
+    text.to_lowercase().contains(needle)
+}
+
+/// Szuka frazy w tekstowych załącznikach ostatnich wiadomości folderu (serwery IMAP zwykle nie indeksują załączników).
+#[tauri::command]
+pub async fn imap_search_attachments(account: String, folder: String, query: String) -> Result<Page, String> {
+    let needle = query.trim().to_lowercase();
+    if needle.chars().count() < 2 || needle.chars().count() > 100 {
+        return Err("Wpisz frazę o długości od 2 do 100 znaków.".to_string());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = search_att_inner(&mut conn, &folder, &needle).await;
+    conn.bye().await;
+    res
+}
+
+async fn search_att_inner(conn: &mut Conn, folder: &str, needle: &str) -> Result<Page, String> {
+    let page = list_inner(conn, folder, 0).await?;
+    let started = std::time::Instant::now();
+    let mut hits: Vec<u32> = Vec::new();
+    for r in page.rows.iter().take(ATT_SEARCH_MESSAGES as usize) {
+        if started.elapsed() > ATT_SEARCH_BUDGET {
+            break;
+        }
+        let Ok(raw) = fetch_raw(conn, folder, r.uid).await else { continue };
+        if let Ok(mail) = mailparse::parse_mail(&raw) {
+            if attachments_contain(&mail, needle) {
+                hits.push(r.uid);
+            }
+        }
+    }
+    let rows: Vec<Row> = page.rows.into_iter().filter(|r| hits.contains(&r.uid)).collect();
+    let total = rows.len() as u32;
+    Ok(Page { rows, next: None, total })
+}
+
 async fn fetch_raw(conn: &mut Conn, folder: &str, uid: u32) -> Result<Vec<u8>, String> {
     conn.select(folder).await?;
     let r = conn.ok(&format!("UID FETCH {uid} (BODY.PEEK[])")).await?;

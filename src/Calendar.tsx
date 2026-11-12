@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errText } from "./api";
+import { occurrences, type Occurrence } from "./recur";
 import type { CalEvent } from "./types";
 
 const DAY = 86_400_000;
@@ -21,11 +22,18 @@ const parseLocal = (date: string, time: string) => {
   return new Date(y, mo - 1, d, h || 0, mi || 0, 0, 0);
 };
 
-function overlapsDay(e: CalEvent, day: Date): boolean {
+function dayOccurrences(events: CalEvent[], day: Date): Occurrence[] {
   const s = dayStart(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   const next = dayStart(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-  return e.startMs < next && e.endMs >= s;
+  return events.flatMap((e) => occurrences(e, s, next)).sort((a, b) => a.startMs - b.startMs);
 }
+
+const REPEAT: [string, string][] = [
+  ["none", "nie powtarza się"], ["daily", "codziennie"], ["weekly", "co tydzień"], ["monthly", "co miesiąc"], ["yearly", "co rok"],
+];
+
+/** Dane do wstępnego wypełnienia formularza nowego wydarzenia (np. z wiadomości). */
+export interface CalPrefill { title: string; notes: string; date: string; time?: string }
 
 interface Form {
   id?: number;
@@ -36,14 +44,30 @@ interface Form {
   end: string;
   remind: number;
   notes: string;
+  repeat: string;
+  until: string;
 }
 
-export function CalendarDialog({ onClose }: { onClose: () => void }) {
+export function CalendarDialog({ onClose, prefill }: { onClose: () => void; prefill?: CalPrefill | null }) {
   const today = new Date();
-  const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-  const [sel, setSel] = useState(dayStart(today.getFullYear(), today.getMonth(), today.getDate()));
+  const [cursor, setCursor] = useState(() => {
+    const d = prefill ? parseLocal(prefill.date, "00:00") : today;
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [sel, setSel] = useState(() => {
+    const d = prefill ? parseLocal(prefill.date, "00:00") : today;
+    return dayStart(d.getFullYear(), d.getMonth(), d.getDate());
+  });
   const [events, setEvents] = useState<CalEvent[]>([]);
-  const [form, setForm] = useState<Form | null>(null);
+  const [form, setForm] = useState<Form | null>(() => {
+    if (!prefill) return null;
+    const t = prefill.time ?? "09:00";
+    const h = Number(t.slice(0, 2));
+    return {
+      title: prefill.title, date: prefill.date, allDay: !prefill.time, start: t, end: `${pad(Math.min(h + 1, 23))}${t.slice(2)}`,
+      remind: 15, notes: prefill.notes, repeat: "none", until: "",
+    };
+  });
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<number | null>(null);
 
@@ -67,20 +91,21 @@ export function CalendarDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", key);
   }, [form, onClose]);
 
-  const dayEvents = (d: Date) => events.filter((e) => overlapsDay(e, d));
+  const dayEvents = (d: Date) => dayOccurrences(events, d);
   const selEvents = dayEvents(sel);
 
   const newEvent = () => {
     const now = new Date();
     const h = sel.toDateString() === now.toDateString() ? Math.min(now.getHours() + 1, 22) : 9;
-    setForm({ title: "", date: dateStr(sel), allDay: false, start: `${pad(h)}:00`, end: `${pad(h + 1)}:00`, remind: 15, notes: "" });
+    setForm({ title: "", date: dateStr(sel), allDay: false, start: `${pad(h)}:00`, end: `${pad(h + 1)}:00`, remind: 15, notes: "", repeat: "none", until: "" });
   };
   const edit = (e: CalEvent) => {
     const s = new Date(e.startMs);
     const en = new Date(e.endMs);
     setForm({
       id: e.id, title: e.title, date: dateStr(s), allDay: e.allDay, start: timeStr(s), end: timeStr(en),
-      remind: e.remindMin, notes: e.notes,
+      remind: e.remindMin, notes: e.notes, repeat: e.repeat || "none",
+      until: e.untilMs ? dateStr(new Date(e.untilMs)) : "",
     });
   };
 
@@ -100,7 +125,8 @@ export function CalendarDialog({ onClose }: { onClose: () => void }) {
     if (Number.isNaN(startMs) || Number.isNaN(endMs)) { setErr("Podaj poprawną datę i godzinę."); return; }
     if (endMs < startMs) { setErr("Koniec nie może być przed początkiem."); return; }
     try {
-      await api.calSave({ id: form.id, title: form.title, notes: form.notes, startMs, endMs, allDay: form.allDay, remindMin: form.remind });
+      const untilMs = form.repeat !== "none" && form.until ? parseLocal(form.until, "23:59").getTime() : 0;
+      await api.calSave({ id: form.id, title: form.title, notes: form.notes, startMs, endMs, allDay: form.allDay, remindMin: form.remind, repeat: form.repeat, untilMs });
       setForm(null);
       const d = parseLocal(form.date, "00:00");
       setSel(d);
@@ -120,7 +146,7 @@ export function CalendarDialog({ onClose }: { onClose: () => void }) {
     setCursor(new Date(today.getFullYear(), today.getMonth(), 1));
     setSel(dayStart(today.getFullYear(), today.getMonth(), today.getDate()));
   };
-  const timeLabel = (e: CalEvent) => e.allDay ? "cały dzień" : `${timeStr(new Date(e.startMs))}–${timeStr(new Date(e.endMs))}`;
+  const timeLabel = (o: Occurrence) => o.event.allDay ? "cały dzień" : `${timeStr(new Date(o.startMs))}–${timeStr(new Date(o.endMs))}`;
 
   return (
     <div className="modal-back" role="dialog" aria-modal="true" aria-label="Kalendarz">
@@ -154,25 +180,28 @@ export function CalendarDialog({ onClose }: { onClose: () => void }) {
           {selEvents.length === 0 && !form && <p className="hint">Brak wydarzeń tego dnia.</p>}
           {!form && (
             <ul className="addr-list">
-              {selEvents.map((e) => (
-                <li key={e.id}>
-                  <span title={e.notes || undefined}><b>{timeLabel(e)}</b> {e.title}{e.remindMin >= 0 ? " 🔔" : ""}</span>
-                  <span>
-                    {confirmDel === e.id ? (
-                      <>
-                        <span className="warn-line">Usunąć bezpowrotnie?</span>{" "}
-                        <button className="small solid" onClick={() => void remove(e)}>Usuń</button>{" "}
-                        <button className="small" onClick={() => setConfirmDel(null)}>Anuluj</button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="small" onClick={() => edit(e)}>Edytuj</button>{" "}
-                        <button className="small" onClick={() => setConfirmDel(e.id ?? null)}>Usuń</button>
-                      </>
-                    )}
-                  </span>
-                </li>
-              ))}
+              {selEvents.map((o) => {
+                const e = o.event;
+                return (
+                  <li key={`${e.id}-${o.startMs}`}>
+                    <span title={e.notes || undefined}><b>{timeLabel(o)}</b> {e.title}{e.remindMin >= 0 ? " 🔔" : ""}{e.repeat !== "none" ? " ↻" : ""}</span>
+                    <span>
+                      {confirmDel === e.id ? (
+                        <>
+                          <span className="warn-line">{e.repeat !== "none" ? "Usunąć całą serię bezpowrotnie?" : "Usunąć bezpowrotnie?"}</span>{" "}
+                          <button className="small solid" onClick={() => void remove(e)}>Usuń</button>{" "}
+                          <button className="small" onClick={() => setConfirmDel(null)}>Anuluj</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="small" onClick={() => edit(e)}>{e.repeat !== "none" ? "Edytuj serię" : "Edytuj"}</button>{" "}
+                          <button className="small" onClick={() => setConfirmDel(e.id ?? null)}>Usuń</button>
+                        </>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
           {!form && <button onClick={newEvent}>Dodaj wydarzenie</button>}
@@ -194,6 +223,14 @@ export function CalendarDialog({ onClose }: { onClose: () => void }) {
               <select value={form.remind} aria-label="Przypomnienie" onChange={(e) => setForm({ ...form, remind: Number(e.target.value) })}>
                 {REMIND.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
+              <div className="cal-row">
+                <select value={form.repeat} aria-label="Powtarzanie" onChange={(e) => setForm({ ...form, repeat: e.target.value })}>
+                  {REPEAT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                {form.repeat !== "none" && (
+                  <label className="cal-row">do <input type="date" value={form.until} aria-label="Powtarzaj do (puste = bez końca)" onChange={(e) => setForm({ ...form, until: e.target.value })} /></label>
+                )}
+              </div>
               <textarea rows={3} maxLength={2000} value={form.notes} placeholder="Notatki (opcjonalnie)" aria-label="Notatki"
                 onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               <div className="cal-row">

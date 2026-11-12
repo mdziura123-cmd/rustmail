@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errText } from "./api";
 
 // Te same klucze co w backup.rs (SETTING_KEYS) – tylko wygląd i zachowanie, nic wrażliwego.
@@ -10,6 +10,29 @@ const KEYS = [
 export function Backup() {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncDir, setSyncDir] = useState<string | null>(null);
+  const [syncInput, setSyncInput] = useState("");
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+
+  useEffect(() => { api.syncGet().then((d) => { setSyncDir(d); setSyncInput(d ?? ""); }).catch(() => undefined); }, []);
+
+  const setDir = async (dir: string) => {
+    setSyncNote(null);
+    try {
+      const d = await api.syncSet(dir);
+      setSyncDir(d);
+      setSyncInput(d ?? "");
+      if (d) await runSync(); else setSyncNote("Synchronizacja wyłączona.");
+    } catch (e) { setSyncNote(errText(e)); }
+  };
+  const runSync = async () => {
+    setBusy(true);
+    setSyncNote(null);
+    try {
+      const r = await api.syncRun();
+      setSyncNote(`Zsynchronizowano. Z pliku dopisano: adresy ${r.contacts}, flagi ${r.flags}, reguły ${r.rules}, wydarzenia ${r.events}. Plik: ${r.path}`);
+    } catch (e) { setSyncNote(errText(e)); } finally { setBusy(false); }
+  };
 
   const exportAll = async () => {
     setBusy(true);
@@ -52,6 +75,20 @@ export function Backup() {
           onChange={(e) => { void importFile(e.target.files?.[0]); e.target.value = ""; }} />
       </label>
       {note && <p className="hint" role="status">{note}</p>}
+      <h4>Synchronizacja między komputerami</h4>
+      <p className="hint">
+        Wskaż folder, który i tak synchronizujesz między komputerami (np. Nextcloud, Syncthing, Dropbox). RustMail zapisze tam plik
+        rustmail-sync.json z książką adresów, flagami, regułami i wydarzeniami kalendarza i będzie go łączyć z danymi na tym komputerze
+        (przy uruchomieniu, co 15 minut i na przycisk). Plik NIE jest zaszyfrowany, a nie zawiera haseł ani treści wiadomości.
+        Synchronizacja tylko dopisuje: usunięta reguła lub wydarzenie może wrócić z pliku innego komputera.
+      </p>
+      <div className="modal-actions wrap">
+        <input value={syncInput} placeholder="/home/ty/Nextcloud/RustMail" aria-label="Folder synchronizacji" onChange={(e) => setSyncInput(e.target.value)} />
+        <button disabled={busy || !syncInput.trim()} onClick={() => void setDir(syncInput)}>{syncDir ? "Zmień folder" : "Włącz synchronizację"}</button>
+        {syncDir && <button disabled={busy} onClick={() => void runSync()}>Synchronizuj teraz</button>}
+        {syncDir && <button disabled={busy} onClick={() => void setDir("")}>Wyłącz</button>}
+      </div>
+      {syncNote && <p className="hint" role="status">{syncNote}</p>}
     </div>
   );
 }

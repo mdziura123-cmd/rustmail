@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS events (
     end_ms INTEGER NOT NULL,
     all_day INTEGER NOT NULL DEFAULT 0,
     remind_min INTEGER NOT NULL DEFAULT -1,
-    reminded INTEGER NOT NULL DEFAULT 0
+    reminded INTEGER NOT NULL DEFAULT 0,
+    repeat TEXT NOT NULL DEFAULT 'none',
+    until_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS events_start ON events (start_ms);
 CREATE TABLE IF NOT EXISTS rules (
@@ -268,6 +270,17 @@ impl Store {
         }
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;").map_err(|e| e.to_string())?;
         conn.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
+        // Dodane później kolumny kalendarza (powtarzanie). Dla istniejących baz; błąd „duplicate column” jest oczekiwany.
+        for stmt in [
+            "ALTER TABLE events ADD COLUMN repeat TEXT NOT NULL DEFAULT 'none'",
+            "ALTER TABLE events ADD COLUMN until_ms INTEGER NOT NULL DEFAULT 0",
+        ] {
+            if let Err(e) = conn.execute(stmt, []) {
+                if !e.to_string().contains("duplicate column") {
+                    return Err(e.to_string());
+                }
+            }
+        }
         Ok(conn)
     }
 
@@ -709,8 +722,8 @@ impl Store {
         self.with(|c| match e.id {
             Some(id) => {
                 let n = c.execute(
-                    "UPDATE events SET title=?1, notes=?2, start_ms=?3, end_ms=?4, all_day=?5, remind_min=?6, reminded=0 WHERE id=?7",
-                    params![e.title, e.notes, e.start_ms, e.end_ms, e.all_day as i64, e.remind_min, id],
+                    "UPDATE events SET title=?1, notes=?2, start_ms=?3, end_ms=?4, all_day=?5, remind_min=?6, repeat=?7, until_ms=?8, reminded=0 WHERE id=?9",
+                    params![e.title, e.notes, e.start_ms, e.end_ms, e.all_day as i64, e.remind_min, e.repeat, e.until_ms, id],
                 )?;
                 if n == 0 {
                     return Err(rusqlite::Error::QueryReturnedNoRows);
@@ -723,8 +736,8 @@ impl Store {
                     return Err(rusqlite::Error::InvalidParameterName("za dużo wydarzeń".to_string()));
                 }
                 c.execute(
-                    "INSERT INTO events (title, notes, start_ms, end_ms, all_day, remind_min) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![e.title, e.notes, e.start_ms, e.end_ms, e.all_day as i64, e.remind_min],
+                    "INSERT INTO events (title, notes, start_ms, end_ms, all_day, remind_min, repeat, until_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![e.title, e.notes, e.start_ms, e.end_ms, e.all_day as i64, e.remind_min, e.repeat, e.until_ms],
                 )?;
                 Ok(c.last_insert_rowid())
             }
@@ -745,6 +758,9 @@ impl Store {
             end_ms: r.get(4)?,
             all_day: r.get::<_, i64>(5)? != 0,
             remind_min: r.get(6)?,
+            repeat: r.get(7)?,
+            until_ms: r.get(8)?,
+            reminded: r.get(9)?,
         })
     }
 
@@ -752,8 +768,9 @@ impl Store {
     pub fn event_range(&self, from_ms: i64, to_ms: i64) -> Result<Vec<crate::calendar::Event>, String> {
         self.with(|c| {
             let mut st = c.prepare(
-                "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min FROM events \
-                 WHERE start_ms < ?2 AND end_ms >= ?1 ORDER BY start_ms, id LIMIT 2000",
+                "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min, repeat, until_ms, reminded FROM events \
+                 WHERE start_ms < ?2 AND ((repeat = 'none' AND end_ms >= ?1) OR (repeat != 'none' AND (until_ms = 0 OR until_ms >= ?1 - (end_ms - start_ms)))) \
+                 ORDER BY start_ms, id LIMIT 2000",
             )?;
             let rows = st.query_map(params![from_ms, to_ms], Self::event_from_row)?;
             rows.collect::<Result<Vec<_>, _>>()
@@ -762,10 +779,25 @@ impl Store {
 
     pub fn event_all(&self) -> Result<Vec<crate::calendar::Event>, String> {
         self.with(|c| {
-            let mut st = c.prepare("SELECT id, title, notes, start_ms, end_ms, all_day, remind_min FROM events ORDER BY start_ms, id")?;
+            let mut st = c.prepare("SELECT id, title, notes, start_ms, end_ms, all_day, remind_min, repeat, until_ms, reminded FROM events ORDER BY start_ms, id")?;
             let rows = st.query_map([], Self::event_from_row)?;
             rows.collect::<Result<Vec<_>, _>>()
         })
+    }
+
+    pub fn event_recurring(&self) -> Result<Vec<crate::calendar::Event>, String> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min, repeat, until_ms, reminded FROM events \
+                 WHERE repeat != 'none' AND remind_min >= 0 ORDER BY start_ms LIMIT 1000",
+            )?;
+            let rows = st.query_map([], Self::event_from_row)?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+    }
+
+    pub fn event_mark(&self, id: i64, occ_ms: i64) -> Result<(), String> {
+        self.with(|c| c.execute("UPDATE events SET reminded = ?2 WHERE id = ?1", params![id, occ_ms]).map(|_| ()))
     }
 
     /// Wydarzenia z przypomnieniem, na które przyszedł czas; oznacza je jako przypomniane.
@@ -775,8 +807,8 @@ impl Store {
             let tx = c.unchecked_transaction()?;
             let due: Vec<crate::calendar::Event> = {
                 let mut st = tx.prepare(
-                    "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min FROM events \
-                     WHERE remind_min >= 0 AND reminded = 0 AND start_ms - remind_min * 60000 <= ?1 ORDER BY start_ms LIMIT 200",
+                    "SELECT id, title, notes, start_ms, end_ms, all_day, remind_min, repeat, until_ms, reminded FROM events \
+                     WHERE repeat = 'none' AND remind_min >= 0 AND reminded = 0 AND start_ms - remind_min * 60000 <= ?1 ORDER BY start_ms LIMIT 200",
                 )?;
                 let rows = st.query_map([now_ms], Self::event_from_row)?;
                 rows.collect::<Result<Vec<_>, _>>()?

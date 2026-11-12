@@ -144,6 +144,9 @@ export const api = {
   backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),
   backupImport: (json: string) =>
     invoke<{ contacts: number; flags: number; rules: number; events: number; settings: Record<string, string> }>("backup_import", { json }),
+  syncGet: () => invoke<string | null>("sync_get"),
+  syncSet: (dir: string) => invoke<string | null>("sync_set", { dir }),
+  syncRun: () => invoke<{ contacts: number; flags: number; rules: number; events: number; path: string }>("sync_run"),
   scheduleMessage: (msg: OutgoingMessage, sendAtMs: number) => invoke<number>("schedule_message", { msg, sendAtMs }),
   imapScheduleMessage: (account: string, msg: OutgoingMessage, sendAtMs: number) =>
     invoke<number>("imap_schedule_message", { account, msg, sendAtMs }),
@@ -180,11 +183,17 @@ export const api = {
   calRange: (fromMs: number, toMs: number) => invoke<CalEvent[]>("cal_range", { fromMs, toMs }),
   calSave: (event: CalEvent) => invoke<number>("cal_save", { event }),
   calDelete: (id: number) => invoke<void>("cal_delete", { id }),
+  calRecurring: () => invoke<CalEvent[]>("cal_recurring"),
+  calMark: (id: number, occMs: number) => invoke<void>("cal_mark", { id, occMs }),
   calDue: (nowMs: number) => invoke<CalEvent[]>("cal_due", { nowMs }),
   rulesApply: (dryRun: boolean) =>
     invoke<{ checked: number; affected: number; done: number; failed: number }>("rules_apply", { dryRun }),
   previewAttachment: (messageId: string, attachmentId: string) =>
     invoke<{ dataUrl: string }>("preview_attachment", { messageId, attachmentId }),
+  imapSearchAttachments: async (account: string, folder: string, query: string) => {
+    const p = await invoke<ImapPage>("imap_search_attachments", { account, folder, query });
+    return { ...p, rows: p.rows.map((r) => ({ ...r, from: cleanDisplay(r.from, 120), subject: cleanDisplay(r.subject, 200) })) };
+  },
   imapPreview: (account: string, folder: string, uid: number, index: number) =>
     invoke<{ dataUrl: string }>("imap_preview", { account, folder, uid, index }),
   imapDownload: (account: string, folder: string, uid: number, index: number, name: string) =>

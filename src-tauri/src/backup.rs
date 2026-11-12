@@ -46,9 +46,8 @@ struct ContactItem {
     name: String,
 }
 
-/// Zapisuje kopię w katalogu Pobrane i zwraca ścieżkę pliku.
-#[tauri::command]
-pub fn backup_export(store: State<'_, Store>, settings: BTreeMap<String, String>) -> Result<String, String> {
+/// Buduje dokument kopii (wspólny dla kopii zapasowej i synchronizacji przez folder).
+fn build_doc(store: &Store, settings: &BTreeMap<String, String>) -> Result<Value, String> {
     let contacts: Vec<Value> = store
         .contacts_list()?
         .into_iter()
@@ -65,17 +64,24 @@ pub fn backup_export(store: State<'_, Store>, settings: BTreeMap<String, String>
         .event_all()?
         .into_iter()
         .take(crate::calendar::MAX_EVENTS as usize)
-        .map(|e| json!({ "title": e.title, "notes": e.notes, "startMs": e.start_ms, "endMs": e.end_ms, "allDay": e.all_day, "remindMin": e.remind_min }))
+        .map(|e| json!({ "title": e.title, "notes": e.notes, "startMs": e.start_ms, "endMs": e.end_ms, "allDay": e.all_day, "remindMin": e.remind_min, "repeat": e.repeat, "untilMs": e.until_ms }))
         .collect();
     let doc = json!({
         "format": FORMAT,
         "version": VERSION,
-        "settings": clean_settings(&settings),
+        "settings": clean_settings(settings),
         "contacts": contacts,
         "flags": flags,
         "rules": rules,
         "events": events,
     });
+    Ok(doc)
+}
+
+/// Zapisuje kopię w katalogu Pobrane i zwraca ścieżkę pliku.
+#[tauri::command]
+pub fn backup_export(store: State<'_, Store>, settings: BTreeMap<String, String>) -> Result<String, String> {
+    let doc = build_doc(&store, &settings)?;
     let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())?;
     let path = remote::save_download("rustmail-kopia.json", &bytes)?;
     Ok(path.to_string_lossy().into_owned())
@@ -94,7 +100,11 @@ pub fn backup_import(store: State<'_, Store>, json: String) -> Result<ImportResu
     if v.get("version").and_then(Value::as_u64).map(|n| n > VERSION).unwrap_or(true) {
         return Err("Kopia pochodzi z nowszej wersji programu.".to_string());
     }
+    merge_doc(&store, &v)
+}
 
+/// Dopisuje dane z dokumentu kopii (niczego nie usuwa).
+fn merge_doc(store: &Store, v: &Value) -> Result<ImportResult, String> {
     let mut addrs: Vec<(contacts::Addr, i64)> = Vec::new();
     if let Some(list) = v.get("contacts").and_then(Value::as_array) {
         for item in list.iter().take(MAX_ITEMS) {
@@ -183,4 +193,81 @@ mod tests {
         assert_eq!(c.len(), 1);
         assert_eq!(c.get("rm.theme").map(String::as_str), Some("dark"));
     }
+}
+
+// ---------- Synchronizacja przez folder ----------
+
+const SYNC_FILE: &str = "rustmail-sync.json";
+
+fn sync_dir_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager as _;
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("sync_dir.txt"))
+}
+
+/// Wybrany folder synchronizacji (jeśli ustawiony).
+#[tauri::command]
+pub fn sync_get(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let t = std::fs::read_to_string(sync_dir_file(&app)?).unwrap_or_default();
+    let t = t.trim();
+    Ok(if t.is_empty() { None } else { Some(t.to_string()) })
+}
+
+/// Ustawia folder synchronizacji (pusty tekst wyłącza synchronizację).
+#[tauri::command]
+pub fn sync_set(app: tauri::AppHandle, dir: String) -> Result<Option<String>, String> {
+    let f = sync_dir_file(&app)?;
+    let d = dir.trim();
+    if d.is_empty() {
+        let _ = std::fs::remove_file(&f);
+        return Ok(None);
+    }
+    if d.contains('\0') || !d.starts_with('/') {
+        return Err("Podaj pełną ścieżkę do folderu, np. /home/ty/Nextcloud/RustMail.".to_string());
+    }
+    let canon = std::fs::canonicalize(d).map_err(|_| "Taki folder nie istnieje.".to_string())?;
+    if !canon.is_dir() {
+        return Err("To nie jest folder.".to_string());
+    }
+    let s = canon.to_string_lossy().into_owned();
+    crate::privfs::write_private(&f, s.as_bytes())?;
+    Ok(Some(s))
+}
+
+#[derive(Serialize)]
+pub struct SyncResult {
+    contacts: usize,
+    flags: usize,
+    rules: usize,
+    events: usize,
+    path: String,
+}
+
+/// Łączy dane z plikiem w folderze synchronizacji (dopisuje to, czego tu brakuje), a potem zapisuje scalony stan.
+/// Usunięcia nie są przenoszone: usunięta reguła lub wydarzenie wróci z pliku innego komputera.
+#[tauri::command]
+pub fn sync_run(app: tauri::AppHandle, store: State<'_, Store>) -> Result<SyncResult, String> {
+    let dir = sync_get(app)?.ok_or("Nie wybrano folderu synchronizacji.")?;
+    let path = std::path::Path::new(&dir).join(SYNC_FILE);
+    let (c, f, r, e) = if path.is_file() {
+        let meta = std::fs::metadata(&path).map_err(|x| format!("Nie można odczytać pliku synchronizacji: {x}"))?;
+        if meta.len() as usize > MAX_BYTES {
+            return Err("Plik synchronizacji jest zbyt duży.".to_string());
+        }
+        let text = std::fs::read_to_string(&path).map_err(|x| format!("Nie można odczytać pliku synchronizacji: {x}"))?;
+        let v: Value = serde_json::from_str(&text).map_err(|_| "Plik synchronizacji jest uszkodzony – nie nadpisuję go.".to_string())?;
+        if v.get("format").and_then(Value::as_str) != Some(FORMAT) {
+            return Err("W folderze jest plik o tej nazwie, ale to nie jest plik RustMail – nie nadpisuję go.".to_string());
+        }
+        if v.get("version").and_then(Value::as_u64).map(|n| n > VERSION).unwrap_or(true) {
+            return Err("Plik synchronizacji pochodzi z nowszej wersji programu – zaktualizuj aplikację.".to_string());
+        }
+        let res = merge_doc(&store, &v)?;
+        (res.contacts, res.flags, res.rules, res.events)
+    } else {
+        (0, 0, 0, 0)
+    };
+    let doc = build_doc(&store, &BTreeMap::new())?;
+    let bytes = serde_json::to_vec_pretty(&doc).map_err(|x| x.to_string())?;
+    crate::privfs::write_private(&path, &bytes).map_err(|x| format!("Nie można zapisać pliku synchronizacji: {x}"))?;
+    Ok(SyncResult { contacts: c, flags: f, rules: r, events: e, path: path.to_string_lossy().into_owned() })
 }
