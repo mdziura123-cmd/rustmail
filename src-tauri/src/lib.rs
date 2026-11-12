@@ -52,9 +52,18 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Zamknięcie okna zostawia aplikację w zasobniku (poczta i powiadomienia działają dalej).
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" && background::should_hide_on_close() {
-                    api.prevent_close();
-                    let _ = window.hide();
+                if window.label() == "main" {
+                    match background::close_action() {
+                        background::CloseAction::Hide => {
+                            api.prevent_close();
+                            let _ = window.hide();
+                        }
+                        background::CloseAction::Minimize => {
+                            api.prevent_close();
+                            let _ = window.minimize();
+                        }
+                        background::CloseAction::Quit => {}
+                    }
                 }
             }
         })
@@ -167,6 +176,7 @@ pub fn run() {
             commands::test_notification,
             commands::show_notification,
             background::set_background,
+            background::set_close_minimize,
             background::background_state,
             background::set_unread,
             backup::backup_export,

@@ -16,9 +16,9 @@ const MAX_BYTES: usize = 5_000_000;
 const MAX_SETTING_LEN: usize = 80_000;
 
 /// Ustawienia, które wolno zapisać w kopii i przywrócić (tylko wygląd i zachowanie, nic wrażliwego).
-pub const SETTING_KEYS: [&str; 16] = [
+pub const SETTING_KEYS: [&str; 17] = [
     "rm.theme", "rm.notify", "rm.notifycontent", "rm.sound", "rm.activeonly", "rm.background", "rm.flagsfirst",
-    "rm.keys", "rm.scale", "rm.labels", "rm.autoupdate", "rm.left", "rm.mid", "rm.spell", "rm.undo", "rm.templates",
+    "rm.keys", "rm.scale", "rm.labels", "rm.autoupdate", "rm.left", "rm.mid", "rm.spell", "rm.undo", "rm.templates", "rm.closemode",
 ];
 
 /// Zostawia tylko dozwolone klucze z rozsądnie krótkimi wartościami.

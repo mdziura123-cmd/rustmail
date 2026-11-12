@@ -196,6 +196,7 @@ export default function App() {
   // Domyślnie zamknięcie okna zostawia aplikację w zasobniku (poczta i powiadomienia działają dalej).
   const [background, setBackground] = useState(() => load(LS.bg, "1") === "1");
   useEffect(() => { void api.setBackground(background).catch(() => undefined); }, [background]);
+  useEffect(() => { void api.setCloseMinimize(load("rm.closemode", "tray") === "taskbar").catch(() => undefined); }, []);
   const [stats, setStats] = useState<{ inbox: number; spam: number; labels: LabelInfo[] }>({ inbox: 0, spam: 0, labels: [] });
   const [newLabel, setNewLabel] = useState<string | null>(null);
   const searchRef = useRef<string | null>(null);

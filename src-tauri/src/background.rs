@@ -24,6 +24,8 @@ use crate::{badge, launcher};
 static TRAY_OK: AtomicBool = AtomicBool::new(false);
 /// Ustawienie użytkownika: zamknięcie okna zostawia aplikację w tle.
 static KEEP_BG: AtomicBool = AtomicBool::new(true);
+/// Ustawienie użytkownika: zamknięcie okna je minimalizuje do paska zadań (zamiast chować do zasobnika).
+static MINIMIZE: AtomicBool = AtomicBool::new(false);
 
 /// Ostatnio ustawiona liczba nieprzeczytanych (żeby nie odświeżać ikon bez zmiany).
 static LAST_UNREAD: AtomicU32 = AtomicU32::new(u32::MAX);
@@ -58,8 +60,30 @@ pub fn set_unread(app: AppHandle, count: u32) {
     });
 }
 
-pub fn should_hide_on_close() -> bool {
-    TRAY_OK.load(Ordering::SeqCst) && KEEP_BG.load(Ordering::SeqCst)
+/// Co zrobić z oknem po kliknięciu „zamknij”: schować do zasobnika, zminimalizować do paska zadań albo zamknąć program.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CloseAction {
+    Hide,
+    Minimize,
+    Quit,
+}
+
+pub fn close_action() -> CloseAction {
+    if !KEEP_BG.load(Ordering::SeqCst) {
+        CloseAction::Quit
+    } else if MINIMIZE.load(Ordering::SeqCst) {
+        CloseAction::Minimize
+    } else if TRAY_OK.load(Ordering::SeqCst) {
+        CloseAction::Hide
+    } else {
+        CloseAction::Quit
+    }
+}
+
+/// Tryb zamykania okna: `true` = minimalizuj do paska zadań (jedno kliknięcie ikony w pasku przywraca okno).
+#[tauri::command]
+pub fn set_close_minimize(minimize: bool) {
+    MINIMIZE.store(minimize, Ordering::SeqCst);
 }
 
 #[tauri::command]

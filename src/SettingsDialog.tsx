@@ -210,6 +210,12 @@ export function SettingsDialog(p: Props) {
   const [undo, setUndoState] = useState(getUndo);
   const [labels, setLabelsState] = useState(getLabels);
   const [trayOk, setTrayOk] = useState<boolean | null>(null);
+  const [closeMode, setCloseMode] = useState<string>(() => { try { return localStorage.getItem("rm.closemode") === "taskbar" ? "taskbar" : "tray"; } catch { return "tray"; } });
+  const pickCloseMode = (m: string) => {
+    setCloseMode(m);
+    try { localStorage.setItem("rm.closemode", m); } catch { /* pamięć niedostępna */ }
+    void api.setCloseMinimize(m === "taskbar").catch(() => undefined);
+  };
   useEffect(() => { void api.backgroundState().then(setTrayOk).catch(() => setTrayOk(null)); }, []);
   const test = async () => {
     setMsg(null);
@@ -281,7 +287,19 @@ export function SettingsDialog(p: Props) {
                   <input type="checkbox" checked={p.background} onChange={(e) => p.onBackground(e.target.checked)} />
                   Po zamknięciu okna zostaw RustMail w tle (ikona w zasobniku)
                 </label>
-                {p.background && trayOk === false && (
+                {p.background && (
+                  <div className="check sound-row">
+                    <label htmlFor="close-mode">Po zamknięciu okna</label>
+                    <select id="close-mode" value={closeMode} onChange={(e) => pickCloseMode(e.target.value)}>
+                      <option value="tray">schowaj do zasobnika</option>
+                      <option value="taskbar">zminimalizuj do paska zadań</option>
+                    </select>
+                  </div>
+                )}
+                {p.background && closeMode === "tray" && (
+                  <p className="hint">Ikonę w zasobniku otwiera menu: Pokaż RustMail. W systemie Linux zasobnik nie przekazuje programowi zwykłego kliknięcia, więc nie da się go otwierać jednym kliknięciem. Przypięta ikona RustMail w pasku zadań otwiera okno jednym kliknięciem, także gdy jest schowane. Możesz też wybrać zminimalizowanie do paska zadań.</p>
+                )}
+                {p.background && trayOk === false && closeMode === "tray" && (
                   <p className="hint">Ikona w zasobniku nie jest dostępna w tym środowisku, więc zamknięcie okna zamknie program.</p>
                 )}
                 <div className="check sound-row">
