@@ -99,3 +99,17 @@ Stopka → „Import poczty”. Wczytuje pliki `.mbox` i `.eml` wyeksportowane z
 ## Poczta IMAP (WP, O2 i inne)
 
 Stopka → „Poczta IMAP (WP)”. Osobne okno do czytania i porządkowania poczty z serwerów IMAP (szyfrowane połączenie, port 993). Hasło trafia do systemowego sejfu. Na razie bez wysyłania i bez pobierania załączników. W WP trzeba włączyć dostęp przez IMAP w ustawieniach poczty i użyć hasła do aplikacji zewnętrznych.
+
+## Nowości z serii 1.9 (skrót)
+
+- **Działanie w tle:** ikona w zasobniku z kropką przy nowych wiadomościach, jedna kopia aplikacji, stały skrót w menu (przypięcie do paska przetrwa aktualizacje), kliknięcie powiadomienia otwiera wiadomość.
+- **Wysyłka:** cofnięcie wysyłki (5–30 s), zaplanowana wysyłka (do roku naprzód; wiadomość czeka w lokalnej bazie, wysyła się tylko przy uruchomionej aplikacji).
+- **Odkładanie wiadomości:** Gmail (wraca do skrzynki jako nieprzeczytana) i WP (tylko lokalnie – aplikacja ukrywa wiadomość na liście, na serwerze nic się nie zmienia).
+- **Reguły automatyczne:** nadawca/temat zawiera → przeczytana, archiwizuj, flaga. Działają na nowych wiadomościach, a przyciskiem „Sprawdź…/Zastosuj” także na starszych (Gmail ok. 200 wątków, WP 25 na konto).
+- **Podpisy** osobne dla każdego konta, **szablony odpowiedzi** (do 15, w Ustawieniach → Poczta).
+- **Podgląd obrazów** (PNG, JPEG, GIF do 8 MB, po skanie ClamAV) w załącznikach.
+- **Wyszukiwanie w załącznikach:** Gmail robi to sam; dla WP `załącznik:fraza` przeszukuje pliki tekstowe w 25 najnowszych wiadomościach folderu.
+- **Kalendarz lokalny** (ikona w dolnej belce): wydarzenia, powtarzanie (dzień/tydzień/miesiąc/rok), przypomnienia, „Dodaj do kalendarza” z wiadomości. Dane w zaszyfrowanej bazie, bez połączenia z pocztą.
+- **Kopia zapasowa i synchronizacja:** plik JSON (kontakty, flagi, reguły, wydarzenia, ustawienia wyglądu, szablony) oraz synchronizacja przez wskazany folder (plik `rustmail-sync.json`, **niezaszyfrowany**, tylko dopisywanie – usunięcia nie są przenoszone).
+- **Kopia bazy przy nowej wersji** (`dbsafe`) oraz dziennik zdarzeń w Ustawieniach.
+- Czego nie ma: wspólnej skrzynki Gmail+WP, podglądu PDF (wymagałby osłabienia zabezpieczeń aplikacji), czytania PDF w wyszukiwaniu WP.
