@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errText } from "./api";
+import { holidayOn, isWeekend } from "./holidays";
 import { occurrences, type Occurrence } from "./recur";
 import type { CalEvent } from "./types";
 
@@ -159,17 +160,19 @@ export function CalendarDialog({ onClose, prefill }: { onClose: () => void; pref
           <span className="grow" />
           <button onClick={onClose}>Zamknij</button>
         </div>
-        <p className="hint">Kalendarz jest lokalny: zapisany tylko na tym komputerze, niepołączony z pocztą ani z żadnym kontem. Wchodzi do kopii zapasowej (Ustawienia → Poczta).</p>
+        <p className="hint">Czerwone dni to polskie święta wolne od pracy (liczone w programie, także Wielkanoc i Boże Ciało), szare to weekendy. Kalendarz jest lokalny: zapisany tylko na tym komputerze, niepołączony z pocztą ani z żadnym kontem. Wchodzi do kopii zapasowej (Ustawienia → Poczta).</p>
         <div className="cal-grid" role="grid" aria-label="Dni miesiąca">
           {WEEK.map((w) => <div key={w} className="cal-dow" role="columnheader">{w}</div>)}
           {cells.map((d) => {
             const n = dayEvents(d).length;
-            const cls = "cal-day" + (d.getMonth() !== cursor.getMonth() ? " other" : "") +
+            const hol = holidayOn(d);
+            const cls = "cal-day" + (hol ? " holiday" : isWeekend(d) ? " weekend" : "") + (d.getMonth() !== cursor.getMonth() ? " other" : "") +
               (d.toDateString() === today.toDateString() ? " today" : "") + (d.toDateString() === sel.toDateString() ? " sel" : "");
             return (
-              <button key={d.getTime()} className={cls} role="gridcell" aria-label={`${d.getDate()} ${MONTHS[d.getMonth()]}${n ? `, wydarzeń: ${n}` : ""}`}
+              <button key={d.getTime()} className={cls} role="gridcell" aria-label={`${d.getDate()} ${MONTHS[d.getMonth()]}${hol ? `, ${hol.name}` : ""}${n ? `, wydarzeń: ${n}` : ""}`} title={hol ? `${hol.name}: ${hol.desc}` : undefined}
                 onClick={() => { setSel(d); setForm(null); }} onDoubleClick={() => { setSel(d); newEvent(); }}>
                 <span>{d.getDate()}</span>
+                {hol && <span className="cal-hol">{hol.name}</span>}
                 {n > 0 && <span className="cal-dot" aria-hidden="true">{n > 1 ? n : ""}</span>}
               </button>
             );
@@ -177,6 +180,13 @@ export function CalendarDialog({ onClose, prefill }: { onClose: () => void; pref
         </div>
         <div className="cal-side">
           <h4>{sel.getDate()} {MONTHS[sel.getMonth()]} {sel.getFullYear()}</h4>
+          {holidayOn(sel) && (
+            <div className="cal-holcard" role="note">
+              <b>{holidayOn(sel)?.name}</b> · dzień wolny od pracy
+              <p>{holidayOn(sel)?.desc}</p>
+            </div>
+          )}
+          {!holidayOn(sel) && isWeekend(sel) && <p className="hint">Weekend – dzień wolny.</p>}
           {selEvents.length === 0 && !form && <p className="hint">Brak wydarzeń tego dnia.</p>}
           {!form && (
             <ul className="addr-list">
