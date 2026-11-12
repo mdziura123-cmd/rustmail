@@ -7,6 +7,9 @@ interface Props {
   outboxCount: number;
   onOutbox: () => void;
   onCalendar: () => void;
+  /** Pogoda w belce (null = wyłączona). */
+  weather: { icon: string; temp: string; title: string } | null;
+  onWeather: () => void;
   onSettings: () => void;
 }
 
@@ -40,7 +43,7 @@ function GearIcon() {
 }
 
 /** Dolna belka: nazwa i wersja, ikona sprawdzania aktualizacji, a po prawej koło zębate (ustawienia). */
-export function StatusBar({ info, u, outboxCount, onOutbox, onCalendar, onSettings }: Props) {
+export function StatusBar({ info, u, outboxCount, onOutbox, onCalendar, weather, onWeather, onSettings }: Props) {
   const { phase } = u;
 
   // Podczas aktualizacji na belce jest tylko pasek postępu.
@@ -89,6 +92,7 @@ export function StatusBar({ info, u, outboxCount, onOutbox, onCalendar, onSettin
       )}
       <span className="grow" />
       {outboxCount > 0 && <button className="linklike plain" onClick={onOutbox}>Do wysłania i odłożone ({outboxCount})</button>}
+      {weather && <button className="linklike plain wx-chip" title={weather.title} aria-label={"Pogoda: " + weather.title} onClick={onWeather}>{weather.icon} {weather.temp}</button>}
       <button className="icon-btn gear" title="Kalendarz" aria-label="Kalendarz" onClick={onCalendar}>
         <CalendarIcon />
       </button>

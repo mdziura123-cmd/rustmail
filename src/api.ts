@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanDisplay, stripEmoji } from "./util";
+import type { Place, WeatherData } from "./weather";
 import type {
   CalEvent,
   Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, SchedItem, SnoozeItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
@@ -141,6 +142,8 @@ export const api = {
   testNotification: () => invoke<void>("test_notification"),
   setBackground: (enabled: boolean) => invoke<void>("set_background", { enabled }),
   setCloseMinimize: (minimize: boolean) => invoke<void>("set_close_minimize", { minimize }),
+  weatherSearch: (query: string) => invoke<Place[]>("weather_search", { query }),
+  weatherGet: (lat: number, lon: number) => invoke<WeatherData>("weather_get", { lat, lon }),
   quitApp: () => invoke<void>("quit_app"),
   backgroundState: () => invoke<boolean>("background_state"),
   backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),

@@ -3,6 +3,7 @@ import { playSound, SOUNDS, type SoundId } from "./sound";
 import { api, errText } from "./api";
 import { AddressBook } from "./AddressBook";
 import { Templates } from "./Templates";
+import { WeatherSettings } from "./WeatherSettings";
 import { Backup } from "./Backup";
 import { Rules } from "./Rules";
 import { clearLog, useLog } from "./eventLog";
@@ -360,6 +361,7 @@ export function SettingsDialog(p: Props) {
                 <AddressBook />
                 <Rules />
                 <Templates />
+                <WeatherSettings />
                 <Backup />
               </div>
             )}

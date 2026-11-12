@@ -411,3 +411,12 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 .cal-day { min-height: 58px; }
 .cal-holcard { border: 1px solid #e5484d; border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--panel) 90%, #e5484d 10%); }
 .cal-holcard p { margin: 4px 0 0; font-size: 13px; }
+
+.weather-modal { width: min(520px, 96vw); display: grid; gap: 10px; }
+.wx-now { display: flex; align-items: center; gap: 14px; }
+.wx-icon { font-size: 44px; line-height: 1; }
+.wx-temp { font-size: 34px; font-weight: 700; }
+.wx-days { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.wx-days li { display: grid; grid-template-columns: 9ch 1fr auto; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.wx-dn { text-transform: capitalize; }
+.wx-chip { white-space: nowrap; }

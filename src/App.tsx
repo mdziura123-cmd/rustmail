@@ -17,6 +17,8 @@ import { OutboxDialog } from "./OutboxDialog";
 import { CalendarDialog, type CalPrefill } from "./Calendar";
 import { dueOccurrence } from "./recur";
 import { findDate } from "./dateFind";
+import { WeatherDialog } from "./WeatherDialog";
+import { describe as describeWx, fmtTemp, useWeather } from "./weather";
 import { ActIcon } from "./ActIcon";
 import { loadSound, playSound, saveSound, type SoundId } from "./sound";
 import { applyCustomKeys, commandFor, customKeys, isTypingTarget, shortcutHelp } from "./shortcuts";
@@ -138,6 +140,8 @@ export default function App() {
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
+  const [wxOpen, setWxOpen] = useState(false);
+  const wx = useWeather();
   const [calPrefill, setCalPrefill] = useState<CalPrefill | null>(null);
   const calFromMail = (subject: string, text: string) => {
     const f = findDate(subject + "\n" + text);
@@ -582,7 +586,7 @@ export default function App() {
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
-      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || spamOpen || importOpen || imapLoginOpen) return;
+      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || wxOpen || spamOpen || importOpen || imapLoginOpen) return;
       e.preventDefault();
       setSelected(new Set(threads.map((t) => t.id)));
       return;
@@ -590,7 +594,7 @@ export default function App() {
     const cmd = commandFor(e);
     if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
     if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
-    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || spamOpen || importOpen || imapLoginOpen) {
+    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || wxOpen || spamOpen || importOpen || imapLoginOpen) {
       if (cmd === "escape" && helpOpen) setHelpOpen(false);
       return;
     }
@@ -1610,6 +1614,8 @@ export default function App() {
       </div>
 
       <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => { setCalPrefill(null); setCalOpen(true); }}
+        weather={wx.pref ? (wx.data ? { icon: describeWx(wx.data.code, wx.data.isDay).icon, temp: fmtTemp(wx.data.temp) + "C", title: `${wx.pref.name}: ${describeWx(wx.data.code, wx.data.isDay).text}` } : { icon: "🌡️", temp: "…", title: wx.pref.name }) : null}
+        onWeather={() => setWxOpen(true)}
         onSettings={() => setSettingsOpen(true)} />
 
       {toast && (
@@ -1656,6 +1662,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {wxOpen && wx.pref && <WeatherDialog pref={wx.pref} data={wx.data} err={wx.err} loading={wx.loading} onRefresh={() => void wx.refresh()} onClose={() => setWxOpen(false)} />}
       {calOpen && <CalendarDialog prefill={calPrefill} onClose={() => { setCalOpen(false); setCalPrefill(null); }} />}
       {outboxOpen && (
         <OutboxDialog items={outbox} scheduled={scheduled} snoozed={snoozed}

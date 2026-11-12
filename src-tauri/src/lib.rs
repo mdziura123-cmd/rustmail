@@ -2,6 +2,7 @@ mod accounts;
 mod auth;
 mod background;
 mod sni;
+mod weather;
 mod backup;
 mod calendar;
 mod badge;
@@ -179,6 +180,8 @@ pub fn run() {
             background::set_background,
             background::set_close_minimize,
             background::quit_app,
+            weather::weather_search,
+            weather::weather_get,
             background::background_state,
             background::set_unread,
             backup::backup_export,
