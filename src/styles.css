@@ -420,3 +420,6 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 .wx-days li { display: grid; grid-template-columns: 9ch 1fr auto; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .wx-dn { text-transform: capitalize; }
 .wx-chip { white-space: nowrap; }
+
+.cal-page { min-height: 100vh; background: var(--bg, var(--panel)); color: var(--ink); padding: 14px; box-sizing: border-box; }
+.cal-pagebox { width: 100%; max-width: 900px; margin: 0 auto; }

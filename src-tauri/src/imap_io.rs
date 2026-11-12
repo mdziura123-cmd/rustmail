@@ -323,9 +323,49 @@ pub struct Folder {
     pub role: String,
 }
 
+/// Liczba wiadomości z odpowiedzi `* STATUS "folder" (MESSAGES n)`.
+fn status_messages(head: &str) -> Option<u32> {
+    let pos = head.find("MESSAGES ")?;
+    let digits: String = head[pos + 9..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// Dwa foldery o tej samej roli (np. „Wersje robocze” i „Szkice”): zostaje jeden (ten z atrybutem serwera,
+/// inaczej pierwszy). Drugi znika z listy, jeśli jest pusty; jeśli ma wiadomości, zostaje jako zwykły folder.
+async fn dedupe_roles(conn: &mut Conn, out: &mut Vec<Folder>, flagged: &[String]) {
+    for role in ["drafts", "sent", "trash", "spam", "archive"] {
+        let idx: Vec<usize> = (0..out.len()).filter(|&i| out[i].role == role).collect();
+        if idx.len() < 2 {
+            continue;
+        }
+        let keep = idx.iter().copied().find(|&i| flagged.contains(&out[i].name)).unwrap_or(idx[0]);
+        let mut drop: Vec<usize> = Vec::new();
+        for &i in idx.iter().filter(|&&i| i != keep) {
+            let empty = match p::quote(&out[i].name) {
+                Ok(q) => match conn.ok(&format!("STATUS {q} (MESSAGES)")).await {
+                    Ok(r) => r.untagged.iter().any(|u| status_messages(&u.head) == Some(0)),
+                    Err(_) => false,
+                },
+                Err(_) => false,
+            };
+            if empty {
+                drop.push(i);
+            } else {
+                out[i].role = "other".to_string();
+            }
+        }
+        drop.sort_unstable_by(|a, b| b.cmp(a));
+        for i in drop {
+            out.remove(i);
+        }
+    }
+}
+
 async fn list_folders(conn: &mut Conn) -> Result<Vec<Folder>, String> {
     let r = conn.ok("LIST \"\" \"*\"").await?;
     let mut out: Vec<Folder> = Vec::new();
+    // foldery, których rolę serwer podał wprost (atrybut specjalnego użytku) – mają pierwszeństwo przy dublach
+    let mut flagged: Vec<String> = Vec::new();
     for u in &r.untagged {
         let Some(e) = p::parse_list(&u.head, &u.lits) else { continue };
         if e.attrs.iter().any(|a| a.eq_ignore_ascii_case("\\Noselect") || a.eq_ignore_ascii_case("\\NonExistent")) {
@@ -335,9 +375,13 @@ async fn list_folders(conn: &mut Conn) -> Result<Vec<Folder>, String> {
             continue;
         }
         let role = p::role_of(&e.name, &e.attrs).to_string();
+        if e.attrs.iter().any(|a| matches!(a.to_ascii_lowercase().as_str(), "\\sent" | "\\trash" | "\\junk" | "\\drafts" | "\\archive" | "\\all")) {
+            flagged.push(e.name.clone());
+        }
         let label = if role == "inbox" { "Odebrane".to_string() } else { p::mutf7_decode(&e.name) };
         out.push(Folder { name: e.name, label, role });
     }
+    dedupe_roles(conn, &mut out, &flagged).await;
     let rank = |r: &str| match r {
         "inbox" => 0,
         "sent" => 1,

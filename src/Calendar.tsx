@@ -49,7 +49,7 @@ interface Form {
   until: string;
 }
 
-export function CalendarDialog({ onClose, prefill }: { onClose: () => void; prefill?: CalPrefill | null }) {
+export function CalendarDialog({ onClose, prefill, standalone }: { onClose: () => void; prefill?: CalPrefill | null; standalone?: boolean }) {
   const today = new Date();
   const [cursor, setCursor] = useState(() => {
     const d = prefill ? parseLocal(prefill.date, "00:00") : today;
@@ -150,8 +150,8 @@ export function CalendarDialog({ onClose, prefill }: { onClose: () => void; pref
   const timeLabel = (o: Occurrence) => o.event.allDay ? "cały dzień" : `${timeStr(new Date(o.startMs))}–${timeStr(new Date(o.endMs))}`;
 
   return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-label="Kalendarz">
-      <div className="modal cal-modal">
+    <div className={standalone ? "cal-page" : "modal-back"} role={standalone ? undefined : "dialog"} aria-modal={standalone ? undefined : true} aria-label="Kalendarz">
+      <div className={standalone ? "cal-modal cal-pagebox" : "modal cal-modal"}>
         <div className="cal-head">
           <button className="small" aria-label="Poprzedni miesiąc" onClick={() => go(-1)}>‹</button>
           <h3>{MONTHS[cursor.getMonth()]} {cursor.getFullYear()}</h3>

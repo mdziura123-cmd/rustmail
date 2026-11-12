@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "Minimalne uprawnienia głównego okna",
   "windows": [
-    "main"
+    "main",
+    "calendar"
   ],
   "permissions": [
     "core:default",

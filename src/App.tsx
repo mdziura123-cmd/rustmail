@@ -14,7 +14,6 @@ import { CacheDialog } from "./CacheDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { AccountSwitcher } from "./AccountSwitcher";
 import { OutboxDialog } from "./OutboxDialog";
-import { CalendarDialog, type CalPrefill } from "./Calendar";
 import { dueOccurrence } from "./recur";
 import { findDate } from "./dateFind";
 import { WeatherDialog } from "./WeatherDialog";
@@ -139,14 +138,12 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [outboxOpen, setOutboxOpen] = useState(false);
-  const [calOpen, setCalOpen] = useState(false);
   const [wxOpen, setWxOpen] = useState(false);
   const wx = useWeather();
-  const [calPrefill, setCalPrefill] = useState<CalPrefill | null>(null);
   const calFromMail = (subject: string, text: string) => {
     const f = findDate(subject + "\n" + text);
-    setCalPrefill({ title: subject.slice(0, 120), notes: f.found ? "" : "Nie znaleziono terminu w wiadomości – ustaw datę.", date: f.date, time: f.time });
-    setCalOpen(true);
+    const prefill = JSON.stringify({ title: subject.slice(0, 120), notes: f.found ? "" : "Nie znaleziono terminu w wiadomości – ustaw datę.", date: f.date, time: f.time });
+    void api.openCalendarWindow(prefill).catch((e) => showToast(errText(e)));
   };
   const [scheduled, setScheduled] = useState<SchedItem[]>([]);
   const [snoozed, setSnoozed] = useState<SnoozeItem[]>([]);
@@ -586,7 +583,7 @@ export default function App() {
     // Ctrl+A zaznacza wszystkie konwersacje na liście (poza polami tekstowymi i oknami).
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
       if (isTypingTarget(e.target as HTMLElement | null)) return;
-      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || wxOpen || spamOpen || importOpen || imapLoginOpen) return;
+      if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || wxOpen || spamOpen || importOpen || imapLoginOpen) return;
       e.preventDefault();
       setSelected(new Set(threads.map((t) => t.id)));
       return;
@@ -594,7 +591,7 @@ export default function App() {
     const cmd = commandFor(e);
     if (!cmd || isTypingTarget(e.target as HTMLElement | null)) return;
     if (cmd === "help") { setHelpOpen((v) => !v); e.preventDefault(); return; }
-    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || calOpen || wxOpen || spamOpen || importOpen || imapLoginOpen) {
+    if (!email || compose || helpOpen || settingsOpen || cacheOpen || sigOpen || senderDlg || outboxOpen || wxOpen || spamOpen || importOpen || imapLoginOpen) {
       if (cmd === "escape" && helpOpen) setHelpOpen(false);
       return;
     }
@@ -1613,7 +1610,7 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => { setCalPrefill(null); setCalOpen(true); }}
+      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => void api.openCalendarWindow().catch((e) => showToast(errText(e)))}
         weather={wx.pref ? (wx.data ? { icon: describeWx(wx.data.code, wx.data.isDay).icon, temp: fmtTemp(wx.data.temp) + "C", title: `${wx.pref.name}: ${describeWx(wx.data.code, wx.data.isDay).text}` } : { icon: "🌡️", temp: "…", title: wx.pref.name }) : null}
         onWeather={() => setWxOpen(true)}
         onSettings={() => setSettingsOpen(true)} />
@@ -1663,7 +1660,6 @@ export default function App() {
         </div>
       )}
       {wxOpen && wx.pref && <WeatherDialog pref={wx.pref} data={wx.data} err={wx.err} loading={wx.loading} onRefresh={() => void wx.refresh()} onClose={() => setWxOpen(false)} />}
-      {calOpen && <CalendarDialog prefill={calPrefill} onClose={() => { setCalOpen(false); setCalPrefill(null); }} />}
       {outboxOpen && (
         <OutboxDialog items={outbox} scheduled={scheduled} snoozed={snoozed}
           onCancelScheduled={async (id) => { try { await api.scheduleDelete(imapAccount, id); } catch (e) { showToast(errText(e)); } void refreshLater(); }}

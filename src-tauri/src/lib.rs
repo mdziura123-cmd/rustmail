@@ -5,6 +5,7 @@ mod sni;
 mod weather;
 mod backup;
 mod calendar;
+mod calwin;
 mod badge;
 mod blocklist;
 mod commands;
@@ -71,6 +72,7 @@ pub fn run() {
         })
         .manage(auth::AppState::new())
         .manage(notify::Notifier::default())
+        .manage(calwin::CalPrefill::default())
         .manage(notify::ImapSeen::default())
         .manage(spam_io::SpamState::default())
         .setup(move |app| {
@@ -226,6 +228,9 @@ pub fn run() {
             calendar::cal_save,
             calendar::cal_delete,
             calendar::cal_due,
+            calwin::open_calendar_window,
+            calwin::cal_take_prefill,
+            calwin::close_calendar_window,
             backup::sync_get,
             backup::sync_set,
             backup::sync_run,
