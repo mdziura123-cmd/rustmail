@@ -275,11 +275,8 @@ impl Store {
             "ALTER TABLE events ADD COLUMN repeat TEXT NOT NULL DEFAULT 'none'",
             "ALTER TABLE events ADD COLUMN until_ms INTEGER NOT NULL DEFAULT 0",
         ] {
-            if let Err(e) = conn.execute(stmt, []) {
-                if !e.to_string().contains("duplicate column") {
-                    return Err(e.to_string());
-                }
-            }
+            // Błąd (zwykle „duplicate column”) nie może zablokować otwarcia bazy z pocztą; najwyżej kalendarz zgłosi błąd.
+            let _ = conn.execute(stmt, []);
         }
         Ok(conn)
     }
