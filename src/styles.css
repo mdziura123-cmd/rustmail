@@ -464,3 +464,20 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 .emoji-pop { padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); display: grid; gap: 6px; max-height: 190px; overflow-y: auto; }
 .emoji-pop .hint { margin: 0; }
 .emoji-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Wyższe górny i dolny pasek: łatwiej trafić w ikony (komputer; telefon ma własne rozmiary wyżej) */
+@media (min-width: 761px) {
+  .titlebar { height: 48px; }
+  .tb-btn { width: 54px; }
+  .tb-btn svg { width: 14px; height: 14px; }
+  .tb-search-row { height: 36px; border-radius: 18px; padding: 0 4px 0 12px; }
+  .tb-search input { font-size: 14px; }
+  .tb-sbtn { width: 32px; height: 30px; border-radius: 15px; }
+  .av-btn { width: 34px; height: 34px; }
+  .av { width: 26px; height: 26px; font-size: 12px; }
+  .tb-right { gap: 8px; }
+  .status { padding: 9px 16px; gap: 16px; font-size: 13px; }
+  .status .icon-btn { width: 36px; height: 32px; border-radius: 6px; }
+  .status .icon-btn svg { width: 18px; height: 18px; }
+  .status .small { min-height: 30px; }
+}
