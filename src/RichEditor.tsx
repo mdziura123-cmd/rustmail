@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActIcon } from "./ActIcon";
+import { EMOJI, token } from "./emoji";
 import { FONTS, isSafeHref, SIZES, sanitizeHtml } from "./sanitize";
 
 /** Operacje na treści edytora potrzebne do sprawdzania pisowni. */
@@ -35,6 +36,7 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [href, setHref] = useState("https://");
   const [linkErr, setLinkErr] = useState<string | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
 
   useEffect(() => {
     if (ref.current) {
@@ -200,7 +202,27 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
         {btn(<ActIcon n="olist" />, "Lista numerowana", () => cmd("insertOrderedList"))}
         {btn(<ActIcon n="link" />, "Wstaw link", () => { rememberSelection(); setLinkOpen((v) => !v); })}
         {btn(<ActIcon n="eraser" />, "Usuń formatowanie zaznaczenia", () => cmd("removeFormat"))}
+        {btn(
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" /><path d="M8.5 14.5c1 1.4 2.2 2 3.5 2s2.5-.6 3.5-2" /><path d="M9 9.5v.5M15 9.5v.5" />
+          </svg>,
+          "Wstaw emotkę", () => { rememberSelection(); setEmojiOpen((v) => !v); })}
       </div>
+      {emojiOpen && (
+        <div className="emoji-pop" role="listbox" aria-label="Emotki">
+          <p className="hint">W oknie pisania widać opis, np. [uśmiech]; odbiorca dostanie prawdziwą emotkę.</p>
+          <div className="emoji-grid">
+            {EMOJI.map((e) => (
+              <button key={e.name} type="button" className="small" disabled={disabled}
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => { apiRef?.current?.insertText(token(e.name)); }}>
+                {e.name}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="small" onClick={() => setEmojiOpen(false)}>Zamknij</button>
+        </div>
+      )}
       {linkOpen && (
         <div className="linkbar">
           <input value={href} onChange={(e) => setHref(e.target.value)} aria-label="Adres linku"

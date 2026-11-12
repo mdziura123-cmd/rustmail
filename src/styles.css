@@ -460,3 +460,7 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 @keyframes cal-slide { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 @keyframes cal-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 @keyframes cal-wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+
+.emoji-pop { padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); display: grid; gap: 6px; max-height: 190px; overflow-y: auto; }
+.emoji-pop .hint { margin: 0; }
+.emoji-grid { display: flex; flex-wrap: wrap; gap: 4px; }
