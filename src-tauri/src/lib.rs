@@ -1,6 +1,7 @@
 mod accounts;
 mod auth;
 mod background;
+mod sni;
 mod backup;
 mod calendar;
 mod badge;
@@ -177,6 +178,7 @@ pub fn run() {
             commands::show_notification,
             background::set_background,
             background::set_close_minimize,
+            background::quit_app,
             background::background_state,
             background::set_unread,
             backup::backup_export,

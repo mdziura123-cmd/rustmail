@@ -30,20 +30,26 @@ static MINIMIZE: AtomicBool = AtomicBool::new(false);
 /// Ostatnio ustawiona liczba nieprzeczytanych (żeby nie odświeżać ikon bez zmiany).
 static LAST_UNREAD: AtomicU32 = AtomicU32::new(u32::MAX);
 
+/// Własna ikona zasobniku (StatusNotifierItem) działa – wtedy lewy przycisk myszy otwiera okno.
+static SNI_ON: AtomicBool = AtomicBool::new(false);
+
 /// Ustawia znacznik nowych wiadomości: kropkę na ikonie zasobnika, podpowiedź i licznik na ikonie w pasku.
 #[tauri::command]
 pub fn set_unread(app: AppHandle, count: u32) {
     if LAST_UNREAD.swap(count, Ordering::SeqCst) == count {
         return;
     }
-    if let Some(tray) = app.tray_by_id("rustmail") {
-        let _ = tray.set_tooltip(Some(badge::tooltip(count)));
-        if let Some(base) = app.default_window_icon() {
-            let (w, h) = (base.width(), base.height());
-            let mut rgba = base.rgba().to_vec();
-            if count > 0 {
-                badge::draw_dot(&mut rgba, w as usize, h as usize);
-            }
+    let tip = badge::tooltip(count);
+    if let Some(base) = app.default_window_icon() {
+        let (w, h) = (base.width(), base.height());
+        let mut rgba = base.rgba().to_vec();
+        if count > 0 {
+            badge::draw_dot(&mut rgba, w as usize, h as usize);
+        }
+        if SNI_ON.load(Ordering::SeqCst) {
+            crate::sni::update(&rgba, w, h, &tip);
+        } else if let Some(tray) = app.tray_by_id("rustmail") {
+            let _ = tray.set_tooltip(Some(tip));
             let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
         }
     }
@@ -97,6 +103,12 @@ pub fn background_state() -> bool {
     TRAY_OK.load(Ordering::SeqCst)
 }
 
+/// Kończy program (z zasobnika bez własnego menu: przycisk w Ustawieniach).
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 pub fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -134,6 +146,18 @@ fn build_tray(app: &AppHandle) -> Result<(), String> {
 /// Tworzy ikonę w zasobniku. Biblioteka zasobnika może zapaść się (panic), gdy w systemie brakuje
 /// obsługi – wtedy aplikacja działa dalej bez zasobnika, a zamknięcie okna zamyka program jak dotąd.
 pub fn init_tray(app: &AppHandle) {
+    // Najpierw własna ikona (lewy przycisk od razu otwiera okno); `RUSTMAIL_TRAY=tauri` wymusza starą ikonę.
+    let force_old = std::env::var("RUSTMAIL_TRAY").map(|v| v == "tauri").unwrap_or(false);
+    if !force_old {
+        if let Some(icon) = app.default_window_icon() {
+            let started = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::sni::start(app, icon.rgba(), icon.width(), icon.height()))).unwrap_or(false);
+            if started {
+                SNI_ON.store(true, Ordering::SeqCst);
+                TRAY_OK.store(true, Ordering::SeqCst);
+                return;
+            }
+        }
+    }
     let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_tray(app))).map(|r| r.is_ok()).unwrap_or(false);
     TRAY_OK.store(ok, Ordering::SeqCst);
 }

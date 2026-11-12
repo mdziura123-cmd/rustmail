@@ -3446,6 +3446,7 @@ name = "rustmail"
 version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
+ "dbus",
  "encoding_rs",
  "keyring",
  "mailparse",

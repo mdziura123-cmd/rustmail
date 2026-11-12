@@ -2,6 +2,18 @@
 //! (przez interfejs „Unity Launcher”, który obsługuje m.in. KDE Plasma). Część rysująca i budująca
 //! argumenty jest czysta, więc testowana osobno.
 
+/// Obraz RGBA w formacie ikony StatusNotifierItem: ARGB32 w kolejności bajtów sieciowej (A, R, G, B).
+pub fn argb_pixmap(rgba: &[u8], w: u32, h: u32) -> Vec<(i32, i32, Vec<u8>)> {
+    if w == 0 || h == 0 || rgba.len() < (w as usize) * (h as usize) * 4 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity((w as usize) * (h as usize) * 4);
+    for px in rgba.chunks_exact(4).take((w as usize) * (h as usize)) {
+        out.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
+    }
+    vec![(w as i32, h as i32, out)]
+}
+
 /// Rysuje na obrazie RGBA czerwoną kropkę z białą obwódką w prawym górnym rogu.
 pub fn draw_dot(rgba: &mut [u8], w: usize, h: usize) {
     if w < 8 || h < 8 || rgba.len() < w * h * 4 {
@@ -63,6 +75,15 @@ pub fn tooltip(count: u32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn argb_order_and_bounds() {
+        let rgba = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let p = argb_pixmap(&rgba, 2, 1);
+        assert_eq!(p, vec![(2, 1, vec![4, 1, 2, 3, 8, 5, 6, 7])]);
+        assert!(argb_pixmap(&rgba, 2, 2).is_empty());
+        assert!(argb_pixmap(&rgba, 0, 1).is_empty());
+    }
+
     use super::*;
 
     #[test]

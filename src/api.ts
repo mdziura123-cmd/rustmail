@@ -141,6 +141,7 @@ export const api = {
   testNotification: () => invoke<void>("test_notification"),
   setBackground: (enabled: boolean) => invoke<void>("set_background", { enabled }),
   setCloseMinimize: (minimize: boolean) => invoke<void>("set_close_minimize", { minimize }),
+  quitApp: () => invoke<void>("quit_app"),
   backgroundState: () => invoke<boolean>("background_state"),
   backupExport: (settings: Record<string, string>) => invoke<string>("backup_export", { settings }),
   backupImport: (json: string) =>
