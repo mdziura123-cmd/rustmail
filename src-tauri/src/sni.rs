@@ -12,7 +12,7 @@ use dbus::{
     blocking::SyncConnection,
     channel::{MatchingReceiver, Sender},
     message::{MatchRule, Message, MessageType},
-    strings::{BusName, ErrorName},
+    strings::{BusName, ErrorName, Signature},
     Path,
 };
 use tauri::AppHandle;
@@ -20,6 +20,8 @@ use tauri::AppHandle;
 const ITEM_PATH: &str = "/StatusNotifierItem";
 const ITEM_IFACE: &str = "org.kde.StatusNotifierItem";
 const PROPS_IFACE: &str = "org.freedesktop.DBus.Properties";
+const MENU_PATH: &str = "/MenuBar";
+const MENU_IFACE: &str = "com.canonical.dbusmenu";
 
 type Pixmap = Vec<(i32, i32, Vec<u8>)>;
 
@@ -37,6 +39,7 @@ enum Prop {
     U(u32),
     O(&'static str),
     Px(Pixmap),
+    Strs(Vec<String>),
     Tip(String, Pixmap, String, String),
 }
 
@@ -55,7 +58,7 @@ fn props(sh: &Shared) -> Vec<(&'static str, Prop)> {
         ("AttentionIconName", Prop::S(String::new())),
         ("ToolTip", Prop::Tip(String::new(), Vec::new(), "RustMail".to_string(), tip)),
         ("ItemIsMenu", Prop::B(false)),
-        ("Menu", Prop::O("/NO_DMENU")),
+        ("Menu", Prop::O(MENU_PATH)),
     ]
 }
 
@@ -79,6 +82,10 @@ fn append_prop(ia: &mut IterAppend, p: &Prop) {
                 ia.append_variant(&<Path as Arg>::signature(), move |v| v.append(path));
             }
         }
+        Prop::Strs(list) => {
+            let list = list.clone();
+            ia.append_variant(&<Vec<String> as Arg>::signature(), move |v| v.append(list));
+        }
         Prop::Px(px) => {
             let px = px.clone();
             ia.append_variant(&<Pixmap as Arg>::signature(), move |v| v.append(px));
@@ -87,6 +94,124 @@ fn append_prop(ia: &mut IterAppend, p: &Prop) {
             let t = (a.clone(), px.clone(), b.clone(), c.clone());
             ia.append_variant(&<(String, Pixmap, String, String) as Arg>::signature(), move |v| v.append(t));
         }
+    }
+}
+
+fn menu_props() -> Vec<(&'static str, Prop)> {
+    vec![
+        ("Version", Prop::U(3)),
+        ("TextDirection", Prop::S("ltr".to_string())),
+        ("Status", Prop::S("normal".to_string())),
+        ("IconThemePath", Prop::Strs(Vec::new())),
+    ]
+}
+
+enum Mv {
+    S(&'static str),
+    B(bool),
+}
+
+const MENU_IDS: [i32; 3] = [1, 2, 3];
+
+/// Pozycje menu zasobnika: 1 = pokaż okno, 2 = separator, 3 = zakończ program.
+fn item_props(id: i32) -> Vec<(&'static str, Mv)> {
+    match id {
+        0 => vec![("children-display", Mv::S("submenu"))],
+        1 => vec![("label", Mv::S("Pokaż RustMail")), ("enabled", Mv::B(true)), ("visible", Mv::B(true))],
+        2 => vec![("type", Mv::S("separator")), ("visible", Mv::B(true))],
+        _ => vec![("label", Mv::S("Zakończ całkowicie")), ("enabled", Mv::B(true)), ("visible", Mv::B(true))],
+    }
+}
+
+fn append_mv(ia: &mut IterAppend, v: &Mv) {
+    match v {
+        Mv::S(s) => {
+            let s = s.to_string();
+            ia.append_variant(&<String as Arg>::signature(), move |x| x.append(s));
+        }
+        Mv::B(b) => {
+            let b = *b;
+            ia.append_variant(&<bool as Arg>::signature(), move |x| x.append(b));
+        }
+    }
+}
+
+fn append_item_props(ia: &mut IterAppend, id: i32) {
+    ia.append_dict(&<String as Arg>::signature(), &<Variant<u8> as Arg>::signature(), |d| {
+        for (k, v) in item_props(id) {
+            d.append_dict_entry(|e| {
+                e.append(k);
+                append_mv(e, &v);
+            });
+        }
+    });
+}
+
+/// Pozycja menu jako struktura (id, właściwości, dzieci).
+fn append_item(ia: &mut IterAppend, id: i32, with_children: bool) {
+    ia.append_struct(|s| {
+        s.append(id);
+        append_item_props(s, id);
+        s.append_array(&<Variant<u8> as Arg>::signature(), |a| {
+            if with_children {
+                if let Ok(sig) = Signature::new("(ia{sv}av)") {
+                    for cid in MENU_IDS {
+                        a.append_variant(&sig, |v| append_item(v, cid, false));
+                    }
+                }
+            }
+        });
+    });
+}
+
+fn menu_call(app: &AppHandle, msg: &Message, member: &str) -> Option<Message> {
+    match member {
+        "GetLayout" => {
+            let (pid, _) = msg.get2::<i32, i32>();
+            let pid = pid.filter(|p| MENU_IDS.contains(p)).unwrap_or(0);
+            let mut r = msg.method_return();
+            {
+                let mut ia = IterAppend::new(&mut r);
+                ia.append(1u32);
+                append_item(&mut ia, pid, pid == 0);
+            }
+            Some(r)
+        }
+        "GetGroupProperties" => {
+            let mut ids: Vec<i32> = msg.get1::<Vec<i32>>().unwrap_or_default().into_iter().filter(|i| *i == 0 || MENU_IDS.contains(i)).collect();
+            if ids.is_empty() {
+                ids = vec![0, 1, 2, 3];
+            }
+            let sig = Signature::new("(ia{sv})").ok()?;
+            let mut r = msg.method_return();
+            {
+                let mut ia = IterAppend::new(&mut r);
+                ia.append_array(&sig, |a| {
+                    for id in ids {
+                        a.append_struct(|s| {
+                            s.append(id);
+                            append_item_props(s, id);
+                        });
+                    }
+                });
+            }
+            Some(r)
+        }
+        "Event" => {
+            let (id, ev) = msg.get2::<i32, &str>();
+            if ev == Some("clicked") {
+                match id {
+                    Some(1) => crate::background::show_main(app),
+                    Some(3) => app.exit(0),
+                    _ => {}
+                }
+            }
+            Some(msg.method_return())
+        }
+        "AboutToShow" => Some(msg.method_return().append1(false)),
+        "AboutToShowGroup" => Some(msg.method_return().append2(Vec::<i32>::new(), Vec::<i32>::new())),
+        "EventGroup" => Some(msg.method_return().append1(Vec::<i32>::new())),
+        _ => error_reply(msg, "org.freedesktop.DBus.Error.UnknownMethod", "Nieznana metoda"),
     }
 }
 
@@ -108,29 +233,27 @@ fn handle(app: &AppHandle, conn: &SyncConnection, msg: Message) {
         return;
     };
     let (path, iface, member) = (path.to_string(), iface.to_string(), member.to_string());
-    let reply: Option<Message> = if path != ITEM_PATH {
+    let reply: Option<Message> = if path != ITEM_PATH && path != MENU_PATH {
         error_reply(&msg, "org.freedesktop.DBus.Error.UnknownObject", "Nieznany obiekt")
-    } else if iface == ITEM_IFACE {
-        match member.as_str() {
-            // lewy przycisk, środkowy przycisk i (bez własnego menu) prawy przycisk: otwórz okno
-            "Activate" | "SecondaryActivate" | "ContextMenu" => {
-                crate::background::show_main(app);
-                Some(msg.method_return())
-            }
-            "Scroll" => Some(msg.method_return()),
-            _ => error_reply(&msg, "org.freedesktop.DBus.Error.UnknownMethod", "Nieznana metoda"),
-        }
     } else if iface == PROPS_IFACE {
+        let which = msg.get1::<&str>().unwrap_or("");
+        let list = if path == ITEM_PATH && which == ITEM_IFACE {
+            props(sh)
+        } else if path == MENU_PATH && which == MENU_IFACE {
+            menu_props()
+        } else {
+            Vec::new()
+        };
         match member.as_str() {
             "GetAll" => {
                 let mut r = msg.method_return();
                 {
                     let mut ia = IterAppend::new(&mut r);
                     ia.append_dict(&<String as Arg>::signature(), &<Variant<u8> as Arg>::signature(), |d| {
-                        for (k, p) in props(sh) {
+                        for (k, p) in &list {
                             d.append_dict_entry(|e| {
-                                e.append(k);
-                                append_prop(e, &p);
+                                e.append(*k);
+                                append_prop(e, p);
                             });
                         }
                     });
@@ -139,12 +262,12 @@ fn handle(app: &AppHandle, conn: &SyncConnection, msg: Message) {
             }
             "Get" => {
                 let (_, name) = msg.get2::<&str, &str>();
-                match name.and_then(|n| props(sh).into_iter().find(|(k, _)| *k == n)) {
+                match name.and_then(|n| list.iter().find(|(k, _)| *k == n)) {
                     Some((_, p)) => {
                         let mut r = msg.method_return();
                         {
                             let mut ia = IterAppend::new(&mut r);
-                            append_prop(&mut ia, &p);
+                            append_prop(&mut ia, p);
                         }
                         Some(r)
                     }
@@ -153,6 +276,18 @@ fn handle(app: &AppHandle, conn: &SyncConnection, msg: Message) {
             }
             _ => error_reply(&msg, "org.freedesktop.DBus.Error.AccessDenied", "Tylko do odczytu"),
         }
+    } else if path == ITEM_PATH && iface == ITEM_IFACE {
+        match member.as_str() {
+            // lewy i środkowy przycisk: otwórz okno (prawy pokazuje menu z obiektu /MenuBar)
+            "Activate" | "SecondaryActivate" | "ContextMenu" => {
+                crate::background::show_main(app);
+                Some(msg.method_return())
+            }
+            "Scroll" => Some(msg.method_return()),
+            _ => error_reply(&msg, "org.freedesktop.DBus.Error.UnknownMethod", "Nieznana metoda"),
+        }
+    } else if path == MENU_PATH && iface == MENU_IFACE {
+        menu_call(app, &msg, &member)
     } else {
         error_reply(&msg, "org.freedesktop.DBus.Error.UnknownInterface", "Nieznany interfejs")
     };

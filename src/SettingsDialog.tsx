@@ -303,7 +303,7 @@ export function SettingsDialog(p: Props) {
                   </div>
                 )}
                 {p.background && closeMode === "tray" && (
-                  <p className="hint">Kliknięcie ikony RustMail w zasobniku (lewym lub prawym przyciskiem) otwiera okno. Żeby zamknąć program całkowicie, użyj przycisku powyżej. Jeśli ikona w zasobniku nie reaguje, przypięta ikona w pasku zadań też otwiera okno, albo wybierz zminimalizowanie do paska zadań.</p>
+                  <p className="hint">Lewy przycisk na ikonie RustMail w zasobniku otwiera okno, a prawy pokazuje menu: „Pokaż RustMail” i „Zakończ całkowicie”. Jeśli ikona w zasobniku nie reaguje, przypięta ikona w pasku zadań też otwiera okno, albo wybierz zminimalizowanie do paska zadań.</p>
                 )}
                 {p.background && trayOk === false && closeMode === "tray" && (
                   <p className="hint">Ikona w zasobniku nie jest dostępna w tym środowisku, więc zamknięcie okna zamknie program.</p>
