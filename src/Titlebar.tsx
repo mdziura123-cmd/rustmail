@@ -33,8 +33,8 @@ export default function Titlebar({ children, center }: { children?: ReactNode; c
   return (
     <div className="titlebar" data-tauri-drag-region>
       <span className="tb-title" data-tauri-drag-region>RustMail</span>
-      <div className="tb-center">{center}</div>
-      <div className="tb-right">
+      <div className="tb-center" data-tauri-drag-region>{center}</div>
+      <div className="tb-right" data-tauri-drag-region>
         {children}
       <div className="tb-btns">
         <button className="tb-btn" aria-label="Minimalizuj" title="Minimalizuj" onClick={run((w) => w.minimize())}>

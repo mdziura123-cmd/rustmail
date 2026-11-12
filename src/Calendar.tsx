@@ -161,7 +161,7 @@ export function CalendarDialog({ onClose, prefill, standalone }: { onClose: () =
           <button onClick={onClose}>Zamknij</button>
         </div>
         <p className="hint">Czerwone dni to polskie święta wolne od pracy (liczone w programie, także Wielkanoc i Boże Ciało), szare to weekendy. Kalendarz jest lokalny: zapisany tylko na tym komputerze, niepołączony z pocztą ani z żadnym kontem. Wchodzi do kopii zapasowej (Ustawienia → Poczta).</p>
-        <div className="cal-grid" role="grid" aria-label="Dni miesiąca">
+        <div key={`${cursor.getFullYear()}-${cursor.getMonth()}`} className="cal-grid" role="grid" aria-label="Dni miesiąca">
           {WEEK.map((w) => <div key={w} className="cal-dow" role="columnheader">{w}</div>)}
           {cells.map((d) => {
             const n = dayEvents(d).length;

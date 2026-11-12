@@ -18,6 +18,7 @@ import { dueOccurrence } from "./recur";
 import { findDate } from "./dateFind";
 import { WeatherDialog } from "./WeatherDialog";
 import { describe as describeWx, fmtTemp, useWeather } from "./weather";
+import { WxIcon } from "./WxIcon";
 import { ActIcon } from "./ActIcon";
 import { loadSound, playSound, saveSound, type SoundId } from "./sound";
 import { applyCustomKeys, commandFor, customKeys, isTypingTarget, shortcutHelp } from "./shortcuts";
@@ -1325,6 +1326,13 @@ export default function App() {
           }}
           placeholder={imapAccount ? "Szukaj w tym folderze…" : "Szukaj w poczcie…"} />
       ) : undefined}>
+        {wx.pref && (
+          <button className="wx-chip" onClick={() => setWxOpen(true)}
+            title={wx.data ? `${wx.pref.name}: ${describeWx(wx.data.code, wx.data.isDay).text}` : wx.pref.name}
+            aria-label={"Pogoda: " + (wx.data ? `${wx.pref.name}, ${describeWx(wx.data.code, wx.data.isDay).text}, ${fmtTemp(wx.data.temp)}C` : wx.pref.name)}>
+            {wx.data ? <><WxIcon code={wx.data.code} isDay={wx.data.isDay} /><span>{fmtTemp(wx.data.temp)}C</span></> : <span>…</span>}
+          </button>
+        )}
         {email && (
           <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
             label={imapAccount ?? email} busy={signingIn}
@@ -1611,8 +1619,6 @@ export default function App() {
       </div>
 
       <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => void api.openCalendarWindow().catch((e) => showToast(errText(e)))}
-        weather={wx.pref ? (wx.data ? { icon: describeWx(wx.data.code, wx.data.isDay).icon, temp: fmtTemp(wx.data.temp) + "C", title: `${wx.pref.name}: ${describeWx(wx.data.code, wx.data.isDay).text}` } : { icon: "🌡️", temp: "…", title: wx.pref.name }) : null}
-        onWeather={() => setWxOpen(true)}
         onSettings={() => setSettingsOpen(true)} />
 
       {toast && (

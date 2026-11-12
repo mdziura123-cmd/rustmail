@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { describe, fmtTemp, type WeatherData, type WeatherPref } from "./weather";
+import { WxIcon } from "./WxIcon";
 
 interface Props {
   pref: WeatherPref;
@@ -33,7 +34,7 @@ export function WeatherDialog({ pref, data, err, loading, onRefresh, onClose }: 
         {data && cur && (
           <>
             <div className="wx-now">
-              <span className="wx-icon" aria-hidden="true">{cur.icon}</span>
+              <span className="wx-icon" aria-hidden="true"><WxIcon code={data.code} isDay={data.isDay} /></span>
               <span className="wx-temp">{fmtTemp(data.temp)}C</span>
               <span>
                 <b>{cur.text}</b>
@@ -45,9 +46,9 @@ export function WeatherDialog({ pref, data, err, loading, onRefresh, onClose }: 
               {data.days.map((d, i) => {
                 const w = describe(d.code);
                 return (
-                  <li key={d.date}>
+                  <li key={d.date} style={{ animationDelay: `${i * 60}ms` }}>
                     <span className="wx-dn">{dayName(d.date, i)}</span>
-                    <span title={w.text}>{w.icon} {w.text}</span>
+                    <span title={w.text}><WxIcon code={d.code} isDay small /> {w.text}</span>
                     <span><b>{fmtTemp(d.max)}</b> / {fmtTemp(d.min)}{d.rain !== null ? ` · opady ${Math.round(d.rain)}%` : ""}</span>
                   </li>
                 );

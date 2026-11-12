@@ -423,3 +423,40 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 
 .cal-page { min-height: 100vh; background: var(--bg, var(--panel)); color: var(--ink); padding: 14px; box-sizing: border-box; }
 .cal-pagebox { width: 100%; max-width: 900px; margin: 0 auto; }
+
+/* ---- pogoda w górnej belce i animacje ---- */
+.wx-chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border: 1px solid transparent; border-radius: 13px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.wx-chip:hover { background: var(--sel); border-color: var(--line); }
+.wx-ico { display: inline-block; line-height: 1; transform-origin: 50% 55%; }
+.wx-small { font-size: 15px; }
+@media (prefers-reduced-motion: no-preference) {
+  .wx-sun { animation: wx-spin 24s linear infinite; }
+  .wx-moon { animation: wx-glow 4s ease-in-out infinite; }
+  .wx-cloud { animation: wx-drift 5s ease-in-out infinite; }
+  .wx-fog { animation: wx-fade 3.2s ease-in-out infinite; }
+  .wx-rain { animation: wx-drip 1.4s ease-in-out infinite; }
+  .wx-snow { animation: wx-sway 3s ease-in-out infinite; }
+  .wx-storm { animation: wx-flash 3.5s ease-in-out infinite; }
+  .wx-days li { animation: cal-rise .35s ease-out both; }
+  .wx-now { animation: cal-rise .3s ease-out both; }
+  .weather-modal, .cal-pagebox { animation: cal-pop .22s ease-out both; }
+  .cal-grid { animation: cal-slide .22s ease-out both; }
+  .cal-day { transition: transform .12s ease, background-color .12s ease, box-shadow .12s ease; }
+  .cal-day:hover { transform: translateY(-2px); box-shadow: 0 3px 8px rgb(0 0 0 / 14%); }
+  .cal-day.today .cal-dot, .cal-day.today > span:first-child { animation: cal-pulse 2.4s ease-in-out infinite; }
+  .cal-side { animation: cal-rise .25s ease-out both; }
+  .cal-holcard { animation: cal-rise .3s ease-out both; }
+  .icon-btn.gear[aria-label="Kalendarz"]:hover svg { animation: cal-wiggle .5s ease-in-out; }
+}
+@keyframes wx-spin { to { transform: rotate(360deg); } }
+@keyframes wx-glow { 0%, 100% { filter: drop-shadow(0 0 0 transparent); transform: scale(1); } 50% { filter: drop-shadow(0 0 4px #f5d76e); transform: scale(1.08); } }
+@keyframes wx-drift { 0%, 100% { transform: translateX(-2px); } 50% { transform: translateX(3px); } }
+@keyframes wx-fade { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes wx-drip { 0%, 100% { transform: translateY(-1px); } 50% { transform: translateY(2px); } }
+@keyframes wx-sway { 0%, 100% { transform: rotate(-8deg) translateY(0); } 50% { transform: rotate(8deg) translateY(2px); } }
+@keyframes wx-flash { 0%, 86%, 100% { opacity: 1; transform: scale(1); } 88% { opacity: .35; } 90% { opacity: 1; transform: scale(1.12); } 93% { opacity: .5; } 95% { opacity: 1; } }
+@keyframes cal-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes cal-pop { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes cal-slide { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@keyframes cal-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes cal-wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
