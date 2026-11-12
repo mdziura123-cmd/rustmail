@@ -476,8 +476,8 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
   .av-btn { width: 34px; height: 34px; }
   .av { width: 26px; height: 26px; font-size: 12px; }
   .tb-right { gap: 8px; }
-  .status { padding: 9px 16px; gap: 16px; font-size: 13px; }
-  .status .icon-btn { width: 36px; height: 32px; border-radius: 6px; }
-  .status .icon-btn svg { width: 18px; height: 18px; }
-  .status .small { min-height: 30px; }
+  .status { padding: 6px 14px; gap: 14px; font-size: 12px; }
+  .status .icon-btn { width: 32px; height: 28px; border-radius: 6px; }
+  .status .icon-btn svg { width: 16px; height: 16px; }
+  .status .small { min-height: 26px; }
 }
