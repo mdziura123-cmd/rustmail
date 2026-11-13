@@ -41,6 +41,7 @@ import { useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
 import { logEvent } from "./eventLog";
 import { listen } from "@tauri-apps/api/event";
+import { dropMarkers } from "./emoji";
 import type { Account, AppInfo, AuthStatus, ImapAccount, ImapActOut, ImapMsg, ImapRow, LabelInfo, OutboxItem, SchedItem, SnoozeItem, ThreadAction, ThreadDetail, ThreadSummary } from "./types";
 import { isThemeId, resolveTheme, type ThemeId } from "./themes";
 import Titlebar from "./Titlebar";
@@ -1556,7 +1557,7 @@ export default function App() {
                   <button title="Odpowiedz nadawcy (r)" aria-label="Odpowiedz nadawcy (r)" className="primary" disabled={needsReauth} onClick={() => reply(false)}><ActIcon n="reply"/></button>
                   <button title="Odpowiedz wszystkim (a)" aria-label="Odpowiedz wszystkim (a)" disabled={needsReauth} onClick={() => reply(true)}><ActIcon n="replyAll"/></button>
                   <button title="Przekaż dalej (f)" aria-label="Przekaż dalej (f)" disabled={needsReauth} onClick={forward}><ActIcon n="forward"/></button>
-                  <button title="Dodaj do kalendarza" aria-label="Dodaj do kalendarza" onClick={() => calFromMail(detail.subject, detail.messages[detail.messages.length - 1]?.body ?? "")}><ActIcon n="calendar"/></button>
+                  <button title="Dodaj do kalendarza" aria-label="Dodaj do kalendarza" onClick={() => calFromMail(detail.subject, dropMarkers(detail.messages[detail.messages.length - 1]?.body ?? ""))}><ActIcon n="calendar"/></button>
                   <span className="sep" />
                   {detail.inInbox && <button title="Odłóż na później" aria-label="Odłóż na później" disabled={needsReauth}
                     onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); gm.show(r.left, r.bottom + 4, snoozePresets().map((sp) => ({ label: "Odłóż: " + sp.label, icon: "clock" as const, onClick: () => void snoozeThreads([detail.id], sp.ms) }))); }}><ActIcon n="clock"/></button>}
@@ -1612,7 +1613,7 @@ export default function App() {
                         <time>{fmtFull(m.dateMs)}</time>
                       </button>
                       {folded ? (
-                        <p className="fold">{splitQuoted(m.body).main.slice(0, 120)}</p>
+                        <p className="fold">{dropMarkers(splitQuoted(m.body).main).slice(0, 120)}</p>
                       ) : (
                         <>
                           <MessageBody m={m} strict={m.risk.level === "high" && !detail.dismissed} />

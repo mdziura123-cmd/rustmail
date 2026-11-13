@@ -10,7 +10,7 @@ import type { OutAttachment, OutgoingMessage } from "./types";
 import { getUndo } from "./display";
 import { useContextMenu } from "./ContextMenu";
 import { loadTemplates } from "./templates";
-import { expandEmoji } from "./emoji";
+import { imgToChars } from "./emoji";
 import { fmtSize } from "./util";
 
 const MAX_ATTACH_BYTES = 20 * 1024 * 1024;
@@ -94,10 +94,10 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
   const tplMenu = useContextMenu();
   const [spellTick, setSpellTick] = useState(0);
 
-  // Przy wysyłaniu opisy emotek [uśmiech] zamieniają się na prawdziwe emotki; w szkicach zostają opisem.
-  const build = useCallback((final = true): OutgoingMessage => ({
+  // Obrazki emotek zamieniają się na prawdziwe znaki emoji (także w szkicach; po wczytaniu znów są obrazkami).
+  const build = useCallback((): OutgoingMessage => ({
     to, cc, bcc, subject,
-    html: final ? expandEmoji(sanitizeHtml(html.current)) : sanitizeHtml(html.current),
+    html: imgToChars(sanitizeHtml(html.current)),
     inReplyTo: init.inReplyTo,
     references: init.references,
     threadId: init.threadId,
@@ -121,10 +121,10 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
     try {
       let id: string | null;
       if (imapAcc) {
-        const uid = await api.imapSaveDraft(imapAcc, build(false), draftRef.current ? Number(draftRef.current) : null);
+        const uid = await api.imapSaveDraft(imapAcc, build(), draftRef.current ? Number(draftRef.current) : null);
         id = uid > 0 ? String(uid) : null;
       } else {
-        id = await api.saveDraft(build(false));
+        id = await api.saveDraft(build());
       }
       draftRef.current = id;
       setDraftId(id);

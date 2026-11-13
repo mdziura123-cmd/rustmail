@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { cleanDisplay, stripEmoji } from "./util";
+import { protectEmoji } from "./emoji";
+const keepEmoji = (s: string | null | undefined) => stripEmoji(protectEmoji(s ?? ""));
 import type { Place, WeatherData } from "./weather";
 import type {
   CalEvent,
@@ -36,8 +38,8 @@ function cleanDetail(d: ThreadDetail): ThreadDetail {
     subject: cleanDisplay(d.subject, 300),
     messages: d.messages.map((m) => ({
       ...m,
-      body: stripEmoji(m.body ?? ""),
-      html: stripEmoji(m.html ?? ""),
+      body: keepEmoji(m.body),
+      html: keepEmoji(m.html),
       from: cleanDisplay(m.from, 120),
       to: cleanDisplay(m.to, 500),
       cc: cleanDisplay(m.cc, 500),
@@ -127,7 +129,7 @@ export const api = {
     const m = await invoke<ImapMsg>("imap_get", { account, folder, uid });
     return {
       ...m, from: cleanDisplay(m.from, 200), to: cleanDisplay(m.to, 500), cc: cleanDisplay(m.cc, 500),
-      subject: cleanDisplay(m.subject, 300), text: stripEmoji(m.text), html: stripEmoji(m.html),
+      subject: cleanDisplay(m.subject, 300), text: keepEmoji(m.text), html: keepEmoji(m.html),
       attachments: m.attachments.map((x) => ({ ...x, name: cleanDisplay(x.name, 150) })),
     } as ImapMsg;
   },

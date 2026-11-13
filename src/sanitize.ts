@@ -1,4 +1,5 @@
 import { stripEmoji } from "./util";
+import { emojiImg, emojiNodes, emojiSrc } from "./emoji";
 // Oczyszczanie HTML tworzonego w edytorze (oraz wczytywanego z wersji roboczej).
 // Zasada: dozwolona jest tylko niewielka lista znaczników; obrazy, style, skrypty, ramki
 // i wszelkie atrybuty poza href w linkach są usuwane. DOMParser nie uruchamia skryptów.
@@ -27,12 +28,18 @@ export function isSafeHref(href: string): boolean {
 function clean(node: Node, out: Node, doc: Document) {
   node.childNodes.forEach((child) => {
     if (child.nodeType === Node.TEXT_NODE) {
-      out.appendChild(doc.createTextNode(child.textContent ?? ""));
+      for (const n of emojiNodes(child.textContent ?? "", doc)) out.appendChild(n);
       return;
     }
     if (child.nodeType !== Node.ELEMENT_NODE) return;
     const el = child as Element;
     const tag = el.tagName.toUpperCase();
+    if (tag === "IMG") {
+      // dozwolone są wyłącznie nasze emotki (kod z zestawu); każdy inny obraz jest usuwany
+      const key = (el.getAttribute("data-emo") ?? "").trim();
+      if (/^[0-9a-f]{2,6}$/.test(key) && emojiSrc(key)) out.appendChild(emojiImg(key, doc));
+      return;
+    }
     if (DROP_WITH_CONTENT.has(tag)) return;
     if (!ALLOWED.has(tag)) {
       clean(el, out, doc); // nieznany znacznik: zachowujemy tylko jego zawartość

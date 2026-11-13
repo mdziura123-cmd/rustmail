@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { EmojiText } from "./EmojiText";
 import { api, errText } from "./api";
 import { analyzeLink, type LinkAnalysis } from "./linkCheck";
 import { sanitizeMail } from "./mailHtml";
@@ -105,7 +106,7 @@ function MessageContent({ m, strict }: { m: MessageView; strict: boolean }) {
     return (
       <>
         {m.html && <button className="linklike plain textmode" onClick={() => setAsText(false)}>Pokaż sformatowaną wersję</button>}
-        <p className="msg">{(showQuote ? m.body : split.main) || "(brak treści tekstowej)"}</p>
+        <p className="msg"><EmojiText text={(showQuote ? m.body : split.main) || "(brak treści tekstowej)"} /></p>
         {split.quoted && (
           <button className="linklike plain quote-toggle" onClick={() => setShowQuote((v) => !v)}>
             {showQuote ? "Ukryj cytowany tekst" : "Pokaż cytowany tekst"}

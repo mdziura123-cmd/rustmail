@@ -2,6 +2,7 @@
 // Budujemy NOWE drzewo DOM wyłącznie z dozwolonych elementów i atrybutów (lista dozwolonych, nie zabronionych).
 // DOMParser nie uruchamia skryptów ani nie pobiera zasobów. Zdalne obrazy są blokowane, dopóki
 // użytkownik się nie zgodzi; linki nie mają atrybutu href (obsługuje je aplikacja po potwierdzeniu).
+import { emojiNodes } from "./emoji";
 
 const ALLOWED = new Set([
   "A", "ABBR", "B", "BLOCKQUOTE", "BR", "CAPTION", "CENTER", "CODE", "DIV", "EM", "FONT", "H1", "H2", "H3", "H4",
@@ -195,7 +196,7 @@ export function sanitizeMail(html: string, allowImages: boolean, hideQuotes = fa
     src.childNodes.forEach((child) => {
       if (++nodes > MAX_NODES || depth > MAX_DEPTH) return;
       if (child.nodeType === Node.TEXT_NODE) {
-        dst.appendChild(doc.createTextNode(child.textContent ?? ""));
+        for (const n of emojiNodes(child.textContent ?? "", doc)) dst.appendChild(n);
         return;
       }
       if (child.nodeType !== Node.ELEMENT_NODE) return;

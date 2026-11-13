@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
+import { dropMarkers } from "./emoji";
 import { api, errText } from "./api";
 import { getProvider, PROVIDERS } from "./translateProviders";
 import type { MessageView } from "./types";
 
 /** Tekst wiadomości do tłumaczenia: wersja tekstowa albo tekst wyciągnięty z HTML (bez wykonywania czegokolwiek). */
 function plainText(m: MessageView): string {
-  if (m.body.trim()) return m.body;
+  if (m.body.trim()) return dropMarkers(m.body);
   if (!m.html) return "";
   try {
     const doc = new DOMParser().parseFromString(m.html, "text/html");
     doc.querySelectorAll("script,style,head").forEach((n) => n.remove());
-    return (doc.body?.textContent ?? "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    return dropMarkers(doc.body?.textContent ?? "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   } catch { return ""; }
 }
 

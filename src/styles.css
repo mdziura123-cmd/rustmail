@@ -489,3 +489,8 @@ html.show-labels .tools button, html.show-labels .compose .small { width: auto; 
 .spell-menu-item:hover, .spell-menu-item:focus-visible { background: var(--sel); }
 .spell-menu-note { padding: 7px 10px; font-size: 12px; color: var(--muted); }
 .spell-menu-sep { height: 1px; margin: 4px 2px; background: var(--line); }
+
+/* Emotki jako obrazki (własny zestaw w aplikacji) */
+img.emo { width: 1.25em; height: 1.25em; vertical-align: -0.25em; display: inline-block; margin: 0 1px; user-select: text; }
+img.emo.big { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
+.emoji-grid button { padding: 3px 5px; min-width: 0; }

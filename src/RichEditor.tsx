@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ActIcon } from "./ActIcon";
-import { EMOJI, token } from "./emoji";
+import { EMOJI, emojiImgHtml, emojiSrc, keyOfChar } from "./emoji";
 import { FONTS, isSafeHref, SIZES, sanitizeHtml } from "./sanitize";
 
 /** Operacje na treści edytora potrzebne do sprawdzania pisowni. */
@@ -141,6 +141,21 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
     if (w && h(w, e.clientX, e.clientY)) e.preventDefault();
   };
 
+  const insertEmoji = (char: string) => {
+    const el = ref.current;
+    if (!el) return;
+    const key = keyOfChar(char);
+    if (!emojiSrc(key)) return;
+    el.focus();
+    const sel = window.getSelection();
+    if (sel && savedRange.current && el.contains(savedRange.current.startContainer)) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+    }
+    document.execCommand("insertHTML", false, emojiImgHtml(key));
+    emit();
+  };
+
   const cmd = (name: string, value?: string) => {
     ref.current?.focus();
     document.execCommand(name, false, value);
@@ -232,13 +247,14 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
       </div>
       {emojiOpen && (
         <div className="emoji-pop" role="listbox" aria-label="Emotki">
-          <p className="hint">W oknie pisania widać opis, np. [uśmiech]; odbiorca dostanie prawdziwą emotkę.</p>
+          <p className="hint">Odbiorca zobaczy emotkę w swoim programie pocztowym.</p>
           <div className="emoji-grid">
             {EMOJI.map((e) => (
               <button key={e.name} type="button" className="small" disabled={disabled}
                 onMouseDown={(ev) => ev.preventDefault()}
-                onClick={() => { apiRef?.current?.insertText(token(e.name)); }}>
-                {e.name}
+                title={e.name} aria-label={e.name}
+                onClick={() => insertEmoji(e.char)}>
+                <img className="emo big" src={emojiSrc(keyOfChar(e.char))} alt="" draggable={false} />
               </button>
             ))}
           </div>
