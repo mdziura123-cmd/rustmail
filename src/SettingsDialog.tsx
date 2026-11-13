@@ -282,7 +282,7 @@ export function SettingsDialog(p: Props) {
                 </label>
                 <label className="check">
                   <input type="checkbox" checked={p.activeOnly} onChange={(e) => p.onActiveOnly(e.target.checked)} />
-                  Sprawdzaj pocztę w tle tylko na koncie, na którym pracuję
+                  Gdy okno jest otwarte, sprawdzaj pocztę tylko na koncie, na którym pracuję (w zasobniku sprawdzane są wszystkie konta)
                 </label>
                 <label className="check">
                   <input type="checkbox" checked={p.background} onChange={(e) => p.onBackground(e.target.checked)} />

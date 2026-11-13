@@ -817,8 +817,10 @@ export default function App() {
   reloadRef.current = () => void loadList(folderRef.current, null, false);
   const bgRef = useRef({ activeOnly, view });
   bgRef.current = { activeOnly, view };
+  // Okno schowane (zasobnik/pasek zadań): sprawdzamy wszystkie konta, żeby przychodziły powiadomienia ze wszystkich.
+  const windowHidden = () => document.visibilityState === "hidden";
   const pollOnce = useCallback(async () => {
-    if (bgRef.current.activeOnly && bgRef.current.view !== "gmail") {
+    if (bgRef.current.activeOnly && !windowHidden() && bgRef.current.view !== "gmail") {
       // Gmail jest nieaktywny: nie sprawdzamy poczty, tylko wysyłamy ewentualną kolejkę.
       try { await flushQueue(false, null); } catch { /* ignorujemy */ }
       return;
@@ -904,7 +906,7 @@ export default function App() {
   const [imapUnread, setImapUnread] = useState<Record<string, number>>({});
   const imapPollOnce = useCallback(async () => {
     for (const a of imapRef.current) {
-      if (bgRef.current.activeOnly && bgRef.current.view !== "imap:" + a.email) continue;
+      if (bgRef.current.activeOnly && !windowHidden() && bgRef.current.view !== "imap:" + a.email) continue;
       try { await flushQueue(false, a.email); } catch { /* ignorujemy */ }
       try {
         const r = await api.imapPoll(a.email, settingsRef.current.notify, settingsRef.current.content);
@@ -924,6 +926,16 @@ export default function App() {
     const t = window.setInterval(() => void imapPollOnce(), 60_000);
     return () => window.clearInterval(t);
   }, [imapKey, imapPollOnce, view, activeOnly]);
+  // Gdy okno znika do zasobnika, od razu sprawdź wszystkie konta (potem robi to timer co minutę).
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "hidden") return;
+      void pollRef.current();
+      void imapPollOnce();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [imapPollOnce]);
   useEffect(() => { void refreshLater(); }, [view, email, refreshLater]);
   // Co 30 s: zaplanowane wiadomości, którym minął czas, trafiają do kolejki i są wysyłane;
   // odłożone konwersacje wracają do skrzynki jako nieprzeczytane.
