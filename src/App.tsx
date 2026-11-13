@@ -928,14 +928,33 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [imapKey, imapPollOnce, view, activeOnly]);
   // Gdy okno znika do zasobnika, od razu sprawdź wszystkie konta (potem robi to timer co minutę).
+  // Gdy okno wraca (z zasobnika lub po minimalizacji), odśwież otwarty folder, żeby były widoczne nowe wiadomości.
+  const imapViewRef = useRef(imap);
+  imapViewRef.current = imap;
   useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState !== "hidden") return;
+    let lastShow = 0;
+    const onShow = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastShow < 3000) return;
+      lastShow = now;
       void pollRef.current();
       void imapPollOnce();
+      if (imapAccountRef.current) imapViewRef.current.refresh();
+      else reloadRef.current();
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        void pollRef.current();
+        void imapPollOnce();
+      } else onShow();
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onShow);
+    };
   }, [imapPollOnce]);
   useEffect(() => { void refreshLater(); }, [view, email, refreshLater]);
   // Co 30 s: zaplanowane wiadomości, którym minął czas, trafiają do kolejki i są wysyłane;

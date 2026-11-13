@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { ActIcon } from "./ActIcon";
 import type { EditorApi } from "./RichEditor";
 import { addCustomWord, checkWords, ensureSpell, extractWords, suggestWord, type SpellLang } from "./spell";
 
@@ -132,24 +131,6 @@ export function SpellBar({ getHtml, tick, api }: Props) {
       </label>
       {status === "loading" && <span className="hint">Wczytywanie słownika…</span>}
       {status === "error" && <span className="hint">Sprawdzanie pisowni niedostępne: {error}</span>}
-      {status === "ready" && bad.length === 0 && <span className="hint">Nie znaleziono błędów.</span>}
-      {status === "ready" && bad.slice(0, 6).map((w) => (
-        <span className="spell-chip" key={w}>
-          <b>{w}</b>
-          {sugg[w] === undefined ? (
-            <button type="button" className="small" onMouseDown={keep} onClick={() => ask(w)}>Podpowiedz</button>
-          ) : sugg[w].length === 0 ? (
-            <span className="hint">brak podpowiedzi</span>
-          ) : (
-            sugg[w].slice(0, 3).map((s) => (
-              <button type="button" className="small solid" key={s} onMouseDown={keep} onClick={() => fix(w, s)}>{s}</button>
-            ))
-          )}
-          <button type="button" className="small" title="Dodaj do słownika" aria-label={`Dodaj „${w}” do słownika`} onMouseDown={keep} onClick={() => learn(w)}><ActIcon n="dict" /></button>
-          <button type="button" className="small" title="Ignoruj" aria-label={`Ignoruj „${w}”`} onMouseDown={keep} onClick={() => ignore(w)}><ActIcon n="clear" /></button>
-        </span>
-      ))}
-      {status === "ready" && bad.length > 6 && <span className="hint">…i {bad.length - 6} więcej</span>}
       {menu && (
         <div className="spell-menu" role="menu" aria-label={`Poprawki dla słowa ${menu.w}`}
           style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 230)), top: Math.max(4, Math.min(menu.y, window.innerHeight - 230)) }}>

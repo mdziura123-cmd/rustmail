@@ -26,8 +26,6 @@ const WORD_CH = "\\p{L}\\p{M}\\p{N}_'’";
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wordRe = (w: string) => new RegExp(`(?<![${WORD_CH}])${esc(w)}(?![${WORD_CH}])`, "gu");
 
-type HighlightApi = { highlights: Map<string, unknown> };
-
 /**
  * Prosty edytor tekstu sformatowanego (pogrubienie, kursywa, podkreślenie, listy, linki).
  * Wklejany tekst jest zawsze zwykłym tekstem, a upuszczanie plików/HTML jest blokowane.
@@ -39,6 +37,38 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
   const [href, setHref] = useState("https://");
   const [linkErr, setLinkErr] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const overlay = useRef<HTMLDivElement>(null);
+  const marks = useRef<Range[]>([]);
+
+  // Podkreślenia błędów rysujemy w osobnej warstwie nad edytorem (treść edytora zostaje nietknięta,
+  // więc Ctrl+Z działa); zakresy same przesuwają się podczas pisania.
+  const drawMarks = () => {
+    const ov = overlay.current;
+    const el = ref.current;
+    if (!ov || !el) return;
+    ov.textContent = "";
+    const o = ov.getBoundingClientRect();
+    const e = el.getBoundingClientRect();
+    for (const r of marks.current) {
+      for (const q of Array.from(r.getClientRects())) {
+        if (q.width < 1 || q.bottom < e.top || q.top > e.bottom) continue;
+        const d = document.createElement("div");
+        d.className = "spell-mark";
+        d.style.left = `${q.left - o.left}px`;
+        d.style.top = `${Math.min(q.bottom, e.bottom) - o.top - 2}px`;
+        d.style.width = `${q.width}px`;
+        ov.appendChild(d);
+      }
+    }
+  };
+  useEffect(() => {
+    const el = ref.current;
+    const redraw = () => drawMarks();
+    el?.addEventListener("scroll", redraw);
+    window.addEventListener("resize", redraw);
+    return () => { el?.removeEventListener("scroll", redraw); window.removeEventListener("resize", redraw); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (ref.current) {
@@ -94,10 +124,6 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
         onChange(el.innerHTML);
       },
       highlight: (words) => {
-        const css = (typeof CSS !== "undefined" ? (CSS as unknown as HighlightApi) : null);
-        const H = (window as unknown as { Highlight?: new (...r: Range[]) => unknown }).Highlight;
-        if (!css || !css.highlights || !H) return;
-        if (words.length === 0) { css.highlights.delete("rm-spell"); return; }
         const ranges: Range[] = [];
         for (const w of words) {
           const re = wordRe(w);
@@ -111,13 +137,13 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
             }
           }
         }
-        css.highlights.set("rm-spell", new H(...ranges));
+        marks.current = ranges;
+        drawMarks();
       },
     };
     return () => {
       apiRef.current = null;
-      const css = (typeof CSS !== "undefined" ? (CSS as unknown as HighlightApi) : null);
-      css?.highlights?.delete("rm-spell");
+      marks.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -272,7 +298,8 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
       )}
       <div ref={ref} className="editable" contentEditable={!disabled} suppressContentEditableWarning
         role="textbox" aria-multiline="true" aria-label="Treść wiadomości"
-        onInput={emit} onContextMenu={onContext} onBlur={rememberSelection} onPaste={onPaste} onDrop={(e) => e.preventDefault()} />
+        onInput={() => { emit(); requestAnimationFrame(drawMarks); }} onContextMenu={onContext} onBlur={rememberSelection} onPaste={onPaste} onDrop={(e) => e.preventDefault()} />
+      <div ref={overlay} className="spell-overlay" aria-hidden="true" />
     </div>
   );
 }
