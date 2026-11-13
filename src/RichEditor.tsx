@@ -11,6 +11,8 @@ export interface EditorApi {
   highlight: (words: string[]) => void;
   /** Wstawia zwykły tekst w miejscu kursora (np. szablon odpowiedzi). */
   insertText: (text: string) => void;
+  /** Wywoływane po kliknięciu prawym przyciskiem na słowie; zwraca true, jeśli pokazało własne menu. */
+  contextHandler: ((word: string, x: number, y: number) => boolean) | null;
 }
 
 interface Props {
@@ -68,6 +70,7 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
       return out;
     };
     apiRef.current = {
+      contextHandler: null,
       replaceWord: (from, to) => {
         const re = wordRe(from);
         for (const t of textNodes()) {
@@ -118,6 +121,25 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Prawy przycisk na słowie: pozwala pisowni pokazać podpowiedzi (jak w przeglądarce).
+  const onContext = (e: React.MouseEvent) => {
+    const h = apiRef?.current?.contextHandler;
+    if (!h) return;
+    const d = document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null };
+    const r = d.caretRangeFromPoint?.(e.clientX, e.clientY);
+    const node = r?.startContainer;
+    if (!r || !node || node.nodeType !== Node.TEXT_NODE || !ref.current?.contains(node)) return;
+    if (node.parentElement?.closest("blockquote")) return;
+    const text = node.nodeValue ?? "";
+    const isW = (c: string) => /[\p{L}\p{M}'’]/u.test(c);
+    let a = r.startOffset;
+    let b = a;
+    while (a > 0 && isW(text[a - 1])) a--;
+    while (b < text.length && isW(text[b])) b++;
+    const w = text.slice(a, b).replace(/^['’]+|['’]+$/g, "");
+    if (w && h(w, e.clientX, e.clientY)) e.preventDefault();
+  };
 
   const cmd = (name: string, value?: string) => {
     ref.current?.focus();
@@ -234,7 +256,7 @@ export function RichEditor({ initialHtml, onChange, disabled, apiRef }: Props) {
       )}
       <div ref={ref} className="editable" contentEditable={!disabled} suppressContentEditableWarning
         role="textbox" aria-multiline="true" aria-label="Treść wiadomości"
-        onInput={emit} onBlur={rememberSelection} onPaste={onPaste} onDrop={(e) => e.preventDefault()} />
+        onInput={emit} onContextMenu={onContext} onBlur={rememberSelection} onPaste={onPaste} onDrop={(e) => e.preventDefault()} />
     </div>
   );
 }

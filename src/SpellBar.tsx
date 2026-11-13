@@ -29,6 +29,9 @@ export function SpellBar({ getHtml, tick, api }: Props) {
   const [sugg, setSugg] = useState<Record<string, string[]>>({});
   const ignored = useRef<Set<string>>(new Set());
   const req = useRef(0);
+  const [menu, setMenu] = useState<{ w: string; x: number; y: number } | null>(null);
+  const badRef = useRef<string[]>([]);
+  badRef.current = bad;
 
   const changeMode = (m: Mode) => {
     setMode(m);
@@ -85,6 +88,38 @@ export function SpellBar({ getHtml, tick, api }: Props) {
   const ask = (w: string) => { void suggestWord(w).then((r) => setSugg((x) => ({ ...x, [w]: r }))).catch(() => {}); };
   const keep = (e: React.MouseEvent) => e.preventDefault();
 
+  // Menu pod prawym przyciskiem myszy na błędnym słowie w edytorze.
+  const askRef = useRef(ask);
+  askRef.current = ask;
+  useEffect(() => {
+    const handler = (w: string, x: number, y: number) => {
+      if (!badRef.current.includes(w)) return false;
+      setMenu({ w, x, y });
+      askRef.current(w);
+      return true;
+    };
+    if (api.current) api.current.contextHandler = handler;
+    return () => { if (api.current) api.current.contextHandler = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const down = (e: MouseEvent) => { if (!(e.target as HTMLElement | null)?.closest(".spell-menu")) close(); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("mousedown", down, true);
+    window.addEventListener("keydown", key, true);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("mousedown", down, true);
+      window.removeEventListener("keydown", key, true);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
+  const act = (f: () => void) => { setMenu(null); f(); };
+
   return (
     <div className="spellbar" role="region" aria-label="Sprawdzanie pisowni">
       <label className="spell-lang">
@@ -115,6 +150,19 @@ export function SpellBar({ getHtml, tick, api }: Props) {
         </span>
       ))}
       {status === "ready" && bad.length > 6 && <span className="hint">…i {bad.length - 6} więcej</span>}
+      {menu && (
+        <div className="spell-menu" role="menu" aria-label={`Poprawki dla słowa ${menu.w}`}
+          style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 230)), top: Math.max(4, Math.min(menu.y, window.innerHeight - 230)) }}>
+          {sugg[menu.w] === undefined && <div className="spell-menu-note">Szukam podpowiedzi…</div>}
+          {sugg[menu.w] !== undefined && sugg[menu.w].length === 0 && <div className="spell-menu-note">Brak podpowiedzi</div>}
+          {(sugg[menu.w] ?? []).slice(0, 6).map((s) => (
+            <button type="button" role="menuitem" key={s} className="spell-menu-item strong" onMouseDown={keep} onClick={() => act(() => fix(menu.w, s))}>{s}</button>
+          ))}
+          <div className="spell-menu-sep" />
+          <button type="button" role="menuitem" className="spell-menu-item" onMouseDown={keep} onClick={() => act(() => learn(menu.w))}>Dodaj do słownika</button>
+          <button type="button" role="menuitem" className="spell-menu-item" onMouseDown={keep} onClick={() => act(() => ignore(menu.w))}>Ignoruj</button>
+        </div>
+      )}
     </div>
   );
 }
