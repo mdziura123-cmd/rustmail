@@ -113,3 +113,13 @@ Stopka → „Poczta IMAP (WP)”. Osobne okno do czytania i porządkowania pocz
 - **Kopia zapasowa i synchronizacja:** plik JSON (kontakty, flagi, reguły, wydarzenia, ustawienia wyglądu, szablony) oraz synchronizacja przez wskazany folder (plik `rustmail-sync.json`, **niezaszyfrowany**, tylko dopisywanie – usunięcia nie są przenoszone).
 - **Kopia bazy przy nowej wersji** (`dbsafe`) oraz dziennik zdarzeń w Ustawieniach.
 - Czego nie ma: wspólnej skrzynki Gmail+WP, podglądu PDF (wymagałby osłabienia zabezpieczeń aplikacji), czytania PDF w wyszukiwaniu WP.
+
+## Bezpieczeństwo poczty (seria 1.10)
+
+- **Weryfikacja nadawcy:** przy wiadomościach Gmaila zielona tarcza „Nadawca zweryfikowany”, gdy Gmail potwierdził DMARC dla domeny z pola „Od”, a czerwona „Nadawca niezweryfikowany”, gdy DMARC się nie powiódł. Zweryfikowany nadawca nie oznacza bezpiecznej treści. WP nie ma tej etykiety: nagłówki weryfikacji od serwera WP nie są jeszcze rozpoznawane.
+- **Nowy nadawca:** etykieta przy adresach spoza lokalnej książki adresowej (uzupełnianej z wysłanych i odebranych). Pokazuje się dopiero, gdy książka ma co najmniej 10 adresów.
+- **Wypisz się:** gdy newsletter podaje nagłówek `List-Unsubscribe`. Po potwierdzeniu otwiera stronę wypisania (tylko https) w przeglądarce albo okno nowej wiadomości na adres wypisania. Nic nie dzieje się samo.
+- **Źródło wiadomości:** nagłówki i pełna treść jako zwykły tekst (Gmail i WP), z kopiowaniem. Bardzo duże wiadomości są przycinane do 3 MB.
+- **Wyciszanie rozmowy** (ikona dzwonka): brak powiadomień o kolejnych wiadomościach. Gmail wycisza wątek, WP rozmowę o tym samym temacie (bez Re:/Odp:/Fwd:). Wyciszenie leży w zaszyfrowanej bazie lokalnej.
+- **Blokada kodem** (Ustawienia → Bezpieczeństwo): PIN lub hasło, blokada przy uruchomieniu i po bezczynności (1–60 min) albo przyciskiem „Zablokuj teraz”. W portfelu systemu leży tylko skrót PBKDF2-HMAC-SHA256 (210 000 iteracji, losowa sól). Po 5 błędnych próbach kolejne są wstrzymywane (30 s, potem coraz dłużej, najwyżej 15 min). W czasie blokady powiadomienia nie pokazują nadawcy ani tematu. Osobne okno kalendarza nie jest blokowane. To ochrona przed podejrzeniem poczty, a nie szyfrowanie: kto ma dostęp do Twojego konta w systemie, może odczytać portfel.
+- Czego nie ma: szyfrowania OpenPGP (wymaga nowej biblioteki; osobny etap).

@@ -614,6 +614,8 @@ pub struct Msg {
     pub attachments: Vec<Att>,
     pub unread: bool,
     pub starred: bool,
+    /// Sposób wypisania się z listy mailingowej (nagłówek List-Unsubscribe).
+    pub unsubscribe: Option<crate::mailinfo::Unsubscribe>,
 }
 
 /// Nazwa załącznika, jeśli ta część wiadomości jest załącznikiem.
@@ -863,6 +865,19 @@ fn walk(part: &ParsedMail, text: &mut String, html: &mut String, atts: &mut Vec<
     }
 }
 
+/// Źródło wiadomości (nagłówki i całość) – bez oznaczania jako przeczytanej.
+#[tauri::command]
+pub async fn imap_source(account: String, folder: String, uid: u32) -> Result<crate::mailinfo::Source, String> {
+    if uid == 0 {
+        return Err("Niepoprawny numer wiadomości.".to_string());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = fetch_raw(&mut conn, &folder, uid).await;
+    conn.bye().await;
+    Ok(crate::mailinfo::source_of(&res?))
+}
+
 #[tauri::command]
 pub async fn imap_get(account: String, folder: String, uid: u32) -> Result<Msg, String> {
     if uid == 0 {
@@ -907,6 +922,10 @@ async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, Strin
         attachments: atts,
         unread: !flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen")),
         starred: flags.iter().any(|f| f.eq_ignore_ascii_case("\\Flagged")),
+        unsubscribe: crate::mailinfo::parse_list_unsubscribe(
+            &h.get_first_value("List-Unsubscribe").unwrap_or_default(),
+            &h.get_first_value("List-Unsubscribe-Post").unwrap_or_default(),
+        ),
     };
     // Oznaczamy jako przeczytaną (nieudane oznaczenie nie przeszkadza w czytaniu).
     let _ = conn.cmd(&format!("UID STORE {uid} +FLAGS (\\Seen)")).await;
@@ -1104,10 +1123,21 @@ async fn poll_inner(
             }
         }
     }
+    // Wyciszone rozmowy (po temacie) nie powiadamiają.
+    let muted: Vec<String> = {
+        use tauri::Manager as _;
+        let keys: Vec<String> = remaining
+            .iter()
+            .filter(|r| new_ids.contains(&r.uid.to_string()))
+            .filter_map(|r| crate::commands::mute_key("i", account, &r.subject))
+            .collect();
+        app.state::<Store>().muted_of(&keys).unwrap_or_default()
+    };
+    let is_muted = |subject: &str| crate::commands::mute_key("i", account, subject).map_or(false, |k| muted.contains(&k));
     if notify_enabled && !new_ids.is_empty() {
         let shown: Vec<&&&Row> = remaining
             .iter()
-            .filter(|r| new_ids.contains(&r.uid.to_string()) && !silenced.contains(&r.uid))
+            .filter(|r| new_ids.contains(&r.uid.to_string()) && !silenced.contains(&r.uid) && !is_muted(r.subject.as_str()))
             .collect();
         let items: Vec<notify::Item> = shown.iter().map(|r| notify::Item { sender: &r.from, subject: &r.subject, risky: false }).collect();
         if let Some((title, body)) = notify::build_text(&items, show_content) {

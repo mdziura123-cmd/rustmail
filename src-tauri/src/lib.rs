@@ -16,6 +16,8 @@ mod dismissed;
 mod filetype;
 mod gmail;
 mod labels;
+mod mailinfo;
+mod lock;
 mod later;
 mod launcher;
 mod notify;
@@ -155,6 +157,7 @@ pub fn run() {
             imap_io::imap_folders,
             imap_io::imap_list,
             imap_io::imap_get,
+            imap_io::imap_source,
             imap_io::imap_act,
             imap_io::imap_search,
             imap_io::imap_send,
@@ -222,6 +225,13 @@ pub fn run() {
             commands::fetch_image,
             commands::open_url,
             commands::download_attachment,
+            commands::message_source,
+            commands::mute_thread,
+            commands::mute_status,
+            lock::lock_status,
+            lock::lock_set,
+            lock::lock_clear,
+            lock::lock_verify,
             commands::preview_attachment,
             commands::rules_apply,
             calendar::cal_range,

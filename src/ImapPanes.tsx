@@ -3,6 +3,8 @@ import { api, errText } from "./api";
 import { Attachments } from "./Attachments";
 import { ReceiveButton } from "./ReceiveButton";
 import { MessageBody } from "./MessageBody";
+import { MessageMeta } from "./MessageMeta";
+import { MuteButton } from "./MuteButton";
 import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
@@ -53,6 +55,7 @@ export function toView(m: ImapMsg): MessageView {
     id: String(m.uid), from: m.from, fromEmail: emailOf(m.from), mine: false, dateMs: m.dateMs,
     body: m.text, htmlOnly: !m.text && !!m.html, html: m.html, attachments: [], to: m.to, cc: m.cc,
     replyTo: m.replyTo, messageId: m.messageId, references: m.references, risk: { level: "none", score: 0, reasons: [] },
+    unsubscribe: m.unsubscribe ?? null,
   };
 }
 
@@ -264,11 +267,15 @@ interface ReaderProps {
   onPendingDone?: () => void;
   /** Wywoływane po zmianie wiadomości (przeczytana, gwiazdka, usunięta…). */
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
+  /** Nowa wiadomość z tego konta (np. wypisanie z listy przez e-mail). */
+  onMail?: (to: string, subject: string, body: string) => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onCalendar, onMoved, onEditDraft, pending, onPendingDone, keys = true }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onCalendar, onMoved, onEditDraft, pending, onPendingDone, onMail, keys = true }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => { setNote(null); }, [uid]);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (pending && msg && msg.uid === pending.uid) { onCompose(pending.cmd, msg); onPendingDone?.(); }
@@ -342,6 +349,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
   return (
     <main className="reader" aria-label="Wiadomość">
       {err && <p className="error pad" role="alert">{err}</p>}
+      {note && <p className="hint pad" role="status">{note}</p>}
       {loading && <div className="empty"><p>Wczytywanie wiadomości…</p></div>}
       {!loading && !msg && !err && <div className="empty"><p>Wybierz wiadomość z listy.</p></div>}
       {msg && (
@@ -358,6 +366,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
               <button title={msg.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} aria-label={msg.unread ? "Oznacz jako przeczytaną (Shift+I)" : "Oznacz jako nieprzeczytaną (Shift+U)"} onClick={() => void act(msg.unread ? "read" : "unread")}><ActIcon n={msg.unread ? "read" : "unread"} /></button>
               <button title={msg.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} aria-label={msg.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} onClick={() => void act(msg.starred ? "unstar" : "star")}><ActIcon n="star" filled={msg.starred} /></button>
               <PrioMenu itemKey={imapPrioKey(account, folder, msg.uid)} onError={(m) => setErr(m)} />
+              {role !== "sent" && role !== "drafts" && <MuteButton kind="i" account={account} item={msg.subject} onToast={(t) => setNote(t)} />}
               {role === "inbox" && <button title="Archiwizuj (e)" aria-label="Archiwizuj (e)" onClick={() => void act("archive")}><ActIcon n="archive"/></button>}
               {!["inbox", "trash", "spam"].includes(role) && <button title="Przenieś do skrzynki odbiorczej" aria-label="Przenieś do skrzynki odbiorczej" onClick={() => void act("inbox")}><ActIcon n="inbox"/></button>}
               {role === "spam" ? <button title="To nie jest spam – przenieś do skrzynki" aria-label="To nie jest spam – przenieś do skrzynki" onClick={() => void act("inbox")}><ActIcon n="notspam"/></button> : <button title="Oznacz jako spam (!)" aria-label="Oznacz jako spam (!)" onClick={() => void act("spam")}><ActIcon n="spam"/></button>}
@@ -371,6 +380,10 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
                 <time>{fmtFull(msg.dateMs)}</time>
               </div>
               <p className="hint">Do: {msg.to}{msg.cc ? ` · Kopia: ${msg.cc}` : ""}</p>
+              {role !== "sent" && role !== "drafts" && (
+                <MessageMeta m={toView(msg)} loadSource={() => api.imapSource(account, folder, msg.uid)}
+                  onMail={(to, sub, b) => onMail?.(to, sub, b)} />
+              )}
               <MessageBody key={msg.uid} m={toView(msg)} strict={false} />
               <Attachments
                 m={{ ...toView(msg), attachments: msg.attachments }}

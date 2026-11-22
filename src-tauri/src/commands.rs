@@ -585,6 +585,51 @@ pub struct SavedFile {
     pub type_warning: Option<String>,
 }
 
+/// Źródło wiadomości Gmail (nagłówki i całość) do podglądu – tylko na żądanie, bez zmiany stanu.
+#[tauri::command]
+pub async fn message_source(state: State<'_, AppState>, message_id: String) -> Result<crate::mailinfo::Source, String> {
+    let raw = gmail::message_source(&state, &message_id).await?;
+    Ok(crate::mailinfo::source_of(&raw))
+}
+
+/// Klucz wyciszenia: wątek Gmaila (`g:konto:wątek`) albo rozmowa IMAP po temacie (`m:konto:temat`).
+pub fn mute_key(kind: &str, account: &str, item: &str) -> Option<String> {
+    let acc = account.trim().to_lowercase();
+    match kind {
+        "g" if !item.is_empty() && item.chars().all(|c| c.is_ascii_alphanumeric()) => Some(format!("g:{acc}:{item}")),
+        "i" => {
+            let subj = crate::mailinfo::normalize_subject(item);
+            if subj.chars().count() < 3 {
+                None
+            } else {
+                Some(format!("m:{acc}:{subj}"))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// Wycisza rozmowę lub cofa wyciszenie. Dla IMAP `item` to temat (rozmowy łączone po temacie).
+#[tauri::command]
+pub fn mute_thread(store: State<'_, Store>, kind: String, account: String, item: String, on: bool) -> Result<(), String> {
+    let key = mute_key(&kind, &account, &item).ok_or("Tej rozmowy nie można wyciszyć (zbyt krótki temat).")?;
+    store.mute_set(&key, on, now_millis())
+}
+
+/// Które z podanych rozmów są wyciszone (zwraca te same wartości `items`, które są wyciszone).
+#[tauri::command]
+pub fn mute_status(store: State<'_, Store>, kind: String, account: String, items: Vec<String>) -> Result<Vec<String>, String> {
+    let pairs: Vec<(String, String)> =
+        items.into_iter().take(crate::prio::MAX_KEYS).filter_map(|i| mute_key(&kind, &account, &i).map(|k| (k, i))).collect();
+    let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
+    let muted = store.muted_of(&keys)?;
+    Ok(pairs.into_iter().filter(|(k, _)| muted.contains(k)).map(|(_, i)| i).collect())
+}
+
 /// Pobiera załącznik, sprawdza typ po zawartości, skanuje ClamAV (jeśli jest) i dopiero wtedy zapisuje.
 /// Plik z wykrytym zagrożeniem nie trafia na dysk w katalogu Pobrane.
 #[tauri::command]
@@ -914,9 +959,18 @@ pub async fn poll_mail(
                 }
             }
         }
+        // Wyciszone rozmowy nie powiadamiają.
+        let muted: Vec<String> = {
+            let keys: Vec<String> = new_ids.iter().filter_map(|id| mute_key("g", &email, id)).collect();
+            store.muted_of(&keys).unwrap_or_default()
+        };
+        let is_muted = |id: &str| mute_key("g", &email, id).map_or(false, |k| muted.contains(&k));
         if notify_enabled && !new_ids.is_empty() {
-            let shown: Vec<&gmail::ThreadSummary> =
-                page.threads.iter().filter(|t| new_ids.contains(&t.id) && !silenced.contains(&t.id)).collect();
+            let shown: Vec<&gmail::ThreadSummary> = page
+                .threads
+                .iter()
+                .filter(|t| new_ids.contains(&t.id) && !silenced.contains(&t.id) && !is_muted(t.id.as_str()))
+                .collect();
             let items: Vec<notify::Item> = shown
                 .iter()
                 .map(|t| notify::Item { sender: &t.participants, subject: &t.subject, risky: t.risk.level != "none" && !t.dismissed })

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS threads (
 );
 CREATE INDEX IF NOT EXISTS threads_date ON threads (last_date_ms DESC);
 CREATE TABLE IF NOT EXISTS prio (key TEXT PRIMARY KEY, level INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS muted (key TEXT PRIMARY KEY, since_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS contacts (email TEXT PRIMARY KEY, name TEXT NOT NULL, uses INTEGER NOT NULL, last_ms INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1088,6 +1089,34 @@ impl Store {
 
     pub fn delete_outbox(&self, account: &str, id: i64) -> Result<(), String> {
         self.with(|c| c.execute(DELETE_OUTBOX, params![id, account]).map(|_| ()))
+    }
+
+    /// Wyciszenie rozmowy (bez powiadomień o nowych wiadomościach). Klucz jak w `prio`.
+    pub fn mute_set(&self, key: &str, on: bool, now_ms: i64) -> Result<(), String> {
+        if !crate::prio::valid_key(key) {
+            return Err("Niepoprawny identyfikator rozmowy.".to_string());
+        }
+        self.with(|c| {
+            if on {
+                c.execute("INSERT OR IGNORE INTO muted (key, since_ms) VALUES (?1, ?2)", params![key, now_ms]).map(|_| ())
+            } else {
+                c.execute("DELETE FROM muted WHERE key = ?1", [key]).map(|_| ())
+            }
+        })
+    }
+
+    /// Które z podanych kluczy są wyciszone.
+    pub fn muted_of(&self, keys: &[String]) -> Result<Vec<String>, String> {
+        self.with(|c| {
+            let mut st = c.prepare("SELECT 1 FROM muted WHERE key = ?1")?;
+            let mut out = Vec::new();
+            for k in keys.iter().filter(|k| crate::prio::valid_key(k)).take(crate::prio::MAX_KEYS) {
+                if st.query_row([k], |_| Ok(())).optional()?.is_some() {
+                    out.push(k.clone());
+                }
+            }
+            Ok(out)
+        })
     }
 }
 

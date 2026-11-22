@@ -36,6 +36,8 @@ const PATHS = {
   copy: "M9 9h11v11H9zM5 15V4h11",
   paste: "M9 4h6v3H9zM7 5H5v16h14V5h-2M9 13h6M9 17h4",
   collapse: "M7 5l5 5 5-5M7 19l5-5 5 5",
+  bell: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4",
+  mute: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4M3 3l18 18",
 } as const;
 
 export type ActIconName = keyof typeof PATHS;
@@ -47,6 +49,7 @@ const LABELS: Partial<Record<ActIconName, string>> = {
   star: "Gwiazdka", label: "Etykieta", edit: "Edytuj", expand: "Rozwiń", collapse: "Zwiń", selectAll: "Zaznacz",
   clear: "Zamknij", save: "Zapisz", send: "Wyślij", attach: "Załącznik", flag: "Flaga", filter: "Filtr", copy: "Kopiuj",
   paste: "Wklej", clock: "Zaplanuj", plus: "Dodaj", calendar: "Data", search: "Szukaj", dict: "Słownik", user: "Konto",
+  bell: "Wycisz", mute: "Wyciszone",
 };
 
 export function ActIcon({ n, filled }: { n: ActIconName; filled?: boolean }) {

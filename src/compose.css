@@ -180,3 +180,28 @@ kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; backg
 .settings-list { display: grid; gap: 8px; justify-items: start; }
 .acc-title { padding: 6px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .65; border-top: 1px solid var(--line); }
 .acc-title:first-child { border-top: 0; }
+
+/* Pasek pod nagłówkiem wiadomości: weryfikacja nadawcy, nowy nadawca, wypisanie, źródło */
+.msg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 2px 0 8px; font-size: 12px; }
+.msg-meta .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); cursor: default; }
+.msg-meta .chip svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.msg-meta .chip.ok { color: #1e7a3c; border-color: #1e7a3c; }
+.msg-meta .chip.bad { color: #b3261e; border-color: #b3261e; }
+.msg-meta .chip.new { color: var(--warn); border-color: var(--warn); }
+.msg-meta .meta-actions { margin-left: auto; display: inline-flex; gap: 12px; }
+.msg-meta .meta-actions button { font-size: 12px; color: var(--accent); }
+.msg-meta .meta-actions button:hover { text-decoration: underline; }
+[data-theme*="dark"] .msg-meta .chip.ok, .dark .msg-meta .chip.ok { color: #6fd08c; border-color: #6fd08c; }
+[data-theme*="dark"] .msg-meta .chip.bad, .dark .msg-meta .chip.bad { color: #ff8a80; border-color: #ff8a80; }
+
+/* Podgląd źródła wiadomości */
+.source-modal { width: min(900px, 100%); }
+.source-box { margin: 0; max-height: 60vh; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); font: 12px/1.45 ui-monospace, "DejaVu Sans Mono", monospace; white-space: pre-wrap; word-break: break-all; user-select: text; }
+
+/* Ekran blokady – nieprzezroczysty, zasłania całą aplikację */
+.lock-back { background: var(--bg); z-index: 100; }
+.lock-box { width: min(360px, 100%); justify-items: center; text-align: center; }
+.lock-box input { width: 100%; padding: 10px 12px; font-size: 18px; text-align: center; letter-spacing: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); }
+.lock-icon { width: 40px; height: 40px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.lock-form { display: grid; gap: 8px; max-width: 320px; }
+.lock-form input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); }

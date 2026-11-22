@@ -8,7 +8,7 @@ import type {
   Account, AppInfo, AuthStatus, CacheStatus, DraftContent, FlushResult, LabelInfo, OutboxItem, SchedItem, SnoozeItem, PollResult, OutgoingMessage, SavedFile, SenderLists, SentInfo, ThreadAction, ThreadDetail,
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
   SpamConfig, SpamLogEntry, SpamScanOutcome, SpamStatus, TrainItem,
-  ImapAccount, ImapActOut, ImapFolder, ImapMsg, ImapPage,
+  ImapAccount, ImapActOut, ImapFolder, ImapMsg, ImapPage, MailSource,
 } from "./types";
 
 /** Lista nie może wisieć w nieskończoność: po limicie czasu pokazujemy błąd zamiast pustego ekranu. */
@@ -230,6 +230,14 @@ export const api = {
   rollbackUpdate: () => invoke<void>("rollback_update"),
   updateState: () => invoke<UpdateState>("update_state"),
   restartApp: () => invoke<void>("restart_app"),
+  messageSource: (messageId: string) => invoke<MailSource>("message_source", { messageId }),
+  imapSource: (account: string, folder: string, uid: number) => invoke<MailSource>("imap_source", { account, folder, uid }),
+  muteThread: (kind: "g" | "i", account: string, item: string, on: boolean) => invoke<void>("mute_thread", { kind, account, item, on }),
+  muteStatus: (kind: "g" | "i", account: string, items: string[]) => invoke<string[]>("mute_status", { kind, account, items }),
+  lockStatus: () => invoke<boolean>("lock_status"),
+  lockSet: (current: string | null, pin: string) => invoke<void>("lock_set", { current, pin }),
+  lockClear: (current: string) => invoke<void>("lock_clear", { current }),
+  lockVerify: (pin: string) => invoke<boolean>("lock_verify", { pin }),
 };
 
 export function errText(e: unknown): string {

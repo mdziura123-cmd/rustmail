@@ -25,6 +25,10 @@ import { applyCustomKeys, commandFor, customKeys, isTypingTarget, shortcutHelp }
 import { Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
+import { MessageMeta } from "./MessageMeta";
+import { MuteButton } from "./MuteButton";
+import { LockScreen } from "./LockScreen";
+import { appLock, getIdleMinutes, idleExpired, setIdleMinutes, useAppLock } from "./appLock";
 import { splitQuoted } from "./quoteTrim";
 import { SenderLists } from "./SenderLists";
 import { SignatureDialog } from "./SignatureDialog";
@@ -196,6 +200,23 @@ export default function App() {
   // Domyślnie poczta jest sprawdzana w tle tylko dla konta, na którym pracujesz.
   const [activeOnly, setActiveOnly] = useState(() => load(LS.active, "1") === "1");
   const [notifyContent, setNotifyContent] = useState(() => load(LS.content, "1") === "1");
+  // Blokada kodem: przy uruchomieniu (jeśli kod ustawiono) i po bezczynności.
+  const { locked } = useAppLock();
+  const [lockIdle, setLockIdle] = useState(getIdleMinutes);
+  const lastActivity = useRef(Date.now());
+  useEffect(() => {
+    void api.lockStatus().then((on) => { appLock.setEnabled(on); if (on) appLock.lock(); }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const touch = () => { lastActivity.current = Date.now(); };
+    const evs = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
+    evs.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    const t = window.setInterval(() => {
+      if (appLock.isEnabled() && !appLock.isLocked() && idleExpired(lastActivity.current, Date.now(), lockIdle)) appLock.lock();
+    }, 15_000);
+    return () => { evs.forEach((e) => window.removeEventListener(e, touch)); window.clearInterval(t); };
+  }, [lockIdle]);
+  useEffect(() => { if (!locked) lastActivity.current = Date.now(); }, [locked]);
   // Domyślnie zamknięcie okna zostawia aplikację w zasobniku (poczta i powiadomienia działają dalej).
   const [background, setBackground] = useState(() => load(LS.bg, "1") === "1");
   useEffect(() => { void api.setBackground(background).catch(() => undefined); }, [background]);
@@ -421,6 +442,12 @@ export default function App() {
       ? buildForward([v], m.subject, account, sigFor("imap:" + account), fmtFull)
       : buildReply([v], m.subject, account, kind === "replyAll", sigFor("imap:" + account), "");
     if (init) startCompose(init, "imap:" + account);
+  };
+  /** Nowa wiadomość z gotowym adresem i tematem (np. wypisanie z listy przez e-mail). Nic nie wysyła się samo. */
+  const composeTo = (from: string, to: string, subject: string, body: string) => {
+    const base = buildNew(sigFor(from));
+    const html = body ? `<div>${escapeHtml(body).replace(/\n/g, "<br>")}</div>` + base.html : base.html;
+    startCompose({ ...base, to, subject, html }, from);
   };
   const forward = () => {
     if (!detail || !email) return;
@@ -813,7 +840,8 @@ export default function App() {
   const soundRef = useRef(sound);
   soundRef.current = sound;
   const settingsRef = useRef({ notify: notifyOn, content: notifyContent });
-  settingsRef.current = { notify: notifyOn, content: notifyContent };
+  // Gdy aplikacja jest zablokowana, powiadomienia nie pokazują nadawcy ani tematu.
+  settingsRef.current = { notify: notifyOn, content: notifyContent && !locked };
   const reloadRef = useRef<() => void>(() => {});
   reloadRef.current = () => void loadList(folderRef.current, null, false);
   const bgRef = useRef({ activeOnly, view });
@@ -1430,6 +1458,7 @@ export default function App() {
             <div className="handle" onPointerDown={mid.onPointerDown} role="separator" aria-orientation="vertical" />
             {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0} pending={imapPending} onPendingDone={() => setImapPending(null)}
               onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
+              onMail={(to, sub, b) => composeTo("imap:" + imapAccount, to, sub, b)}
               onCalendar={calFromMail}
               onEditDraft={(m) => editImapDraft(imapAccount, m)}
               onMoved={(i) => imapMoved(imapAccount, i.folder, [{ uid: i.uid, out: i.out }], MOVE_TEXT[i.action] ?? "Gotowe.")}
@@ -1610,6 +1639,7 @@ export default function App() {
                   <button title={detail.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} aria-label={detail.starred ? "Usuń gwiazdkę (s)" : "Dodaj gwiazdkę (s)"} disabled={needsReauth} aria-pressed={detail.starred} onClick={() => void runAction(detail.starred ? "unstar" : "star")}>
                     <ActIcon n="star" filled={detail.starred} /></button>
                   {email && <PrioMenu itemKey={gmailPrioKey(email, detail.id)} onError={showToast} />}
+                  {email && <MuteButton kind="g" account={email} item={detail.id} onToast={showToast} />}
                   {(() => {
                     const t = replyTarget(detail.messages);
                     return t && !t.mine ? (
@@ -1635,6 +1665,7 @@ export default function App() {
                         <p className="fold">{dropMarkers(splitQuoted(m.body).main).slice(0, 120)}</p>
                       ) : (
                         <>
+                          <MessageMeta m={m} loadSource={() => api.messageSource(m.id)} onMail={(to, sub, b) => composeTo("gmail", to, sub, b)} />
                           <MessageBody m={m} strict={m.risk.level === "high" && !detail.dismissed} />
                           <Attachments m={m} strict={m.risk.level === "high" && !detail.dismissed} />
                         </>
@@ -1713,6 +1744,7 @@ export default function App() {
           onRollback={() => void updater.rollback()} onCheckUpdate={() => void updater.check(true)}
           theme={theme} onTheme={setTheme}
           onKeysChanged={() => save(LS.keys, JSON.stringify(customKeys()))}
+          lockIdle={lockIdle} onLockIdle={(n) => { setLockIdle(n); setIdleMinutes(n); }}
           sound={sound} onSound={(s) => { setSound(s); saveSound(s); }}
           onNotify={(on) => { setNotifyOn(on); save(LS.notify, on ? "1" : "0"); }}
           onContent={(on) => { setNotifyContent(on); save(LS.content, on ? "1" : "0"); }}
@@ -1731,6 +1763,7 @@ export default function App() {
             showToast("Podpis zapisany.");
           }} />
       )}
+      {locked && <LockScreen />}
     </div>
   );
 }

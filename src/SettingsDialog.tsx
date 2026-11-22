@@ -6,6 +6,7 @@ import { Templates } from "./Templates";
 import { WeatherSettings } from "./WeatherSettings";
 import { Backup } from "./Backup";
 import { Rules } from "./Rules";
+import { LockSettings } from "./LockScreen";
 import { clearLog, useLog } from "./eventLog";
 import { getLabels, getScale, getUndo, setLabels, setScale, setUndo, SCALES, UNDO_DELAYS } from "./display";
 import { BINDINGS, customKeys, keyLabel, keyOf, keysVersion, resetKeys, setKey, subscribeKeys } from "./shortcuts";
@@ -41,6 +42,8 @@ interface Props {
   onCheckUpdate: () => void;
   onOpen: (what: SettingsTarget) => void;
   onClose: () => void;
+  lockIdle: number;
+  onLockIdle: (n: number) => void;
 }
 
 const TABS = [
@@ -48,6 +51,7 @@ const TABS = [
   { id: "accounts", label: "Konta" },
   { id: "mail", label: "Poczta" },
   { id: "spam", label: "Filtr spamu" },
+  { id: "security", label: "Bezpieczeństwo" },
   { id: "shortcuts", label: "Skróty" },
   { id: "updates", label: "Aktualizacje" },
   { id: "log", label: "Dziennik" },
@@ -392,6 +396,7 @@ export function SettingsDialog(p: Props) {
                 </div>
               </>
             )}
+            {tab === "security" && <LockSettings idle={p.lockIdle} onIdle={p.onLockIdle} />}
             {tab === "log" && <LogView />}
             {msg && <p className="hint" role="status">{msg}</p>}
           </div>

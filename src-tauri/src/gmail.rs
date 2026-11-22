@@ -163,6 +163,12 @@ pub struct MessageView {
     pub message_id: String,
     pub references: String,
     pub risk: Risk,
+    /// Weryfikacja nadawcy według Gmaila: `verified`, `failed` albo `unknown` (patrz mailinfo::auth_verdict).
+    #[serde(default)]
+    pub auth: String,
+    /// Sposób wypisania się z listy mailingowej (nagłówek List-Unsubscribe), jeśli nadawca go podał.
+    #[serde(default)]
+    pub unsubscribe: Option<crate::mailinfo::Unsubscribe>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -968,6 +974,23 @@ pub async fn thread_action(state: &AppState, id: &str, action: &str) -> Result<(
     Ok(())
 }
 
+// ---------- Źródło wiadomości ----------
+
+/// Surowa wiadomość (RFC 822) do podglądu źródła – tylko na żądanie użytkownika, bez zmiany stanu wiadomości.
+pub async fn message_source(state: &AppState, message_id: &str) -> Result<Vec<u8>, String> {
+    check_id(message_id)?;
+    #[derive(Deserialize)]
+    struct RawBody {
+        #[serde(default)]
+        raw: String,
+    }
+    let token = access_token(state).await?;
+    let body: RawBody = get_json(&state.http, &token, &format!("messages/{message_id}"), &[("format", "raw")]).await?;
+    URL_SAFE_NO_PAD
+        .decode(body.raw.trim_end_matches('='))
+        .map_err(|_| "Nie można odczytać źródła wiadomości (błędne dane).".to_string())
+}
+
 // ---------- Pobieranie załącznika ----------
 
 const MAX_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
@@ -1147,6 +1170,23 @@ fn assess_message(
     let (name, email) = from_of(m);
     let reply_to = hdr(m, "Reply-To");
     let subject = hdr(m, "Subject");
+    phishing::assess(&Signals {
+        from_name: &name,
+        from_email: &email,
+        reply_to: &reply_to,
+        subject: &subject,
+        auth: auth_results(m),
+        body,
+        html,
+        attachment_names: attachments.iter().map(|a| a.name.clone()).collect(),
+        mine: is_mine(m, my_email),
+        blocked: rules.is_blocked(&email),
+        allowed: rules.is_allowed(&email),
+    })
+}
+
+/// Wyniki SPF/DKIM/DMARC z nagłówków dodanych przez Gmail (podstawione przez nadawcę są ignorowane).
+fn auth_results(m: &RawMessage) -> phishing::AuthResults {
     let auth_values: Vec<&str> = m
         .payload
         .as_ref()
@@ -1158,19 +1198,7 @@ fn assess_message(
                 .collect()
         })
         .unwrap_or_default();
-    phishing::assess(&Signals {
-        from_name: &name,
-        from_email: &email,
-        reply_to: &reply_to,
-        subject: &subject,
-        auth: phishing::parse_auth_results(&auth_values),
-        body,
-        html,
-        attachment_names: attachments.iter().map(|a| a.name.clone()).collect(),
-        mine: is_mine(m, my_email),
-        blocked: rules.is_blocked(&email),
-        allowed: rules.is_allowed(&email),
-    })
+    phishing::parse_auth_results(&auth_values)
 }
 
 fn summarize(t: &RawThread, my_email: &str, f: &Filters<'_>) -> ThreadSummary {
@@ -1279,6 +1307,14 @@ fn message_view(m: &RawMessage, my_email: &str, rules: &Rules) -> MessageView {
             .to_string(),
         references: hdr(m, "References"),
         risk,
+        auth: if mine { String::new() } else { crate::mailinfo::auth_verdict(auth_results(m).dmarc.as_deref()).to_string() },
+        unsubscribe: if mine {
+            None
+        } else {
+            m.payload.as_ref().and_then(|p| {
+                crate::mailinfo::parse_list_unsubscribe(header(p, "List-Unsubscribe").unwrap_or(""), header(p, "List-Unsubscribe-Post").unwrap_or(""))
+            })
+        },
     }
 }
 

@@ -179,6 +179,25 @@ export interface MessageView {
   messageId: string;
   references: string;
   risk: Risk;
+  /** Weryfikacja nadawcy przez serwer poczty (tylko Gmail): verified | failed | unknown. */
+  auth?: string;
+  /** Wypisanie się z listy mailingowej, jeśli nadawca je udostępnia. */
+  unsubscribe?: Unsubscribe | null;
+}
+
+export interface Unsubscribe {
+  url?: string | null;
+  mailto?: string | null;
+  mailSubject: string;
+  mailBody: string;
+  oneClick: boolean;
+}
+
+export interface MailSource {
+  headers: string;
+  full: string;
+  truncated: boolean;
+  size: number;
 }
 
 export interface ThreadDetail {
@@ -262,6 +281,7 @@ export interface ImapMsg {
   uid: number; from: string; to: string; cc: string; subject: string; dateMs: number;
   messageId: string; references: string; replyTo: string;
   text: string; html: string; attachments: Attachment[]; unread: boolean; starred: boolean;
+  unsubscribe?: Unsubscribe | null;
 }
 
 export interface CalEvent {
