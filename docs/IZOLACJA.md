@@ -10,6 +10,11 @@ Instalacja: `bash install-sandbox.sh` (pobiera najnowsze wydanie, sprawdza sumę
 - D-Bus przez filtr: wyłącznie pęk kluczy, powiadomienia i portal otwierania linków. Linki otwiera zwykła przeglądarka przez portal;
 - nie widzi: reszty katalogu domowego, kluczy SSH, dokumentów, innych procesów.
 
+## OpenPGP w piaskownicy
+- RustMail uruchamia systemowy `gpg` (z `/usr`, tylko do odczytu) z własnym pękiem kluczy w `~/.local/share/pl.rustmail.app/gnupg`;
+- gpg-agent działa wewnątrz piaskownicy (gniazdo w jej prywatnym katalogu sesji), więc inne programy go nie widzą i nie korzystają z odblokowanych kluczy;
+- `~/.gnupg` użytkownika jest niewidoczny – istniejący klucz trzeba wyeksportować (`gpg --export-secret-keys --armor adres > klucz.asc`) i zaimportować w Ustawieniach → Szyfrowanie OpenPGP.
+
 ## Diagnostyka
 - `rustmail-sandbox --check` – czy system ma wszystko, czego trzeba;
 - `rustmail-sandbox --print` – pokazuje pełne polecenie piaskownicy;

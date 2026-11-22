@@ -488,6 +488,18 @@ pub struct OutgoingDto {
     pub thread_id: Option<String>,
     pub draft_id: Option<String>,
     pub attachments: Vec<AttachmentDto>,
+    /// OpenPGP: podpisz wiadomość własnym kluczem.
+    #[serde(default)]
+    pub pgp_sign: bool,
+    /// OpenPGP: zaszyfruj do kluczy wszystkich odbiorców (i własnego).
+    #[serde(default)]
+    pub pgp_encrypt: bool,
+    /// OpenPGP: dołącz własny klucz publiczny.
+    #[serde(default)]
+    pub pgp_attach_key: bool,
+    /// Hasło klucza (tylko na czas podpisu; nigdzie nie jest zapisywane). Brak = hasło zapamiętane przez gpg-agent.
+    #[serde(default)]
+    pub pgp_passphrase: Option<String>,
 }
 
 /// Składa wiadomość z danych z interfejsu. Przy wysyłaniu wymaga co najmniej jednego odbiorcy.
@@ -505,23 +517,39 @@ pub(crate) fn prepare(dto: &OutgoingDto, from: &str, require_to: bool) -> Result
             .map_err(|_| format!("Nie można odczytać załącznika „{}”.", compose::clean_header_value(&a.name)))?;
         attachments.push(OutAttachment { name: a.name.clone(), mime: a.mime.clone(), data });
     }
+    // Wersje robocze nigdy nie są szyfrowane na serwerze: zaszyfrowana wiadomość nie może więc trafić tam jawnie.
+    if !require_to && dto.pgp_encrypt {
+        return Err("Wiadomości szyfrowanej nie zapisuję jako wersji roboczej na serwerze (leżałaby tam bez szyfrowania). Kopia zostaje tylko w zaszyfrowanej bazie lokalnej.".to_string());
+    }
+    let pgp_on = require_to && (dto.pgp_sign || dto.pgp_encrypt || dto.pgp_attach_key);
+    let gpg = if pgp_on { Some(crate::pgp::gpg()?) } else { None };
+    if let (Some(g), true) = (&gpg, dto.pgp_attach_key) {
+        attachments.push(crate::pgp_send::own_key_attachment(g, from)?);
+    }
     let nonce: String = auth::random_urlsafe(12).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let text = gmail::strip_html(&dto.html);
-    compose::build_message(
-        &Outgoing {
-            from: from.to_string(),
-            to,
-            cc,
-            bcc,
-            subject: dto.subject.clone(),
-            text,
-            html: dto.html.clone(),
-            in_reply_to: dto.in_reply_to.clone(),
-            references: dto.references.clone(),
-            attachments,
-        },
-        &format!("{nonce}00000000"),
-    )
+    let out = Outgoing {
+        from: from.to_string(),
+        to,
+        cc,
+        bcc,
+        subject: dto.subject.clone(),
+        text,
+        html: dto.html.clone(),
+        in_reply_to: dto.in_reply_to.clone(),
+        references: dto.references.clone(),
+        attachments,
+    };
+    let nonce = format!("{nonce}00000000");
+    match gpg {
+        Some(g) => crate::pgp_send::protect(
+            &g,
+            &out,
+            &nonce,
+            &crate::pgp_send::Options { sign: dto.pgp_sign, encrypt: dto.pgp_encrypt, passphrase: dto.pgp_passphrase.as_deref().filter(|p| !p.is_empty()) },
+        ),
+        None => compose::build_message(&out, &nonce),
+    }
 }
 
 #[tauri::command]
@@ -861,6 +889,10 @@ mod tests {
             thread_id: None,
             draft_id: None,
             attachments: vec![],
+            pgp_sign: false,
+            pgp_encrypt: false,
+            pgp_attach_key: false,
+            pgp_passphrase: None,
         }
     }
 
@@ -870,6 +902,16 @@ mod tests {
         assert!(prepare(&empty, "ja@example.com", true).is_err());
         assert!(prepare(&empty, "ja@example.com", false).is_ok());
         assert!(prepare(&dto(), "ja@example.com", true).is_ok());
+    }
+
+    #[test]
+    fn encrypted_message_is_never_saved_as_a_plain_server_draft() {
+        let enc = OutgoingDto { pgp_encrypt: true, ..dto() };
+        assert!(prepare(&enc, "ja@example.com", false).is_err());
+        // Sam podpis nie dotyczy wersji roboczej – zapisuje się zwykła wersja (bez wywołania GnuPG).
+        let signed = OutgoingDto { pgp_sign: true, ..dto() };
+        let raw = String::from_utf8(prepare(&signed, "ja@example.com", false).unwrap()).unwrap();
+        assert!(!raw.contains("multipart/signed"));
     }
 
     #[test]

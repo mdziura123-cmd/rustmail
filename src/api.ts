@@ -9,6 +9,7 @@ import type {
   SyncResult, ThreadPage, UpdateInfo, UpdateState,
   SpamConfig, SpamLogEntry, SpamScanOutcome, SpamStatus, TrainItem,
   ImapAccount, ImapActOut, ImapFolder, ImapMsg, ImapPage, MailSource,
+  PgpImport, PgpKey, PgpOpened, PgpRecipients, PgpStatus,
 } from "./types";
 
 /** Lista nie może wisieć w nieskończoność: po limicie czasu pokazujemy błąd zamiast pustego ekranu. */
@@ -240,6 +241,24 @@ export const api = {
   lockVerify: (pin: string) => invoke<boolean>("lock_verify", { pin }),
   lockEngage: () => invoke<boolean>("lock_engage"),
   lockState: () => invoke<boolean>("lock_state"),
+  pgpStatus: () => invoke<PgpStatus>("pgp_status"),
+  pgpKeys: () => invoke<PgpKey[]>("pgp_keys"),
+  pgpGenerate: (name: string, email: string, passphrase: string) => invoke<string>("pgp_generate", { name, email, passphrase }),
+  pgpImport: (text: string | null, dataBase64: string | null) => invoke<PgpImport>("pgp_import", { text, dataBase64 }),
+  pgpImportGmailAtt: (messageId: string, attachmentId: string) => invoke<PgpImport>("pgp_import_gmail_att", { messageId, attachmentId }),
+  pgpImportImapAtt: (account: string, folder: string, uid: number, index: number) =>
+    invoke<PgpImport>("pgp_import_imap_att", { account, folder, uid, index }),
+  pgpExportPublic: (fingerprint: string) => invoke<string>("pgp_export_public", { fingerprint }),
+  pgpSaveKey: (fingerprint: string, secret: boolean, passphrase: string | null) =>
+    invoke<SavedFile>("pgp_save_key", { fingerprint, secret, passphrase }),
+  pgpDelete: (fingerprint: string) => invoke<void>("pgp_delete", { fingerprint }),
+  pgpForget: () => invoke<void>("pgp_forget"),
+  pgpCheckRecipients: (account: string | null, to: string, cc: string, bcc: string) =>
+    invoke<PgpRecipients>("pgp_check_recipients", { account, to, cc, bcc }),
+  pgpOpenGmail: (messageId: string, passphrase: string | null) => invoke<PgpOpened>("pgp_open_gmail", { messageId, passphrase }),
+  pgpOpenImap: (account: string, folder: string, uid: number, passphrase: string | null) =>
+    invoke<PgpOpened>("pgp_open_imap", { account, folder, uid, passphrase }),
+  pgpSaveAttachment: (name: string, dataBase64: string) => invoke<SavedFile>("pgp_save_attachment", { name, dataBase64 }),
 };
 
 export function errText(e: unknown): string {

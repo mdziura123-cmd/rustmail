@@ -232,6 +232,58 @@ export interface OutgoingMessage {
   threadId: string | null;
   draftId: string | null;
   attachments: OutAttachment[];
+  /** OpenPGP: podpisz własnym kluczem. */
+  pgpSign?: boolean;
+  /** OpenPGP: zaszyfruj do kluczy wszystkich odbiorców i własnego. */
+  pgpEncrypt?: boolean;
+  /** OpenPGP: dołącz własny klucz publiczny. */
+  pgpAttachKey?: boolean;
+  /** Hasło klucza – tylko na czas tej wysyłki, nigdzie niezapisywane. */
+  pgpPassphrase?: string | null;
+}
+
+export interface PgpStatus { available: boolean; version: string; error: string | null }
+
+export interface PgpKey {
+  fingerprint: string;
+  keyId: string;
+  uids: string[];
+  emails: string[];
+  algo: string;
+  createdMs: number;
+  /** 0 = bez daty ważności. */
+  expiresMs: number;
+  revoked: boolean;
+  expired: boolean;
+  canEncrypt: boolean;
+  canSign: boolean;
+  /** Czy to Twój klucz (z częścią prywatną). */
+  secret: boolean;
+}
+
+export interface PgpImport { fingerprints: string[]; newKeys: number; unchanged: number; secret: number }
+
+export interface PgpRecipients { available: boolean; missing: string[]; ownKey: boolean }
+
+export interface PgpSig {
+  /** good | bad | expired_key | revoked_key | expired_sig | no_key | error */
+  status: string;
+  fingerprint: string;
+  keyId: string;
+  signer: string;
+  fromMatches: boolean;
+  createdMs: number;
+}
+
+export interface PgpAtt { name: string; mime: string; size: number; dataBase64: string }
+
+export interface PgpOpened {
+  kind: "encrypted" | "signed" | "none";
+  decrypted: boolean;
+  text: string;
+  html: string;
+  attachments: PgpAtt[];
+  signature: PgpSig | null;
 }
 
 export interface SentInfo {

@@ -914,6 +914,26 @@ fn walk(part: &ParsedMail, text: &mut String, html: &mut String, atts: &mut Vec<
     }
 }
 
+/// Surowa wiadomość (do odszyfrowania OpenPGP) – bez oznaczania jako przeczytanej.
+pub(crate) async fn raw_message(account: &str, folder: &str, uid: u32) -> Result<Vec<u8>, String> {
+    if uid == 0 {
+        return Err("Niepoprawny numer wiadomości.".to_string());
+    }
+    let creds = load(account)?;
+    let mut conn = open(&creds).await?;
+    let res = fetch_raw(&mut conn, folder, uid).await;
+    conn.bye().await;
+    res
+}
+
+/// Zawartość załącznika o danym numerze (np. klucza OpenPGP do zaimportowania).
+pub(crate) async fn attachment_bytes(account: &str, folder: &str, uid: u32, index: u32) -> Result<Vec<u8>, String> {
+    let raw = raw_message(account, folder, uid).await?;
+    let mail = mailparse::parse_mail(&raw).map_err(|e| format!("Nie udało się odczytać wiadomości: {e}"))?;
+    let mut counter = 0usize;
+    find_att(&mail, &mut counter, index as usize).ok_or_else(|| "Nie znaleziono załącznika w tej wiadomości.".to_string())
+}
+
 /// Źródło wiadomości (nagłówki i całość) – bez oznaczania jako przeczytanej.
 #[tauri::command]
 pub async fn imap_source(account: String, folder: String, uid: u32) -> Result<crate::mailinfo::Source, String> {

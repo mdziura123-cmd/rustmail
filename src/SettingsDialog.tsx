@@ -7,6 +7,7 @@ import { WeatherSettings } from "./WeatherSettings";
 import { Backup } from "./Backup";
 import { Rules } from "./Rules";
 import { LockSettings } from "./LockScreen";
+import { PgpSettings } from "./PgpSettings";
 import { clearLog, useLog } from "./eventLog";
 import { getLabels, getScale, getUndo, setLabels, setScale, setUndo, SCALES, UNDO_DELAYS } from "./display";
 import { BINDINGS, customKeys, keyLabel, keyOf, keysVersion, resetKeys, setKey, subscribeKeys } from "./shortcuts";
@@ -52,6 +53,7 @@ const TABS = [
   { id: "mail", label: "Poczta" },
   { id: "spam", label: "Filtr spamu" },
   { id: "security", label: "Bezpieczeństwo" },
+  { id: "pgp", label: "Szyfrowanie OpenPGP" },
   { id: "shortcuts", label: "Skróty" },
   { id: "updates", label: "Aktualizacje" },
   { id: "log", label: "Dziennik" },
@@ -397,6 +399,7 @@ export function SettingsDialog(p: Props) {
               </>
             )}
             {tab === "security" && <LockSettings idle={p.lockIdle} onIdle={p.onLockIdle} />}
+            {tab === "pgp" && <PgpSettings accounts={[...p.gmail.map((a) => a.email), ...p.imap.map((a) => a.email)]} />}
             {tab === "log" && <LogView />}
             {msg && <p className="hint" role="status">{msg}</p>}
           </div>

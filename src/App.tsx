@@ -26,6 +26,7 @@ import { Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
 import { MessageMeta } from "./MessageMeta";
+import { PgpMessage } from "./PgpMessage";
 import { MuteButton } from "./MuteButton";
 import { LockScreen } from "./LockScreen";
 import { appLock, bindAppLock, getIdleMinutes, idleExpired, setIdleMinutes, useAppLock } from "./appLock";
@@ -1666,8 +1667,12 @@ export default function App() {
                       ) : (
                         <>
                           <MessageMeta m={m} loadSource={() => api.messageSource(m.id)} onMail={(to, sub, b) => composeTo("gmail", to, sub, b)} />
-                          <MessageBody m={m} strict={m.risk.level === "high" && !detail.dismissed} />
-                          <Attachments m={m} strict={m.risk.level === "high" && !detail.dismissed} />
+                          <PgpMessage m={m} strict={m.risk.level === "high" && !detail.dismissed}
+                            open={(pass) => api.pgpOpenGmail(m.id, pass)}
+                            importKey={(a) => api.pgpImportGmailAtt(m.id, a.id ?? "")}>
+                            <MessageBody m={m} strict={m.risk.level === "high" && !detail.dismissed} />
+                            <Attachments m={m} strict={m.risk.level === "high" && !detail.dismissed} />
+                          </PgpMessage>
                         </>
                       )}
                     </article>

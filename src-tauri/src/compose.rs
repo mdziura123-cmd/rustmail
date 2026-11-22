@@ -167,6 +167,15 @@ fn text_part(content_type: &str, body: &str) -> String {
 }
 
 pub fn build_message(m: &Outgoing, nonce: &str) -> Result<Vec<u8>, String> {
+    let (headers, entity) = build_split(m, nonce)?;
+    let mut out = headers.into_bytes();
+    out.extend_from_slice(&entity);
+    Ok(out)
+}
+
+/// Wiadomość rozdzielona na nagłówki główne (bez Content-Type) i treść MIME z własnym Content-Type.
+/// Podział jest potrzebny do OpenPGP: szyfrowana albo podpisywana jest tylko treść, nagłówki zostają jawne.
+pub fn build_split(m: &Outgoing, nonce: &str) -> Result<(String, Vec<u8>), String> {
     let total_rcpt = m.to.len() + m.cc.len() + m.bcc.len();
     if total_rcpt > MAX_RECIPIENTS {
         return Err(format!("Zbyt wielu odbiorców (maksymalnie {MAX_RECIPIENTS})."));
@@ -214,15 +223,13 @@ pub fn build_message(m: &Outgoing, nonce: &str) -> Result<Vec<u8>, String> {
 
     let mut out: Vec<u8> = Vec::new();
     if m.attachments.is_empty() {
-        h.push_str(&format!("Content-Type: multipart/alternative; boundary=\"{alt_b}\"\r\n\r\n"));
-        out.extend_from_slice(h.as_bytes());
+        out.extend_from_slice(format!("Content-Type: multipart/alternative; boundary=\"{alt_b}\"\r\n\r\n").as_bytes());
         out.extend_from_slice(alternative.as_bytes());
-        return Ok(out);
+        return Ok((h, out));
     }
 
     let mix_b = format!("rm_mix_{nonce}");
-    h.push_str(&format!("Content-Type: multipart/mixed; boundary=\"{mix_b}\"\r\n\r\n"));
-    out.extend_from_slice(h.as_bytes());
+    out.extend_from_slice(format!("Content-Type: multipart/mixed; boundary=\"{mix_b}\"\r\n\r\n").as_bytes());
     out.extend_from_slice(
         format!("--{mix_b}\r\nContent-Type: multipart/alternative; boundary=\"{alt_b}\"\r\n\r\n{alternative}").as_bytes(),
     );
@@ -238,7 +245,7 @@ pub fn build_message(m: &Outgoing, nonce: &str) -> Result<Vec<u8>, String> {
         );
     }
     out.extend_from_slice(format!("--{mix_b}--\r\n").as_bytes());
-    Ok(out)
+    Ok((h, out))
 }
 
 #[cfg(test)]
@@ -369,6 +376,17 @@ mod tests {
         assert!(build_message(&sample(), "ab").is_err());
         let long = Outgoing { subject: "x".repeat(301), ..sample() };
         assert!(build_message(&long, "abcdefgh12").is_err());
+    }
+
+    #[test]
+    fn split_parts_join_to_the_full_message() {
+        let (h, e) = build_split(&sample(), "abcdefgh12").unwrap();
+        assert!(!h.contains("Content-Type"));
+        assert!(h.ends_with("X-Mailer: RustMail\r\n"));
+        assert!(e.starts_with(b"Content-Type: multipart/alternative"));
+        let mut joined = h.into_bytes();
+        joined.extend_from_slice(&e);
+        assert_eq!(joined, build_message(&sample(), "abcdefgh12").unwrap());
     }
 
     #[test]

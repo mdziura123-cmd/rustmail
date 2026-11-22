@@ -4,6 +4,7 @@ import { Attachments } from "./Attachments";
 import { ReceiveButton } from "./ReceiveButton";
 import { MessageBody } from "./MessageBody";
 import { MessageMeta } from "./MessageMeta";
+import { PgpMessage } from "./PgpMessage";
 import { RiskBanner } from "./RiskBanner";
 import { MuteButton } from "./MuteButton";
 import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
@@ -398,13 +399,17 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
                 <MessageMeta m={toView(msg)} verifier="wp" loadSource={() => api.imapSource(account, folder, msg.uid)}
                   onMail={(to, sub, b) => onMail?.(to, sub, b)} />
               )}
-              <MessageBody key={msg.uid} m={toView(msg)} strict={strict} />
-              <Attachments
-                m={{ ...toView(msg), attachments: msg.attachments }}
-                strict={strict}
-                dl={(a) => api.imapDownload(account, folder, msg.uid, Number(a.id), a.name)}
-                pv={(a) => api.imapPreview(account, folder, msg.uid, Number(a.id))}
-              />
+              <PgpMessage key={"pgp" + msg.uid} m={toView(msg)} atts={msg.attachments} strict={strict}
+                open={(pass) => api.pgpOpenImap(account, folder, msg.uid, pass)}
+                importKey={(a) => api.pgpImportImapAtt(account, folder, msg.uid, Number(a.id))}>
+                <MessageBody key={msg.uid} m={toView(msg)} strict={strict} />
+                <Attachments
+                  m={{ ...toView(msg), attachments: msg.attachments }}
+                  strict={strict}
+                  dl={(a) => api.imapDownload(account, folder, msg.uid, Number(a.id), a.name)}
+                  pv={(a) => api.imapPreview(account, folder, msg.uid, Number(a.id))}
+                />
+              </PgpMessage>
             </article>
           </div>
         </>

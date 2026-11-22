@@ -12,6 +12,8 @@ import { useContextMenu } from "./ContextMenu";
 import { loadTemplates } from "./templates";
 import { imgToChars } from "./emoji";
 import { fmtSize } from "./util";
+import { badPass, getAttachKeyDefault, getSignDefault, needsPass, pgpMsg } from "./pgp";
+import type { PgpRecipients } from "./types";
 
 const MAX_ATTACH_BYTES = 20 * 1024 * 1024;
 const AUTOSAVE_MS = 20000;
@@ -94,6 +96,35 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
   const tplMenu = useContextMenu();
   const [spellTick, setSpellTick] = useState(0);
 
+  // OpenPGP: podpis i szyfrowanie tej wiadomości. Hasło klucza żyje tylko w pamięci, do końca wysyłki.
+  const [pgpSign, setPgpSign] = useState(getSignDefault);
+  const [pgpEncrypt, setPgpEncrypt] = useState(false);
+  const [pgpKey, setPgpKey] = useState(getAttachKeyDefault);
+  const [pgpCheck, setPgpCheck] = useState<PgpRecipients | null>(null);
+  const [passAsk, setPassAsk] = useState<{ retry: () => void; bad: boolean } | null>(null);
+  const [passValue, setPassValue] = useState("");
+  const passRef = useRef<string | null>(null);
+  const fromDefaults = useRef(getSignDefault() || getAttachKeyDefault());
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api.pgpCheckRecipients(imapAcc, to, cc, bcc).then((r) => {
+        setPgpCheck(r);
+        // Domyślny podpis/klucz z ustawień nie może zablokować wysyłki, gdy konto nie ma jeszcze klucza.
+        if (fromDefaults.current && (!r.available || !r.ownKey)) { setPgpSign(false); setPgpKey(false); }
+        fromDefaults.current = false;
+      }).catch(() => setPgpCheck(null));
+    }, 600);
+    return () => clearTimeout(t);
+  }, [imapAcc, to, cc, bcc, pgpSign, pgpEncrypt, pgpKey]);
+  /** Gdy GnuPG prosi o hasło klucza: pokazuje pole hasła i powtarza akcję. Zwraca true, jeśli to był taki błąd. */
+  const askPass = (m: string, retry: () => void): boolean => {
+    if (!needsPass(m) && !badPass(m)) return false;
+    passRef.current = null;
+    setPassValue("");
+    setPassAsk({ retry, bad: badPass(m) });
+    return true;
+  };
+
   // Obrazki emotek zamieniają się na prawdziwe znaki emoji (także w szkicach; po wczytaniu znów są obrazkami).
   const build = useCallback((): OutgoingMessage => ({
     to, cc, bcc, subject,
@@ -103,7 +134,9 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
     threadId: init.threadId,
     draftId: draftRef.current,
     attachments: atts.map(({ name, mime, dataBase64 }) => ({ name, mime, dataBase64 })),
-  }), [to, cc, bcc, subject, atts, init]);
+    pgpSign, pgpEncrypt, pgpAttachKey: pgpKey,
+    pgpPassphrase: passRef.current,
+  }), [to, cc, bcc, subject, atts, init, pgpSign, pgpEncrypt, pgpKey]);
 
   const markDirty = () => { dirty.current = true; };
 
@@ -143,9 +176,10 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
 
   // Automatyczny zapis co kilkanaście sekund, tylko gdy coś się zmieniło.
   useEffect(() => {
-    const t = setInterval(() => { if (dirty.current && !sending) void saveDraft(false); }, AUTOSAVE_MS);
+    // Wiadomość szyfrowana nie trafia na serwer jako jawna wersja robocza (kopia zostaje w szyfrowanej bazie lokalnej).
+    const t = setInterval(() => { if (dirty.current && !sending && !pgpEncrypt) void saveDraft(false); }, AUTOSAVE_MS);
     return () => clearInterval(t);
-  }, [saveDraft, sending]);
+  }, [saveDraft, sending, pgpEncrypt]);
 
   // Zapamiętuje adresy odbiorców w książce adresów (po udanej wysyłce lub zapisie w kolejce).
   const remember = () => { api.contactsRemember([to, cc, bcc].filter(Boolean).join(", ")).catch(() => {}); };
@@ -185,13 +219,16 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
     try {
       if (imapAcc) await api.imapScheduleMessage(imapAcc, build(), atMs);
       else await api.scheduleMessage(build(), atMs);
+      passRef.current = null;
       remember();
       dirty.current = false;
       backup(null);
       onScheduled(atMs);
     } catch (e) {
-      setError(errText(e));
+      const m = errText(e);
       setSending(false);
+      if (askPass(m, () => void schedule(atMs))) return;
+      setError(pgpMsg(m));
     }
   };
 
@@ -201,6 +238,7 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
     try {
       if (imapAcc) {
         const res = await api.imapSend(imapAcc, build());
+        passRef.current = null;
         remember();
         if (draftRef.current) api.imapDeleteDraft(imapAcc, Number(draftRef.current)).catch(() => {});
         dirty.current = false;
@@ -210,6 +248,7 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
         return;
       }
       const info = await api.sendMessage(build());
+      passRef.current = null;
       remember();
       dirty.current = false;
       backup(null);
@@ -217,6 +256,7 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
       onSent({ threadId: info.threadId || init.threadId || "" });
     } catch (e) {
       const m = errText(e);
+      if (askPass(m, () => void doSend())) { setSending(false); return; }
       setError(m);
       // Kolejka tylko wtedy, gdy wysyłka na pewno się nie zaczęła (brak połączenia z serwerem).
       setCanQueue(imapAcc
@@ -232,13 +272,16 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
     try {
       if (imapAcc) await api.imapOutboxQueue(imapAcc, build());
       else await api.queueMessage(build());
+      passRef.current = null;
       remember();
       dirty.current = false;
       backup(null);
       onQueued();
     } catch (e) {
-      setError(errText(e));
+      const m = errText(e);
       setSending(false);
+      if (askPass(m, () => void queue())) return;
+      setError(pgpMsg(m));
     }
   };
 
@@ -333,6 +376,7 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
       </div>
 
       {init.note && <p className="note">{init.note}</p>}
+      {(pgpSign || pgpEncrypt || pgpKey) && <PgpLine check={pgpCheck} sign={pgpSign} encrypt={pgpEncrypt} attach={pgpKey} />}
 
       <RichEditor initialHtml={init.html} disabled={sending} apiRef={editorApi} onChange={(h) => { html.current = h; markDirty(); setSpellTick((t) => t + 1); }} />
       <SpellBar getHtml={() => html.current} tick={spellTick} api={editorApi} />
@@ -388,6 +432,28 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
           </div>
         </div>
       )}
+      {passAsk && (
+        <div className="modal-back" role="dialog" aria-modal="true" aria-label="Hasło klucza OpenPGP">
+          <form className="modal" onSubmit={(e) => {
+            e.preventDefault();
+            if (!passValue) return;
+            passRef.current = passValue;
+            setPassValue("");
+            const again = passAsk.retry;
+            setPassAsk(null);
+            again();
+          }}>
+            <h3>Hasło klucza OpenPGP</h3>
+            <p className="hint">Hasło jest potrzebne do podpisania wiadomości. Program zapamięta je na 10 minut i zapomni po zamknięciu.</p>
+            <input type="password" autoComplete="off" autoFocus aria-label="Hasło klucza" value={passValue} onChange={(e) => setPassValue(e.target.value)} />
+            {passAsk.bad && <p className="error" role="alert">Nieprawidłowe hasło. Spróbuj ponownie.</p>}
+            <div className="modal-actions">
+              <button className="primary" disabled={!passValue}>Podpisz i kontynuuj</button>
+              <button type="button" onClick={() => { setPassAsk(null); setPassValue(""); }}>Anuluj</button>
+            </div>
+          </form>
+        </div>
+      )}
       <footer className="compose-foot">
         <button className="primary" disabled={sending} title={sending ? "Wysyłanie…" : "Wyślij"} aria-label={sending ? "Wysyłanie…" : "Wyślij"} aria-busy={sending} onClick={send}><ActIcon n="send" /></button>
         <button disabled={sending} title="Zaplanuj wysyłkę" aria-label="Zaplanuj wysyłkę" aria-expanded={schedOpen} onClick={() => { setSchedOpen((o) => !o); if (!schedAt) setSchedAt(toLocalInput(addHours(new Date(), 1))); }}><ActIcon n="clock" /></button>
@@ -400,6 +466,16 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
         }}><ActIcon n="list" /></button>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => void addFiles(e.target.files)} />
         <button disabled={sending} title="Dodaj załącznik" aria-label="Dodaj załącznik" onClick={() => fileRef.current?.click()}><ActIcon n="attach" /></button>
+        <span className="sep" />
+        <button disabled={sending} className={pgpSign ? "toggle on" : "toggle"} aria-pressed={pgpSign}
+          title={pgpSign ? "Podpis OpenPGP: włączony" : "Podpisz OpenPGP (odbiorca sprawdzi, że to od Ciebie)"}
+          aria-label="Podpisz OpenPGP" onClick={() => setPgpSign((v) => !v)}><ActIcon n="seal" /></button>
+        <button disabled={sending} className={pgpEncrypt ? "toggle on" : "toggle"} aria-pressed={pgpEncrypt}
+          title={pgpEncrypt ? "Szyfrowanie OpenPGP: włączone" : "Zaszyfruj OpenPGP (przeczytają tylko odbiorcy)"}
+          aria-label="Zaszyfruj OpenPGP" onClick={() => { setPgpEncrypt((v) => !v); markDirty(); }}><ActIcon n="lock" /></button>
+        <button disabled={sending} className={pgpKey ? "toggle on" : "toggle"} aria-pressed={pgpKey}
+          title={pgpKey ? "Mój klucz publiczny zostanie dołączony" : "Dołącz mój klucz publiczny OpenPGP"}
+          aria-label="Dołącz mój klucz publiczny OpenPGP" onClick={() => setPgpKey((v) => !v)}><ActIcon n="key" /></button>
         <span className="grow" />
         <button className="small warn" disabled={sending} title={draftId ? "Usuń wersję roboczą" : "Odrzuć wiadomość"} aria-label={draftId ? "Usuń wersję roboczą" : "Odrzuć wiadomość"} onClick={() => void discard()}>
           <ActIcon n="trash" />
@@ -408,4 +484,19 @@ export function Compose({ init, onSent, onQueued, onScheduled, onClose, from: fr
       {tplMenu.menu}
     </section>
   );
+}
+
+/** Stan OpenPGP pod polami adresów: brakujące klucze, brak własnego klucza, co zostanie zaszyfrowane. */
+function PgpLine({ check, sign, encrypt, attach }: { check: PgpRecipients | null; sign: boolean; encrypt: boolean; attach: boolean }) {
+  if (!check) return <p className="hint pad">OpenPGP: sprawdzanie kluczy…</p>;
+  if (!check.available) return <p className="error pad" role="alert">OpenPGP jest niedostępne (brak programu GnuPG) – wyłącz podpis i szyfrowanie.</p>;
+  if ((sign || encrypt || attach) && !check.ownKey) {
+    return <p className="error pad" role="alert">Nie masz klucza OpenPGP dla konta nadawcy. Utwórz go w Ustawieniach → Szyfrowanie OpenPGP.</p>;
+  }
+  if (encrypt && check.missing.length > 0) {
+    return <p className="error pad" role="alert">Brak klucza publicznego dla: {check.missing.join(", ")}. Bez niego nie da się zaszyfrować – zaimportuj klucz albo wyłącz szyfrowanie.</p>;
+  }
+  const parts = [encrypt ? "treść i załączniki zostaną zaszyfrowane (temat i adresy pozostają jawne; wersja robocza nie trafia na serwer)" : "",
+    sign ? "wiadomość zostanie podpisana" : "", attach ? "dołączę Twój klucz publiczny" : ""].filter(Boolean);
+  return <p className="hint pad">OpenPGP: {parts.join(", ")}.</p>;
 }

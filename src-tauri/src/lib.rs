@@ -17,6 +17,9 @@ mod filetype;
 mod gmail;
 mod labels;
 mod mailinfo;
+mod pgp;
+mod pgp_mail;
+mod pgp_send;
 mod lock;
 mod later;
 mod launcher;
@@ -87,6 +90,10 @@ pub fn run() {
             // Katalogi aplikacji (konfiguracja, dane, pamięć podręczna) są dostępne tylko dla właściciela.
             for d in [app.path().app_config_dir(), app.path().app_data_dir(), app.path().app_cache_dir()].into_iter().flatten() {
                 let _ = privfs::ensure_private_dir(&d);
+            }
+            // Własny, odizolowany pęk kluczy OpenPGP (osobny od ~/.gnupg użytkownika).
+            if let Ok(dir) = app.path().app_data_dir() {
+                pgp::set_home(dir.join("gnupg"));
             }
             // Baza lokalna: jeśli nie da się jej otworzyć, aplikacja działa dalej tylko online.
             // Klucz szyfrowania bazy leży w pęku kluczy systemu (jak tokeny), nigdy na dysku obok bazy.
@@ -255,7 +262,29 @@ pub fn run() {
             update::rollback_update,
             update::update_state,
             update::restart_app,
+            pgp_mail::pgp_status,
+            pgp_mail::pgp_keys,
+            pgp_mail::pgp_generate,
+            pgp_mail::pgp_import,
+            pgp_mail::pgp_import_gmail_att,
+            pgp_mail::pgp_import_imap_att,
+            pgp_mail::pgp_export_public,
+            pgp_mail::pgp_save_key,
+            pgp_mail::pgp_delete,
+            pgp_mail::pgp_forget,
+            pgp_mail::pgp_check_recipients,
+            pgp_mail::pgp_open_gmail,
+            pgp_mail::pgp_open_imap,
+            pgp_mail::pgp_save_attachment,
         ])
-        .run(tauri::generate_context!())
-        .expect("nie udało się uruchomić RustMail");
+        .build(tauri::generate_context!())
+        .expect("nie udało się uruchomić RustMail")
+        .run(|_app, event| {
+            // Przy zamknięciu aplikacji gpg-agent zapomina hasła kluczy (nie zostają odblokowane w tle).
+            if let tauri::RunEvent::Exit = event {
+                if let Ok(g) = pgp::gpg() {
+                    g.stop_agent();
+                }
+            }
+        });
 }
