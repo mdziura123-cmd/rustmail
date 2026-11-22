@@ -545,7 +545,7 @@ pub async fn bootstrap(app: &AppHandle, st: &SpamState, gm: &AppState, email: &s
 
 // ---------- Skanowanie ----------
 
-fn filters_data(app: &AppHandle) -> Result<(HashSet<String>, Rules), String> {
+pub(crate) fn filters_data(app: &AppHandle) -> Result<(HashSet<String>, Rules), String> {
     let d = dir(app)?;
     let safe = dismissed::load(&d.join("dismissed.txt"));
     let rules = Rules { blocked: blocklist::load_list(&d.join("blocked.txt")), allowed: blocklist::load_list(&d.join("allowed.txt")) };

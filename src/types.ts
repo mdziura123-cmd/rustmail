@@ -284,6 +284,11 @@ export interface ImapMsg {
   unsubscribe?: Unsubscribe | null;
   /** Weryfikacja nadawcy przez serwer WP (podpis DKIM domeny z pola „Od”). */
   auth?: string;
+  /** Lokalna ocena phishingu (te same reguły co w Gmailu). */
+  risk?: Risk;
+  /** Klucz do oznaczenia jako bezpiecznej i czy już ją tak oznaczono. */
+  safeKey?: string;
+  dismissed?: boolean;
 }
 
 export interface CalEvent {

@@ -618,6 +618,53 @@ pub struct Msg {
     pub unsubscribe: Option<crate::mailinfo::Unsubscribe>,
     /// Weryfikacja nadawcy przez serwer (obecnie tylko Poczta WP): verified | failed | unknown.
     pub auth: String,
+    /// Lokalna ocena ryzyka phishingu (te same reguły co w Gmailu).
+    pub risk: crate::gmail::Risk,
+    /// Klucz do oznaczenia wiadomości jako bezpiecznej („fałszywy alarm”) i czy już ją tak oznaczono.
+    pub safe_key: String,
+    pub dismissed: bool,
+}
+
+/// Klucz „bezpiecznej” wiadomości IMAP: skrót konta i Message-ID (stały po przeniesieniu między folderami),
+/// a gdy go brak – folderu i numeru UID. Same litery i cyfry, jak identyfikatory wątków Gmaila.
+fn safe_key(account: &str, folder: &str, uid: u32, message_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let src = if message_id.trim().is_empty() {
+        format!("{}\n{folder}\n{uid}", account.to_lowercase())
+    } else {
+        format!("{}\n{}", account.to_lowercase(), message_id.trim())
+    };
+    let h = Sha256::digest(src.as_bytes());
+    let hex: String = h.iter().map(|b| format!("{b:02x}")).collect();
+    format!("w{}", &hex[..40])
+}
+
+/// Ocena phishingu dla wiadomości IMAP. Wynik weryfikacji WP (podpis DKIM domeny nadawcy) zastępuje
+/// wynik DMARC, którego serwer IMAP nie podaje.
+fn assess_imap(m: &Msg, rules: &crate::blocklist::Rules) -> crate::gmail::Risk {
+    let addr = p::bare_addr(&m.from).to_ascii_lowercase();
+    let name = p::display_name(&m.from);
+    let auth = match m.auth.as_str() {
+        "verified" => crate::phishing::AuthResults { spf: None, dkim: Some("pass".into()), dmarc: Some("pass".into()) },
+        "failed" => crate::phishing::AuthResults { spf: None, dkim: Some("fail".into()), dmarc: None },
+        _ => crate::phishing::AuthResults::default(),
+    };
+    let text: String = m.text.chars().take(100_000).collect();
+    let html: String = m.html.chars().take(400_000).collect();
+    crate::phishing::assess(&crate::phishing::Signals {
+        from_name: &name,
+        from_email: &addr,
+        reply_to: &m.reply_to,
+        subject: &m.subject,
+        auth,
+        body: &text,
+        html: &html,
+        attachment_names: m.attachments.iter().map(|a| a.name.clone()).collect(),
+        mine: false,
+        blocked: rules.is_blocked(&addr),
+        allowed: rules.is_allowed(&addr),
+    })
+    .into()
 }
 
 /// Nazwa załącznika, jeśli ta część wiadomości jest załącznikiem.
@@ -881,7 +928,7 @@ pub async fn imap_source(account: String, folder: String, uid: u32) -> Result<cr
 }
 
 #[tauri::command]
-pub async fn imap_get(account: String, folder: String, uid: u32) -> Result<Msg, String> {
+pub async fn imap_get(app: tauri::AppHandle, account: String, folder: String, uid: u32) -> Result<Msg, String> {
     if uid == 0 {
         return Err("Niepoprawny numer wiadomości.".to_string());
     }
@@ -893,6 +940,15 @@ pub async fn imap_get(account: String, folder: String, uid: u32) -> Result<Msg, 
     res.map(|mut m| {
         if !crate::mailinfo::is_wp_host(&creds.host) {
             m.auth = "unknown".to_string();
+        }
+        // Wiadomości wysłane przez użytkownika nie są oceniane.
+        let mine = p::bare_addr(&m.from).eq_ignore_ascii_case(&account);
+        if let Ok((safe, rules)) = spam_io::filters_data(&app) {
+            m.safe_key = safe_key(&account, &folder, uid, &m.message_id);
+            m.dismissed = safe.contains(&m.safe_key);
+            if !mine {
+                m.risk = assess_imap(&m, &rules);
+            }
         }
         m
     })
@@ -939,6 +995,9 @@ async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, Strin
             let from_email = crate::contacts::parse_list(&from).into_iter().next().map(|a| a.email).unwrap_or_default();
             crate::mailinfo::wp_dkim_verdict(&h.get_all_values("X-WP-DKIM-Status"), &from_email).to_string()
         },
+        risk: crate::gmail::Risk { level: "none".to_string(), score: 0, reasons: vec![] },
+        safe_key: String::new(),
+        dismissed: false,
     };
     // Oznaczamy jako przeczytaną (nieudane oznaczenie nie przeszkadza w czytaniu).
     let _ = conn.cmd(&format!("UID STORE {uid} +FLAGS (\\Seen)")).await;

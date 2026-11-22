@@ -4,6 +4,7 @@ import { Attachments } from "./Attachments";
 import { ReceiveButton } from "./ReceiveButton";
 import { MessageBody } from "./MessageBody";
 import { MessageMeta } from "./MessageMeta";
+import { RiskBanner } from "./RiskBanner";
 import { MuteButton } from "./MuteButton";
 import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { commandFor, isTypingTarget } from "./shortcuts";
@@ -54,7 +55,7 @@ export function toView(m: ImapMsg): MessageView {
   return {
     id: String(m.uid), from: m.from, fromEmail: emailOf(m.from), mine: false, dateMs: m.dateMs,
     body: m.text, htmlOnly: !m.text && !!m.html, html: m.html, attachments: [], to: m.to, cc: m.cc,
-    replyTo: m.replyTo, messageId: m.messageId, references: m.references, risk: { level: "none", score: 0, reasons: [] },
+    replyTo: m.replyTo, messageId: m.messageId, references: m.references, risk: m.risk ?? { level: "none", score: 0, reasons: [] },
     unsubscribe: m.unsubscribe ?? null,
     auth: m.auth ?? "unknown",
   };
@@ -347,6 +348,17 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  // Wiadomość ocenioną jako bardzo podejrzana pokazujemy w trybie ścisłym (jak w Gmailu), dopóki
+  // użytkownik nie uzna jej za bezpieczną.
+  const strict = !!msg && !msg.dismissed && msg.risk?.level === "high";
+  const markSafe = async (safe: boolean) => {
+    if (!msg?.safeKey) return;
+    try {
+      await api.setThreadSafe(msg.safeKey, safe);
+      setMsg({ ...msg, dismissed: safe });
+    } catch (e) { setErr(errText(e)); }
+  };
+
   return (
     <main className="reader" aria-label="Wiadomość">
       {err && <p className="error pad" role="alert">{err}</p>}
@@ -374,8 +386,9 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
               {role === "trash" ? <button title="Przywróć z kosza" aria-label="Przywróć z kosza" onClick={() => void act("inbox")}><ActIcon n="restore"/></button> : <button title="Usuń – przenieś do kosza (Delete)" aria-label="Usuń – przenieś do kosza (Delete)" onClick={() => void act("trash")}><ActIcon n="trash"/></button>}
             </div>
           </header>
+          <RiskBanner messages={[toView(msg)]} dismissed={!!msg.dismissed} onSafe={(safe) => void markSafe(safe)} />
           <div className="thread">
-            <article className="bubble received wide">
+            <article className={"bubble received wide" + (!msg.dismissed && msg.risk && msg.risk.level !== "none" ? " risk-" + msg.risk.level : "")}>
               <div className="bubble-head">
                 <strong>{msg.from}</strong>
                 <time>{fmtFull(msg.dateMs)}</time>
@@ -385,10 +398,10 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
                 <MessageMeta m={toView(msg)} verifier="wp" loadSource={() => api.imapSource(account, folder, msg.uid)}
                   onMail={(to, sub, b) => onMail?.(to, sub, b)} />
               )}
-              <MessageBody key={msg.uid} m={toView(msg)} strict={false} />
+              <MessageBody key={msg.uid} m={toView(msg)} strict={strict} />
               <Attachments
                 m={{ ...toView(msg), attachments: msg.attachments }}
-                strict={false}
+                strict={strict}
                 dl={(a) => api.imapDownload(account, folder, msg.uid, Number(a.id), a.name)}
                 pv={(a) => api.imapPreview(account, folder, msg.uid, Number(a.id))}
               />
