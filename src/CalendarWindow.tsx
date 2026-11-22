@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { CalendarDialog, type CalPrefill } from "./Calendar";
 import { isThemeId, resolveTheme } from "./themes";
@@ -29,6 +29,19 @@ export default function CalendarWindow() {
   const { locked } = useAppLock();
   // Okno kalendarza dzieli blokadę z oknem poczty (nie blokuje się samo przy otwarciu).
   useEffect(() => { bindAppLock(false); }, []);
+  // Praca w kalendarzu liczy się jako aktywność: okno poczty nie zablokuje aplikacji z powodu bezczynności.
+  useEffect(() => {
+    let last = 0;
+    const touch = () => {
+      const now = Date.now();
+      if (now - last < 20_000) return;
+      last = now;
+      void emit("app-activity").catch(() => undefined);
+    };
+    const evs = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
+    evs.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    return () => evs.forEach((e) => window.removeEventListener(e, touch));
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;

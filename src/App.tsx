@@ -218,6 +218,11 @@ export default function App() {
     return () => { evs.forEach((e) => window.removeEventListener(e, touch)); window.clearInterval(t); };
   }, [lockIdle]);
   useEffect(() => { if (!locked) lastActivity.current = Date.now(); }, [locked]);
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void listen("app-activity", () => { lastActivity.current = Date.now(); }).then((f) => { un = f; });
+    return () => un?.();
+  }, []);
   // Domyślnie zamknięcie okna zostawia aplikację w zasobniku (poczta i powiadomienia działają dalej).
   const [background, setBackground] = useState(() => load(LS.bg, "1") === "1");
   useEffect(() => { void api.setBackground(background).catch(() => undefined); }, [background]);
