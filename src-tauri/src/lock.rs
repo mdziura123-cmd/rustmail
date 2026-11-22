@@ -6,6 +6,7 @@
 //! blokady ekranu systemu ani szyfrowania dysku.
 
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -94,6 +95,15 @@ struct Attempts {
 
 static ATTEMPTS: Mutex<Attempts> = Mutex::new(Attempts { fails: 0, until: None });
 
+/// Wspólny stan blokady wszystkich okien (poczta i kalendarz). Zmiana jest ogłaszana zdarzeniem `app-lock`.
+static LOCKED: AtomicBool = AtomicBool::new(false);
+
+fn announce(app: &tauri::AppHandle, locked: bool) {
+    use tauri::Emitter;
+    LOCKED.store(locked, Ordering::SeqCst);
+    let _ = app.emit("app-lock", locked);
+}
+
 fn throttle_check() -> Result<(), String> {
     let a = ATTEMPTS.lock().map_err(|_| "Błąd blokady.".to_string())?;
     if let Some(u) = a.until {
@@ -154,16 +164,38 @@ pub async fn lock_clear(current: String) -> Result<(), String> {
         if !check(&current)? {
             return Err("Kod jest nieprawidłowy.".to_string());
         }
+        LOCKED.store(false, Ordering::SeqCst);
         secrets::delete(KEY)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Sprawdza kod przy odblokowaniu. Błąd oznacza wstrzymanie po zbyt wielu próbach.
+/// Sprawdza kod przy odblokowaniu. Poprawny kod odblokowuje wszystkie okna.
+/// Błąd oznacza wstrzymanie po zbyt wielu próbach.
 #[tauri::command]
-pub async fn lock_verify(pin: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || check(&pin)).await.map_err(|e| e.to_string())?
+pub async fn lock_verify(app: tauri::AppHandle, pin: String) -> Result<bool, String> {
+    let ok = tauri::async_runtime::spawn_blocking(move || check(&pin)).await.map_err(|e| e.to_string())??;
+    if ok {
+        announce(&app, false);
+    }
+    Ok(ok)
+}
+
+/// Blokuje wszystkie okna (tylko gdy ustawiono kod).
+#[tauri::command]
+pub fn lock_engage(app: tauri::AppHandle) -> Result<bool, String> {
+    if secrets::get(KEY)?.is_none() {
+        return Ok(false);
+    }
+    announce(&app, true);
+    Ok(true)
+}
+
+/// Czy aplikacja jest teraz zablokowana (np. dla okna kalendarza otwieranego w czasie blokady).
+#[tauri::command]
+pub fn lock_state() -> bool {
+    LOCKED.load(Ordering::SeqCst)
 }
 
 #[cfg(test)]

@@ -232,6 +232,8 @@ pub fn run() {
             lock::lock_set,
             lock::lock_clear,
             lock::lock_verify,
+            lock::lock_engage,
+            lock::lock_state,
             commands::preview_attachment,
             commands::rules_apply,
             calendar::cal_range,

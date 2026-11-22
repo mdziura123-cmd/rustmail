@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { CalendarDialog, type CalPrefill } from "./Calendar";
 import { isThemeId, resolveTheme } from "./themes";
+import { bindAppLock, useAppLock } from "./appLock";
+import { LockScreen } from "./LockScreen";
 
 function parse(raw: string | null): CalPrefill | null {
   if (!raw) return null;
@@ -24,6 +26,9 @@ function parse(raw: string | null): CalPrefill | null {
 export default function CalendarWindow() {
   const [prefill, setPrefill] = useState<CalPrefill | null>(null);
   const [gen, setGen] = useState(0);
+  const { locked } = useAppLock();
+  // Okno kalendarza dzieli blokadę z oknem poczty (nie blokuje się samo przy otwarciu).
+  useEffect(() => { bindAppLock(false); }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -47,5 +52,10 @@ export default function CalendarWindow() {
     return () => un?.();
   }, []);
 
-  return <CalendarDialog key={gen} standalone prefill={prefill} onClose={() => void api.closeCalendarWindow()} />;
+  return (
+    <>
+      <CalendarDialog key={gen} standalone prefill={prefill} onClose={() => void api.closeCalendarWindow()} />
+      {locked && <LockScreen />}
+    </>
+  );
 }

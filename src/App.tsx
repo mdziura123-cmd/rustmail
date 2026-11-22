@@ -28,7 +28,7 @@ import { RiskBanner } from "./RiskBanner";
 import { MessageMeta } from "./MessageMeta";
 import { MuteButton } from "./MuteButton";
 import { LockScreen } from "./LockScreen";
-import { appLock, getIdleMinutes, idleExpired, setIdleMinutes, useAppLock } from "./appLock";
+import { appLock, bindAppLock, getIdleMinutes, idleExpired, setIdleMinutes, useAppLock } from "./appLock";
 import { splitQuoted } from "./quoteTrim";
 import { SenderLists } from "./SenderLists";
 import { SignatureDialog } from "./SignatureDialog";
@@ -205,7 +205,7 @@ export default function App() {
   const [lockIdle, setLockIdle] = useState(getIdleMinutes);
   const lastActivity = useRef(Date.now());
   useEffect(() => {
-    void api.lockStatus().then((on) => { appLock.setEnabled(on); if (on) appLock.lock(); }).catch(() => undefined);
+    bindAppLock(true);
   }, []);
   useEffect(() => {
     const touch = () => { lastActivity.current = Date.now(); };
@@ -1056,7 +1056,7 @@ export default function App() {
         for (const e of due) {
           const when = e.allDay ? "cały dzień" : new Date(e.startMs).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
           showToast(`Wydarzenie: ${e.title} (${when})`);
-          void api.showNotification("Wydarzenie: " + e.title, when).catch(() => undefined);
+          void api.showNotification(appLock.isLocked() ? "Przypomnienie z kalendarza" : "Wydarzenie: " + e.title, when).catch(() => undefined);
         }
         let fired = due.length;
         for (const e of await api.calRecurring()) {
@@ -1065,7 +1065,7 @@ export default function App() {
           await api.calMark(e.id, occ);
           const when = e.allDay ? "cały dzień" : new Date(occ).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
           showToast(`Wydarzenie: ${e.title} (${when})`);
-          void api.showNotification("Wydarzenie: " + e.title, when).catch(() => undefined);
+          void api.showNotification(appLock.isLocked() ? "Przypomnienie z kalendarza" : "Wydarzenie: " + e.title, when).catch(() => undefined);
           fired += 1;
         }
         if (fired > 0) playSound(soundRef.current);

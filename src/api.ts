@@ -238,6 +238,8 @@ export const api = {
   lockSet: (current: string | null, pin: string) => invoke<void>("lock_set", { current, pin }),
   lockClear: (current: string) => invoke<void>("lock_clear", { current }),
   lockVerify: (pin: string) => invoke<boolean>("lock_verify", { pin }),
+  lockEngage: () => invoke<boolean>("lock_engage"),
+  lockState: () => invoke<boolean>("lock_state"),
 };
 
 export function errText(e: unknown): string {
