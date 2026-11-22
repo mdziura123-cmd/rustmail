@@ -179,7 +179,7 @@ export interface MessageView {
   messageId: string;
   references: string;
   risk: Risk;
-  /** Weryfikacja nadawcy przez serwer poczty (tylko Gmail): verified | failed | unknown. */
+  /** Weryfikacja nadawcy przez serwer poczty (Gmail: DMARC, WP: DKIM): verified | failed | unknown. */
   auth?: string;
   /** Wypisanie się z listy mailingowej, jeśli nadawca je udostępnia. */
   unsubscribe?: Unsubscribe | null;
@@ -282,6 +282,8 @@ export interface ImapMsg {
   messageId: string; references: string; replyTo: string;
   text: string; html: string; attachments: Attachment[]; unread: boolean; starred: boolean;
   unsubscribe?: Unsubscribe | null;
+  /** Weryfikacja nadawcy przez serwer WP (podpis DKIM domeny z pola „Od”). */
+  auth?: string;
 }
 
 export interface CalEvent {

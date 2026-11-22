@@ -9,10 +9,12 @@ interface Props {
   loadSource: () => Promise<MailSource>;
   /** Wypisanie przez e-mail: otwiera nową wiadomość (nic nie wysyła się samo). */
   onMail: (to: string, subject: string, body: string) => void;
+  /** Kto weryfikował nadawcę: Gmail (DMARC) albo Poczta WP (podpis DKIM). */
+  verifier?: "gmail" | "wp";
 }
 
 /** Pasek pod nagłówkiem wiadomości: weryfikacja nadawcy, „nowy nadawca”, wypisanie z listy, źródło. */
-export function MessageMeta({ m, loadSource, onMail }: Props) {
+export function MessageMeta({ m, loadSource, onMail, verifier = "gmail" }: Props) {
   const book = useKnownSenders();
   const [unsub, setUnsub] = useState<Unsubscribe | null>(null);
   const [source, setSource] = useState(false);
@@ -22,13 +24,17 @@ export function MessageMeta({ m, loadSource, onMail }: Props) {
   return (
     <div className="msg-meta">
       {m.auth === "verified" && (
-        <span className="chip ok" title={`Gmail potwierdził (DMARC), że wiadomość naprawdę wysłano z domeny ${domain}. To nie oznacza, że treść jest bezpieczna.`}>
+        <span className="chip ok" title={verifier === "wp"
+          ? `Poczta WP potwierdziła podpis cyfrowy (DKIM) domeny ${domain} – wiadomość naprawdę pochodzi z tej domeny. To nie oznacza, że treść jest bezpieczna.`
+          : `Gmail potwierdził (DMARC), że wiadomość naprawdę wysłano z domeny ${domain}. To nie oznacza, że treść jest bezpieczna.`}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4" /></svg>
           Nadawca zweryfikowany
         </span>
       )}
       {m.auth === "failed" && (
-        <span className="chip bad" title={`Gmail nie potwierdził, że wiadomość wysłano z domeny ${domain}. Adres nadawcy mógł zostać podrobiony.`}>
+        <span className="chip bad" title={verifier === "wp"
+          ? `Poczta WP uznała podpis cyfrowy (DKIM) za nieprawidłowy. Adres nadawcy mógł zostać podrobiony.`
+          : `Gmail nie potwierdził, że wiadomość wysłano z domeny ${domain}. Adres nadawcy mógł zostać podrobiony.`}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM12 8v5M12 16h.01" /></svg>
           Nadawca niezweryfikowany
         </span>

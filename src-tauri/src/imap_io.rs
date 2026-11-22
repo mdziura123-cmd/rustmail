@@ -616,6 +616,8 @@ pub struct Msg {
     pub starred: bool,
     /// Sposób wypisania się z listy mailingowej (nagłówek List-Unsubscribe).
     pub unsubscribe: Option<crate::mailinfo::Unsubscribe>,
+    /// Weryfikacja nadawcy przez serwer (obecnie tylko Poczta WP): verified | failed | unknown.
+    pub auth: String,
 }
 
 /// Nazwa załącznika, jeśli ta część wiadomości jest załącznikiem.
@@ -887,7 +889,13 @@ pub async fn imap_get(account: String, folder: String, uid: u32) -> Result<Msg, 
     let mut conn = open(&creds).await?;
     let res = get_inner(&mut conn, &folder, uid).await;
     conn.bye().await;
-    res
+    // Nagłówkowi X-WP-DKIM-Status ufamy tylko na serwerze WP – gdzie indziej mógł go dopisać nadawca.
+    res.map(|mut m| {
+        if !crate::mailinfo::is_wp_host(&creds.host) {
+            m.auth = "unknown".to_string();
+        }
+        m
+    })
 }
 
 async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, String> {
@@ -926,6 +934,11 @@ async fn get_inner(conn: &mut Conn, folder: &str, uid: u32) -> Result<Msg, Strin
             &h.get_first_value("List-Unsubscribe").unwrap_or_default(),
             &h.get_first_value("List-Unsubscribe-Post").unwrap_or_default(),
         ),
+        auth: {
+            let from = h.get_first_value("From").unwrap_or_default();
+            let from_email = crate::contacts::parse_list(&from).into_iter().next().map(|a| a.email).unwrap_or_default();
+            crate::mailinfo::wp_dkim_verdict(&h.get_all_values("X-WP-DKIM-Status"), &from_email).to_string()
+        },
     };
     // Oznaczamy jako przeczytaną (nieudane oznaczenie nie przeszkadza w czytaniu).
     let _ = conn.cmd(&format!("UID STORE {uid} +FLAGS (\\Seen)")).await;

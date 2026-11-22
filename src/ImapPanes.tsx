@@ -56,6 +56,7 @@ export function toView(m: ImapMsg): MessageView {
     body: m.text, htmlOnly: !m.text && !!m.html, html: m.html, attachments: [], to: m.to, cc: m.cc,
     replyTo: m.replyTo, messageId: m.messageId, references: m.references, risk: { level: "none", score: 0, reasons: [] },
     unsubscribe: m.unsubscribe ?? null,
+    auth: m.auth ?? "unknown",
   };
 }
 
@@ -381,7 +382,7 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
               </div>
               <p className="hint">Do: {msg.to}{msg.cc ? ` · Kopia: ${msg.cc}` : ""}</p>
               {role !== "sent" && role !== "drafts" && (
-                <MessageMeta m={toView(msg)} loadSource={() => api.imapSource(account, folder, msg.uid)}
+                <MessageMeta m={toView(msg)} verifier="wp" loadSource={() => api.imapSource(account, folder, msg.uid)}
                   onMail={(to, sub, b) => onMail?.(to, sub, b)} />
               )}
               <MessageBody key={msg.uid} m={toView(msg)} strict={false} />

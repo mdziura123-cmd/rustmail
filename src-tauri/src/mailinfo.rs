@@ -124,6 +124,44 @@ pub fn auth_verdict(dmarc: Option<&str>) -> &'static str {
     }
 }
 
+/// Weryfikacja nadawcy w Poczcie WP. Serwer WP nie dodaje Authentication-Results, tylko nagłówek
+/// `X-WP-DKIM-Status: good (id: domena)` z wynikiem sprawdzenia podpisu DKIM.
+/// - `verified`: dokładnie jeden taki nagłówek, wynik „good”, a podpisująca domena to domena z pola „Od”
+///   (ta sama domena rejestrowalna – jak przy DMARC),
+/// - `failed`: wynik wyraźnie negatywny (bad/fail/invalid…),
+/// - `unknown`: brak nagłówka, podpis innej domeny (np. firmy wysyłającej newslettery) albo więcej niż
+///   jeden nagłówek – wtedy któryś mógł zostać podstawiony przez nadawcę, więc żadnemu nie ufamy.
+pub fn wp_dkim_verdict(values: &[String], from_email: &str) -> &'static str {
+    if values.len() != 1 {
+        return "unknown";
+    }
+    let v = values[0].trim().to_ascii_lowercase();
+    let status = v.split(|c: char| c.is_whitespace() || c == '(').next().unwrap_or("");
+    if matches!(status, "bad" | "fail" | "failed" | "invalid" | "error") {
+        return "failed";
+    }
+    if status != "good" {
+        return "unknown";
+    }
+    let Some(id) = v.split("id:").nth(1) else { return "unknown" };
+    let signer: String = id.trim().chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
+    let from_dom = crate::phishing::domain_of(from_email);
+    if signer.is_empty() || from_dom.is_empty() || !from_email.contains('@') {
+        return "unknown";
+    }
+    if crate::phishing::registrable(&signer) == crate::phishing::registrable(&from_dom) {
+        "verified"
+    } else {
+        "unknown"
+    }
+}
+
+/// Czy konto IMAP to Poczta WP (tylko tam nagłówek X-WP-DKIM-Status pochodzi od serwera).
+pub fn is_wp_host(host: &str) -> bool {
+    let h = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    h == "wp.pl" || h.ends_with(".wp.pl")
+}
+
 /// Blok nagłówków surowej wiadomości (do pierwszej pustej linii).
 pub fn header_block(raw: &[u8]) -> &[u8] {
     let find = |pat: &[u8]| raw.windows(pat.len()).position(|w| w == pat);
@@ -243,6 +281,26 @@ mod tests {
         assert_eq!(auth_verdict(Some("fail")), "failed");
         assert_eq!(auth_verdict(Some("none")), "unknown");
         assert_eq!(auth_verdict(None), "unknown");
+    }
+
+    #[test]
+    fn wp_dkim() {
+        let one = |s: &str| vec![s.to_string()];
+        assert_eq!(wp_dkim_verdict(&one("good (id: przelewy24.pl)   "), "no-reply@przelewy24.pl"), "verified");
+        assert_eq!(wp_dkim_verdict(&one("good (id: przelewy24.pl)"), "info@mail.przelewy24.pl"), "verified");
+        assert_eq!(wp_dkim_verdict(&one("good (id: sendgrid.net)"), "news@sklep.pl"), "unknown");
+        assert_eq!(wp_dkim_verdict(&one("good (id: przelewy24.pl.evil.com)"), "no-reply@przelewy24.pl"), "unknown");
+        assert_eq!(wp_dkim_verdict(&one("bad (id: bank.pl)"), "a@bank.pl"), "failed");
+        assert_eq!(wp_dkim_verdict(&one("none"), "a@bank.pl"), "unknown");
+        assert_eq!(wp_dkim_verdict(&[], "a@bank.pl"), "unknown");
+        // dwa nagłówki: jeden mógł podstawić nadawca
+        let two = vec!["good (id: bank.pl)".to_string(), "good (id: bank.pl)".to_string()];
+        assert_eq!(wp_dkim_verdict(&two, "a@bank.pl"), "unknown");
+        assert_eq!(wp_dkim_verdict(&one("good (id: bank.pl)"), "zly-adres"), "unknown");
+        assert!(is_wp_host("imap.wp.pl"));
+        assert!(is_wp_host("WP.PL"));
+        assert!(!is_wp_host("imap.wp.pl.evil.com"));
+        assert!(!is_wp_host("notwp.pl"));
     }
 
     #[test]

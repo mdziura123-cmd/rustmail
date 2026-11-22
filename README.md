@@ -116,7 +116,7 @@ Stopka → „Poczta IMAP (WP)”. Osobne okno do czytania i porządkowania pocz
 
 ## Bezpieczeństwo poczty (seria 1.10)
 
-- **Weryfikacja nadawcy:** przy wiadomościach Gmaila zielona tarcza „Nadawca zweryfikowany”, gdy Gmail potwierdził DMARC dla domeny z pola „Od”, a czerwona „Nadawca niezweryfikowany”, gdy DMARC się nie powiódł. Zweryfikowany nadawca nie oznacza bezpiecznej treści. WP nie ma tej etykiety: nagłówki weryfikacji od serwera WP nie są jeszcze rozpoznawane.
+- **Weryfikacja nadawcy:** przy wiadomościach Gmaila zielona tarcza „Nadawca zweryfikowany”, gdy Gmail potwierdził DMARC dla domeny z pola „Od”, a czerwona „Nadawca niezweryfikowany”, gdy DMARC się nie powiódł. Zweryfikowany nadawca nie oznacza bezpiecznej treści. W Poczcie WP tarcza opiera się na nagłówku `X-WP-DKIM-Status` od serwera WP: zielona, gdy podpis DKIM jest prawidłowy i należy do domeny z pola „Od”; brak tarczy, gdy podpisała inna domena (np. firma rozsyłająca newslettery) albo nagłówek występuje więcej niż raz (mógł go podstawić nadawca). Nagłówek jest brany pod uwagę tylko dla kont na serwerze wp.pl.
 - **Nowy nadawca:** etykieta przy adresach spoza lokalnej książki adresowej (uzupełnianej z wysłanych i odebranych). Pokazuje się dopiero, gdy książka ma co najmniej 10 adresów.
 - **Wypisz się:** gdy newsletter podaje nagłówek `List-Unsubscribe`. Po potwierdzeniu otwiera stronę wypisania (tylko https) w przeglądarce albo okno nowej wiadomości na adres wypisania. Nic nie dzieje się samo.
 - **Źródło wiadomości:** nagłówki i pełna treść jako zwykły tekst (Gmail i WP), z kopiowaniem. Bardzo duże wiadomości są przycinane do 3 MB.
