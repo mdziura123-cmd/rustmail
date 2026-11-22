@@ -77,6 +77,8 @@ na GitHubie może wymagać drobnych poprawek. Wysyłanie i zapis wersji roboczyc
 
 ## Motywy kolorystyczne
 
+Od 1.11.2 są też motywy biurowe: granat i biel, granat ciemny, grafit jasny i ciemny, butelkowa zieleń, bordo (Ustawienia → Ogólne → Motyw).
+
 Wybierasz je w lewym panelu, na dole („Motyw”): Systemowy, Jasny, Ciemny, Proton (fiolet i biel), Proton ciemny,
 Błękit i biel, Solarized jasny, Solarized ciemny. Wszystkie kolory są jednolite – bez rozmycia i przezroczystości.
 Kolory każdego motywu są w jednym miejscu: `src/themes.css` (zmienne `--bg`, `--accent` itd.). Nowy motyw = nowy blok

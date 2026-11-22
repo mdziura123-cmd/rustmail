@@ -42,3 +42,40 @@
   --sel: #0d4452; --sent: #0f4d5e; --recv: #04313c; --warn: #e0b43a;
   --shadow: 0 0 0 1px var(--line); --backdrop: #001f27; color-scheme: dark;
 }
+/* Motywy biurowe: stonowane, jednolite kolory (granat, grafit, butelkowa zieleń, bordo). */
+:root[data-theme="navy"] {
+  --bg: #eef1f5; --panel: #ffffff; --panel-2: #f6f8fb; --line: #d5dce6;
+  --ink: #111c2b; --muted: #55627a; --accent: #1e3a5f; --accent-ink: #ffffff;
+  --sel: #dce5f0; --sent: #e1e8f2; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #c9d2de; color-scheme: light;
+}
+:root[data-theme="navy-dark"] {
+  --bg: #0c1420; --panel: #121d2d; --panel-2: #172437; --line: #24344b;
+  --ink: #e4eaf2; --muted: #95a4ba; --accent: #7fa7d9; --accent-ink: #0c1420;
+  --sel: #1d3150; --sent: #1c3556; --recv: #172437; --warn: #e8b64f;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #080e17; color-scheme: dark;
+}
+:root[data-theme="graphite"] {
+  --bg: #efefef; --panel: #ffffff; --panel-2: #f6f6f6; --line: #d8d8d8;
+  --ink: #1c1c1e; --muted: #5c5c63; --accent: #3a3f47; --accent-ink: #ffffff;
+  --sel: #e2e3e6; --sent: #e6e7ea; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #cfcfd2; color-scheme: light;
+}
+:root[data-theme="graphite-dark"] {
+  --bg: #141517; --panel: #1c1d20; --panel-2: #222428; --line: #33363b;
+  --ink: #e8e8ea; --muted: #a0a2a8; --accent: #9fb4cc; --accent-ink: #141517;
+  --sel: #2b3038; --sent: #2c323b; --recv: #222428; --warn: #e8b64f;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #0c0d0e; color-scheme: dark;
+}
+:root[data-theme="forest"] {
+  --bg: #eef2ef; --panel: #ffffff; --panel-2: #f5f8f6; --line: #d3ddd6;
+  --ink: #142019; --muted: #546659; --accent: #1f5e46; --accent-ink: #ffffff;
+  --sel: #dbe9e1; --sent: #e0ece5; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #c8d4cc; color-scheme: light;
+}
+:root[data-theme="burgundy"] {
+  --bg: #f3efef; --panel: #ffffff; --panel-2: #f9f6f6; --line: #e0d5d7;
+  --ink: #241316; --muted: #6a5559; --accent: #7a1f35; --accent-ink: #ffffff;
+  --sel: #efdfe2; --sent: #f2e5e8; --recv: #ffffff; --warn: #8a5a00;
+  --shadow: 0 0 0 1px var(--line); --backdrop: #d8cccf; color-scheme: light;
+}

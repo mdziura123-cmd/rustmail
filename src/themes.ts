@@ -1,7 +1,8 @@
 /** Motywy kolorystyczne. Wszystkie kolory są jednolite (bez przezroczystości i rozmycia). */
 
 export type ThemeId =
-  | "auto" | "light" | "dark" | "proton" | "proton-dark" | "blue" | "solarized-light" | "solarized-dark";
+  | "auto" | "light" | "dark" | "proton" | "proton-dark" | "blue" | "solarized-light" | "solarized-dark"
+  | "navy" | "navy-dark" | "graphite" | "graphite-dark" | "forest" | "burgundy";
 
 export type Mode = "light" | "dark";
 
@@ -14,6 +15,12 @@ export const THEMES: { id: ThemeId; label: string; mode: Mode | null }[] = [
   { id: "blue", label: "Błękit i biel", mode: "light" },
   { id: "solarized-light", label: "Solarized jasny", mode: "light" },
   { id: "solarized-dark", label: "Solarized ciemny", mode: "dark" },
+  { id: "navy", label: "Biurowy – granat i biel", mode: "light" },
+  { id: "navy-dark", label: "Biurowy – granat ciemny", mode: "dark" },
+  { id: "graphite", label: "Biurowy – grafit jasny", mode: "light" },
+  { id: "graphite-dark", label: "Biurowy – grafit ciemny", mode: "dark" },
+  { id: "forest", label: "Biurowy – butelkowa zieleń", mode: "light" },
+  { id: "burgundy", label: "Biurowy – bordo", mode: "light" },
 ];
 
 export function isThemeId(s: string | null | undefined): s is ThemeId {
