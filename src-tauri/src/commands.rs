@@ -620,6 +620,35 @@ pub async fn message_source(state: State<'_, AppState>, message_id: String) -> R
     Ok(crate::mailinfo::source_of(&raw))
 }
 
+fn checked_sender(email: &str) -> Result<String, String> {
+    let e = email.trim().to_lowercase();
+    if !contacts::valid_email(&e) {
+        return Err("Niepoprawny adres nadawcy.".to_string());
+    }
+    if my_email().map(|m| m.eq_ignore_ascii_case(&e)).unwrap_or(false) {
+        return Err("To Twój własny adres – nie można go zablokować.".to_string());
+    }
+    Ok(e)
+}
+
+/// Ile wiadomości od nadawcy (Gmail) jest poza Spamem i Koszem – do potwierdzenia przed przeniesieniem.
+#[tauri::command]
+pub async fn sender_spam_count(state: State<'_, AppState>, email: String) -> Result<usize, String> {
+    let e = checked_sender(&email)?;
+    Ok(gmail::sender_message_ids(&state, &e, gmail::SENDER_SPAM_CAP).await?.len())
+}
+
+/// „Spam i zablokuj nadawcę” (Gmail): wszystkie wiadomości od nadawcy do Spamu, nadawca na listę zablokowanych.
+/// Zwraca liczbę przeniesionych wiadomości.
+#[tauri::command]
+pub async fn sender_spam_apply(app: AppHandle, state: State<'_, AppState>, email: String) -> Result<usize, String> {
+    let e = checked_sender(&email)?;
+    let ids = gmail::sender_message_ids(&state, &e, gmail::SENDER_SPAM_CAP).await?;
+    gmail::batch_spam(&state, &ids).await?;
+    add_sender_rule(app, "blocked".to_string(), e)?;
+    Ok(ids.len())
+}
+
 /// Klucz wyciszenia: wątek Gmaila (`g:konto:wątek`) albo rozmowa IMAP po temacie (`m:konto:temat`).
 pub fn mute_key(kind: &str, account: &str, item: &str) -> Option<String> {
     let acc = account.trim().to_lowercase();
@@ -976,6 +1005,7 @@ pub async fn poll_mail(
         let safe = dismissed::load(&dismissed_path(&app)?);
         let rules = load_rules(&app)?;
         let page = gmail::list_threads(&state, "unread", None, &email, &gmail::Filters { dismissed: &safe, rules: &rules }).await?;
+        let sender_rules = rules;
         let ids: Vec<String> = page.threads.iter().map(|t| t.id.clone()).collect();
         let new_ids = match notifier.0.lock() {
             Ok(mut s) => {
@@ -988,6 +1018,14 @@ pub async fn poll_mail(
         new_count = new_ids.len();
         // Reguły automatyczne działają na nowych wiadomościach; przeczytane lub zarchiwizowane nie powiadamiają.
         let mut silenced: Vec<String> = Vec::new();
+        // Nowe wiadomości od zablokowanych nadawców trafiają od razu do Spamu (bez powiadomienia).
+        for t in page.threads.iter().filter(|t| new_ids.contains(&t.id)) {
+            let blocked = t.senders.split_whitespace().any(|e| sender_rules.is_blocked(&e.to_ascii_lowercase()));
+            if blocked && gmail::thread_action(&state, &t.id, "spam").await.is_ok() {
+                spam_moved += 1;
+                silenced.push(t.id.clone());
+            }
+        }
         let rules = store.rules_list().unwrap_or_default();
         if !rules.is_empty() {
             for t in page.threads.iter().filter(|t| new_ids.contains(&t.id)) {

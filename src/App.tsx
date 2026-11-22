@@ -28,6 +28,8 @@ import { RiskBanner } from "./RiskBanner";
 import { MessageMeta } from "./MessageMeta";
 import { PgpMessage } from "./PgpMessage";
 import { MuteButton } from "./MuteButton";
+import { SenderSpamButton } from "./SenderSpamButton";
+import { trainImap } from "./imapTrain";
 import { LockScreen } from "./LockScreen";
 import { appLock, bindAppLock, getIdleMinutes, idleExpired, setIdleMinutes, useAppLock } from "./appLock";
 import { splitQuoted } from "./quoteTrim";
@@ -1358,6 +1360,10 @@ export default function App() {
       catch (e) { failed += 1; lastError = errText(e); }
     }
     const isMove = ["trash", "spam", "archive", "inbox"].includes(action);
+    if (action === "spam" || (action === "inbox" && imapRole === "spam")) {
+      const rows = imap.rows.filter((r) => done.some((d) => d.uid === r.uid));
+      trainImap(account, folderName, rows.map((r) => ({ uid: r.uid, subject: r.subject, from: r.from })), action === "spam");
+    }
     if (isMove) {
       for (const d of done) imap.remove(d.uid);
       if (imapUid !== null && done.some((d) => d.uid === imapUid)) setImapUid(null);
@@ -1465,6 +1471,7 @@ export default function App() {
             {compose ? <main className="reader" aria-label="Nowa wiadomość">{composeNode}</main> : <ImapReader account={imapAccount} folder={imap.folder} role={imapRole} uid={imapUid} keys={imapSel.size === 0} pending={imapPending} onPendingDone={() => setImapPending(null)}
               onCompose={(k, m) => composeFromImap(imapAccount, k, m)}
               onMail={(to, sub, b) => composeTo("imap:" + imapAccount, to, sub, b)}
+              onSenderSpam={(n) => { setImapUid(null); void imap.refresh(); showToast(n > 0 ? `Przeniesiono do Spamu: ${n}. Nadawca zablokowany.` : "Nadawca zablokowany."); }}
               onCalendar={calFromMail}
               onEditDraft={(m) => editImapDraft(imapAccount, m)}
               onMoved={(i) => imapMoved(imapAccount, i.folder, [{ uid: i.uid, out: i.out }], MOVE_TEXT[i.action] ?? "Gotowe.")}
@@ -1649,7 +1656,18 @@ export default function App() {
                   {(() => {
                     const t = replyTarget(detail.messages);
                     return t && !t.mine ? (
-                      <button title="Opcje nadawcy" aria-label="Opcje nadawcy" onClick={() => setSenderDlg({ email: t.fromEmail })}><ActIcon n="user"/></button>
+                      <>
+                        <button title="Opcje nadawcy" aria-label="Opcje nadawcy" onClick={() => setSenderDlg({ email: t.fromEmail })}><ActIcon n="user"/></button>
+                        {email && !needsReauth && (
+                          <SenderSpamButton kind="gmail" account={email} email={t.fromEmail.toLowerCase()} onError={showToast}
+                            onDone={(n) => {
+                              setThreads((prev) => prev.filter((x) => x.id !== detail.id));
+                              setOpenId(null); setDetail(null);
+                              showToast(n > 0 ? `Przeniesiono do Spamu: ${n}. Nadawca zablokowany.` : "Nadawca zablokowany.");
+                              reloadRef.current();
+                            }} />
+                        )}
+                      </>
                     ) : null;
                   })()}
                   <span className="sep" />

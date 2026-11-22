@@ -974,6 +974,60 @@ pub async fn thread_action(state: &AppState, id: &str, action: &str) -> Result<(
     Ok(())
 }
 
+// ---------- Spam i blokada nadawcy ----------
+
+/// Najwięcej wiadomości przenoszonych naraz przez „Spam i zablokuj nadawcę”.
+pub const SENDER_SPAM_CAP: usize = 2000;
+
+/// Identyfikatory wiadomości od nadawcy poza Spamem i Koszem (adres musi być wcześniej sprawdzony).
+pub async fn sender_message_ids(state: &AppState, email: &str, cap: usize) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct MsgRef {
+        id: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MsgList {
+        #[serde(default)]
+        messages: Vec<MsgRef>,
+        #[serde(default)]
+        next_page_token: Option<String>,
+    }
+    if email.chars().any(|c| c.is_whitespace() || c == '"' || c == '(' || c == ')') {
+        return Err("Niepoprawny adres nadawcy.".to_string());
+    }
+    let token = access_token(state).await?;
+    let q = format!("from:{email} -in:spam -in:trash");
+    let mut out: Vec<String> = Vec::new();
+    let mut page: Option<String> = None;
+    loop {
+        let mut params: Vec<(&str, &str)> = vec![("q", q.as_str()), ("maxResults", "500")];
+        if let Some(p) = page.as_deref() {
+            params.push(("pageToken", p));
+        }
+        let list: MsgList = get_json(&state.http, &token, "messages", &params).await?;
+        for m in list.messages {
+            if check_id(&m.id).is_ok() && out.len() < cap {
+                out.push(m.id);
+            }
+        }
+        match list.next_page_token {
+            Some(t) if out.len() < cap && !t.is_empty() => page = Some(t),
+            _ => break,
+        }
+    }
+    Ok(out)
+}
+
+/// Przenosi wiadomości do Spamu (etykieta SPAM, bez INBOX) paczkami po 1000.
+pub async fn batch_spam(state: &AppState, ids: &[String]) -> Result<(), String> {
+    for chunk in ids.chunks(1000) {
+        let body = serde_json::json!({ "ids": chunk, "addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"] });
+        post_json(state, "messages/batchModify", &body).await?;
+    }
+    Ok(())
+}
+
 // ---------- Źródło wiadomości ----------
 
 /// Surowa wiadomość (RFC 822) do podglądu źródła – tylko na żądanie użytkownika, bez zmiany stanu wiadomości.

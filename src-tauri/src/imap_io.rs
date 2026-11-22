@@ -1111,6 +1111,69 @@ async fn act_inner(conn: &mut Conn, folder: &str, uid: u32, action: &str) -> Res
     }
 }
 
+// ---------- Spam i blokada nadawcy ----------
+
+/// Najwięcej wiadomości IMAP przenoszonych naraz (każda to osobne polecenie na serwerze).
+const SENDER_SPAM_CAP: usize = 500;
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderSpamOut {
+    /// Ile wiadomości od nadawcy znaleziono poza Spamem, Koszem, Wysłanymi i Roboczymi.
+    pub found: usize,
+    pub moved: usize,
+    /// Prawda, gdy wiadomości jest więcej niż limit jednego przeniesienia.
+    pub more: bool,
+}
+
+/// „Spam i zablokuj nadawcę” dla konta IMAP. Z `apply = false` tylko liczy (do potwierdzenia).
+/// Z `apply = true` przenosi do Spamu i dopisuje nadawcę do listy zablokowanych.
+#[tauri::command]
+pub async fn imap_sender_spam(app: tauri::AppHandle, account: String, email: String, apply: bool) -> Result<SenderSpamOut, String> {
+    let e = email.trim().to_lowercase();
+    if !crate::contacts::valid_email(&e) {
+        return Err("Niepoprawny adres nadawcy.".to_string());
+    }
+    if e.eq_ignore_ascii_case(account.trim()) {
+        return Err("To Twój własny adres – nie można go zablokować.".to_string());
+    }
+    let creds = load(&account)?;
+    let mut conn = open(&creds).await?;
+    let res = sender_spam_inner(&mut conn, &e, apply).await;
+    conn.bye().await;
+    let out = res?;
+    if apply {
+        crate::commands::add_sender_rule(app, "blocked".to_string(), e)?;
+    }
+    Ok(out)
+}
+
+async fn sender_spam_inner(conn: &mut Conn, email: &str, apply: bool) -> Result<SenderSpamOut, String> {
+    let folders = list_folders(conn).await?;
+    let target = folders.iter().find(|f| f.role == "spam").map(|f| f.name.clone()).ok_or("Nie znaleziono folderu Spam.")?;
+    let mut hits: Vec<(String, u32)> = Vec::new();
+    for f in folders.iter().filter(|f| !["spam", "trash", "sent", "drafts"].contains(&f.role.as_str())) {
+        if conn.select(&f.name).await.is_err() {
+            continue;
+        }
+        let Ok(r) = conn.ok(&format!("UID SEARCH FROM {}", p::quote(email)?)).await else { continue };
+        for u in &r.untagged {
+            if let Some(rest) = u.head.strip_prefix("* SEARCH") {
+                hits.extend(rest.split_whitespace().filter_map(|x| x.parse::<u32>().ok()).map(|uid| (f.name.clone(), uid)));
+            }
+        }
+    }
+    let mut out = SenderSpamOut { found: hits.len(), moved: 0, more: hits.len() > SENDER_SPAM_CAP };
+    if apply {
+        for (folder, uid) in hits.iter().take(SENDER_SPAM_CAP) {
+            if move_msg(conn, folder, *uid, &target).await.is_ok() {
+                out.moved += 1;
+            }
+        }
+    }
+    Ok(out)
+}
+
 // ---------- Sprawdzanie poczty w tle: filtr spamu i powiadomienia ----------
 
 #[derive(Serialize)]
@@ -1182,8 +1245,19 @@ async fn poll_inner(
     }
     let verdicts = spam_io::evaluate_imap(app, spam, &state.http, &cands).await;
     let mut moved_uids: Vec<u32> = Vec::new();
+    // Nowe wiadomości od zablokowanych nadawców trafiają od razu do Spamu (bez względu na ustawienia filtra).
+    if let Ok((_, block)) = spam_io::filters_data(app) {
+        for r in unread.iter().copied() {
+            if block.is_blocked(&p::bare_addr(&r.from).to_ascii_lowercase()) && act_inner(conn, &inbox, r.uid, "spam").await.is_ok() {
+                moved_uids.push(r.uid);
+            }
+        }
+    }
     for v in &verdicts {
         let uid = cand_rows[v.idx].uid;
+        if moved_uids.contains(&uid) {
+            continue;
+        }
         if act_inner(conn, &inbox, uid, "spam").await.is_ok() {
             spam_io::imap_moved(app, spam, &cands[v.idx], &v.reason);
             moved_uids.push(uid);

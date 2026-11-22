@@ -7,6 +7,8 @@ import { MessageMeta } from "./MessageMeta";
 import { PgpMessage } from "./PgpMessage";
 import { RiskBanner } from "./RiskBanner";
 import { MuteButton } from "./MuteButton";
+import { SenderSpamButton } from "./SenderSpamButton";
+import { trainImap } from "./imapTrain";
 import type { ImapActOut, ImapFolder, ImapMsg, ImapRow, MessageView } from "./types";
 import { commandFor, isTypingTarget } from "./shortcuts";
 import { fmtDate, fmtFull } from "./util";
@@ -272,9 +274,11 @@ interface ReaderProps {
   onChanged: (uid: number, patch: Partial<ImapRow> | "removed") => void;
   /** Nowa wiadomość z tego konta (np. wypisanie z listy przez e-mail). */
   onMail?: (to: string, subject: string, body: string) => void;
+  /** Po „Spam i zablokuj nadawcę”: liczba przeniesionych wiadomości. */
+  onSenderSpam?: (moved: number) => void;
 }
 
-export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onCalendar, onMoved, onEditDraft, pending, onPendingDone, onMail, keys = true }: ReaderProps) {
+export function ImapReader({ account, folder, role, uid, onChanged, onCompose, onCalendar, onMoved, onEditDraft, pending, onPendingDone, onMail, onSenderSpam, keys = true }: ReaderProps) {
   const [msg, setMsg] = useState<ImapMsg | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -306,6 +310,9 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
     setErr(null);
     try {
       const out = await api.imapAct(account, folder, msg.uid, action);
+      if (action === "spam" || (action === "inbox" && role === "spam")) {
+        trainImap(account, folder, [{ uid: msg.uid, subject: msg.subject, from: msg.from, text: msg.text }], action === "spam");
+      }
       if (["trash", "spam", "archive", "inbox"].includes(action)) {
         changed.current(msg.uid, "removed");
         onMovedRef.current?.({ action, folder, uid: msg.uid, out });
@@ -383,6 +390,10 @@ export function ImapReader({ account, folder, role, uid, onChanged, onCompose, o
               {role !== "sent" && role !== "drafts" && <MuteButton kind="i" account={account} item={msg.subject} onToast={(t) => setNote(t)} />}
               {role === "inbox" && <button title="Archiwizuj (e)" aria-label="Archiwizuj (e)" onClick={() => void act("archive")}><ActIcon n="archive"/></button>}
               {!["inbox", "trash", "spam"].includes(role) && <button title="Przenieś do skrzynki odbiorczej" aria-label="Przenieś do skrzynki odbiorczej" onClick={() => void act("inbox")}><ActIcon n="inbox"/></button>}
+              {!["spam", "sent", "drafts"].includes(role) && (
+                <SenderSpamButton kind="imap" account={account} email={emailOf(msg.from)} onError={(m) => setErr(m)}
+                  onDone={(n) => onSenderSpam?.(n)} />
+              )}
               {role === "spam" ? <button title="To nie jest spam – przenieś do skrzynki" aria-label="To nie jest spam – przenieś do skrzynki" onClick={() => void act("inbox")}><ActIcon n="notspam"/></button> : <button title="Oznacz jako spam (!)" aria-label="Oznacz jako spam (!)" onClick={() => void act("spam")}><ActIcon n="spam"/></button>}
               {role === "trash" ? <button title="Przywróć z kosza" aria-label="Przywróć z kosza" onClick={() => void act("inbox")}><ActIcon n="restore"/></button> : <button title="Usuń – przenieś do kosza (Delete)" aria-label="Usuń – przenieś do kosza (Delete)" onClick={() => void act("trash")}><ActIcon n="trash"/></button>}
             </div>

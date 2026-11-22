@@ -38,6 +38,7 @@ const PATHS = {
   collapse: "M7 5l5 5 5-5M7 19l5-5 5 5",
   bell: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4",
   mute: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4M3 3l18 18",
+  ban: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M5.6 5.6l12.8 12.8",
   lock: "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M12 15v2",
   seal: "M12 3l2 2h3v3l2 2-2 2v3h-3l-2 2-2-2H7v-3l-2-2 2-2V5h3zM9.5 10.5l2 2 3.5-3.5",
   key: "M15 3a6 6 0 1 0 0 12 6 6 0 0 0 0-12M10.5 13.5 3 21M6 18l2 2M15 7.5h.01",
@@ -52,7 +53,7 @@ const LABELS: Partial<Record<ActIconName, string>> = {
   star: "Gwiazdka", label: "Etykieta", edit: "Edytuj", expand: "Rozwiń", collapse: "Zwiń", selectAll: "Zaznacz",
   clear: "Zamknij", save: "Zapisz", send: "Wyślij", attach: "Załącznik", flag: "Flaga", filter: "Filtr", copy: "Kopiuj",
   paste: "Wklej", clock: "Zaplanuj", plus: "Dodaj", calendar: "Data", search: "Szukaj", dict: "Słownik", user: "Konto",
-  bell: "Wycisz", mute: "Wyciszone", lock: "Szyfruj", seal: "Podpisz", key: "Klucz",
+  bell: "Wycisz", mute: "Wyciszone", ban: "Zablokuj", lock: "Szyfruj", seal: "Podpisz", key: "Klucz",
 };
 
 export function ActIcon({ n, filled }: { n: ActIconName; filled?: boolean }) {

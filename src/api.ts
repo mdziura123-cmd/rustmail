@@ -240,6 +240,10 @@ export const api = {
   lockClear: (current: string) => invoke<void>("lock_clear", { current }),
   lockVerify: (pin: string) => invoke<boolean>("lock_verify", { pin }),
   lockEngage: () => invoke<boolean>("lock_engage"),
+  senderSpamCount: (email: string) => invoke<number>("sender_spam_count", { email }),
+  senderSpamApply: (email: string) => invoke<number>("sender_spam_apply", { email }),
+  imapSenderSpam: (account: string, email: string, apply: boolean) =>
+    invoke<{ found: number; moved: number; more: boolean }>("imap_sender_spam", { account, email, apply }),
   lockState: () => invoke<boolean>("lock_state"),
   pgpStatus: () => invoke<PgpStatus>("pgp_status"),
   pgpKeys: () => invoke<PgpKey[]>("pgp_keys"),
