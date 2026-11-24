@@ -50,14 +50,14 @@ export function StatusBar({ info, u, outboxCount, onOutbox }: Props) {
       {phase === "available" && u.info && (
         <>
           <span title={u.info.notes || undefined}>Dostępna nowa wersja <b>{u.info.latest}</b>. Zaktualizować?</span>
-          <button className="small solid" onClick={() => void u.install()}>Zaktualizuj</button>
+          <button className="small solid" onClick={u.ask}>Zaktualizuj…</button>
           <button className="small" onClick={u.dismiss}>Później</button>
         </>
       )}
       {(phase === "ready" || phase === "rolledback") && (
         <>
           <span>{phase === "ready" ? "Aktualizacja gotowa." : "Przywrócono poprzednią wersję."} Uruchom ponownie, aby ją zastosować.</span>
-          <button className="small solid" onClick={u.restart}>Uruchom ponownie</button>
+          <button className="small solid" onClick={() => void u.restart()}>Uruchom ponownie</button>
           <button className="small" onClick={u.dismiss}>Później</button>
         </>
       )}

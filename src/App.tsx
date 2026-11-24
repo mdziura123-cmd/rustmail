@@ -26,6 +26,7 @@ import { Compose } from "./Compose";
 import { MessageBody } from "./MessageBody";
 import { RiskBanner } from "./RiskBanner";
 import { MessageMeta } from "./MessageMeta";
+import { UpdateDialog } from "./UpdateDialog";
 import { PgpMessage } from "./PgpMessage";
 import { MuteButton } from "./MuteButton";
 import { SenderSpamButton } from "./SenderSpamButton";
@@ -44,7 +45,7 @@ import { buildForward, buildNew, buildReply, escapeHtml, replyTarget, type Compo
 import { sanitizeHtml } from "./sanitize";
 import { FOLDERS, type FolderId } from "./folders";
 import { StatusBar } from "./StatusBar";
-import { useUpdater } from "./useUpdater";
+import { updateGate, useUpdater } from "./useUpdater";
 import { fmtDate, fmtFull } from "./util";
 import { logEvent } from "./eventLog";
 import { listen } from "@tauri-apps/api/event";
@@ -933,8 +934,8 @@ export default function App() {
   }, [view]);
   useEffect(() => {
     if (!email) return;
-    void pollOnce();
-    const t = window.setInterval(() => void pollOnce(), 60_000);
+    void updateGate.run(pollOnce);
+    const t = window.setInterval(() => void updateGate.run(pollOnce), 60_000);
     return () => window.clearInterval(t);
   }, [email, pollOnce, view, activeOnly]);
   // Konta IMAP (np. WP): filtr spamu i powiadomienia, co minutę (niezależnie od Gmaila).
@@ -959,8 +960,8 @@ export default function App() {
   const imapKey = imapAccs.map((a) => a.email).join("|");
   useEffect(() => {
     if (!imapKey) return;
-    void imapPollOnce();
-    const t = window.setInterval(() => void imapPollOnce(), 60_000);
+    void updateGate.run(imapPollOnce);
+    const t = window.setInterval(() => void updateGate.run(imapPollOnce), 60_000);
     return () => window.clearInterval(t);
   }, [imapKey, imapPollOnce, view, activeOnly]);
   // Gdy okno znika do zasobnika, od razu sprawdź wszystkie konta (potem robi to timer co minutę).
@@ -974,15 +975,16 @@ export default function App() {
       const now = Date.now();
       if (now - lastShow < 3000) return;
       lastShow = now;
-      void pollRef.current();
-      void imapPollOnce();
+      if (updateGate.busy) return;
+      void updateGate.run(pollRef.current);
+      void updateGate.run(imapPollOnce);
       if (imapAccountRef.current) imapViewRef.current.refresh();
       else reloadRef.current();
     };
     const onVis = () => {
       if (document.visibilityState === "hidden") {
-        void pollRef.current();
-        void imapPollOnce();
+        void updateGate.run(pollRef.current);
+        void updateGate.run(imapPollOnce);
       } else onShow();
     };
     document.addEventListener("visibilitychange", onVis);
@@ -1038,8 +1040,8 @@ export default function App() {
         if (woke > 0) { playSound(soundRef.current); void refreshLater(); void pollRef.current(); }
       } catch (e) { logEvent("Odłożone", "Odłożone wiadomości: " + errText(e)); }
     };
-    void tick();
-    const t = window.setInterval(() => void tick(), 30_000);
+    void updateGate.run(tick);
+    const t = window.setInterval(() => void updateGate.run(tick), 30_000);
     return () => window.clearInterval(t);
   }, [email, imapKey, refreshLater, showToast]);
   // Synchronizacja danych lokalnych przez wybrany folder: przy starcie i co 15 minut (jeśli folder jest ustawiony).
@@ -1052,8 +1054,8 @@ export default function App() {
         }
       } catch (e) { logEvent("Synchronizacja", errText(e)); }
     };
-    void run();
-    const t = window.setInterval(() => void run(), 15 * 60_000);
+    void updateGate.run(run);
+    const t = window.setInterval(() => void updateGate.run(run), 15 * 60_000);
     return () => window.clearInterval(t);
   }, []);
   // Przypomnienia z kalendarza lokalnego (działają bez względu na to, czy jakieś konto jest zalogowane).
@@ -1106,7 +1108,7 @@ export default function App() {
   }, [loadList, loadDetail]);
   useEffect(() => {
     if (!email) return;
-    const t = window.setInterval(() => void syncOnce(), 60_000);
+    const t = window.setInterval(() => void updateGate.run(syncOnce), 60_000);
     return () => window.clearInterval(t);
   }, [email, syncOnce]);
 
@@ -1808,6 +1810,7 @@ export default function App() {
             showToast("Podpis zapisany.");
           }} />
       )}
+      <UpdateDialog u={updater} />
       {locked && <LockScreen />}
     </div>
   );

@@ -514,3 +514,32 @@ img.emo.big { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
 .rail-acc .acc-pop { left: calc(100% + 8px); right: auto; top: auto; bottom: 0; }
 @media (prefers-reduced-motion: no-preference) { .rail-acc .acc-pop { animation: none; } }
 .rail-acc .av-btn .av { width: 30px; height: 30px; font-size: 14px; }
+
+/* Okno aktualizacji – zasłania całą aplikację na czas instalacji */
+.upd-back { z-index: 90; background: var(--backdrop); }
+.upd-box { width: min(460px, 100%); outline: none; }
+.upd-box h3 { margin: 4px 0 0; text-align: center; }
+.upd-badge { width: 56px; height: 56px; margin: 0 auto; border-radius: 50%; display: grid; place-items: center; background: var(--sel); color: var(--accent); }
+.upd-badge svg { width: 28px; height: 28px; }
+.upd-badge.ok { color: #1e7a3c; }
+.upd-badge.err { color: #b3261e; }
+.upd-ver { display: flex; justify-content: center; align-items: center; gap: 10px; font-size: 15px; color: var(--muted); }
+.upd-ver b { color: var(--accent); font-size: 17px; }
+.upd-notes { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--panel-2); max-height: 180px; overflow-y: auto; }
+.upd-notes-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.upd-notes ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; }
+.upd-steps { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 8px; }
+.upd-steps li { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.upd-steps li.now { color: var(--ink); font-weight: 600; }
+.upd-steps li.done { color: var(--ink); }
+.upd-dot { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 11px; color: var(--accent-ink); }
+.upd-steps li.done .upd-dot { background: var(--accent); border-color: var(--accent); }
+.upd-steps li.now .upd-dot { border-color: var(--accent); border-top-color: transparent; }
+.upd-pct { margin-left: auto; font-variant-numeric: tabular-nums; }
+.upd-bar { width: 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  .upd-steps li.now .upd-dot { animation: upd-spin .9s linear infinite; }
+  .upd-box { animation: cal-rise .25s ease-out both; }
+}
+@keyframes upd-spin { to { transform: rotate(360deg); } }
+.upd-bar { flex: none; }

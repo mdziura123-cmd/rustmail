@@ -6,12 +6,39 @@ import type { UpdateInfo, UpdateState } from "./types";
 export type Phase =
   | "idle" | "checking" | "available" | "installing" | "ready" | "uptodate" | "rolledback" | "error";
 
+/** Etap instalacji: wait = kończenie pracy w tle, potem kroki zgłaszane przez backend. */
+export type Stage = "wait" | "prepare" | "download" | "checksum" | "install";
+
+/** Bramka pracy w tle: na czas aktualizacji i ponownego uruchomienia nowe zadania (sprawdzanie poczty,
+ *  wysyłka kolejki, synchronizacja) nie startują, a trwające są dokańczane przed podmianą plików. */
+export const updateGate = {
+  busy: false,
+  active: 0,
+  /** Uruchamia zadanie w tle, chyba że trwa aktualizacja. */
+  async run(f: () => Promise<unknown> | unknown) {
+    if (updateGate.busy) return;
+    updateGate.active += 1;
+    try { await f(); } finally { updateGate.active -= 1; }
+  },
+  /** Zamyka bramkę i czeka (najwyżej `ms`), aż trwające zadania się skończą. */
+  async drain(ms = 30_000) {
+    updateGate.busy = true;
+    const end = Date.now() + ms;
+    while (updateGate.active > 0 && Date.now() < end) await new Promise((r) => setTimeout(r, 200));
+  },
+};
+
 export function useUpdater(autoCheck: boolean) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<UpdateState | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [stage, setStage] = useState<Stage>("wait");
+  /** Okno aktualizacji: potwierdzenie przed instalacją. */
+  const [asking, setAsking] = useState(false);
+  /** Czy ostatni błąd pochodzi z instalacji (wtedy pokazuje go okno aktualizacji). */
+  const [installFailed, setInstallFailed] = useState(false);
   const phaseRef = useRef<Phase>("idle");
   const manualRef = useRef(false);
   const dismissed = useRef<string | null>(null);
@@ -53,6 +80,13 @@ export function useUpdater(autoCheck: boolean) {
     return () => { dead = true; off?.(); };
   }, []);
 
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let dead = false;
+    listen<Stage>("update-stage", (e) => setStage(e.payload)).then((f) => { if (dead) f(); else off = f; }).catch(() => {});
+    return () => { dead = true; off?.(); };
+  }, []);
+
   // „Masz najnowszą wersję” znika samo.
   useEffect(() => {
     if (phase !== "uptodate") return;
@@ -68,14 +102,20 @@ export function useUpdater(autoCheck: boolean) {
   }, [autoCheck, check]);
 
   const install = useCallback(async () => {
+    setAsking(false);
+    setInstallFailed(false);
     setProgress(null);
+    setStage("wait");
     set("installing");
+    await updateGate.drain();
     try {
       await api.installUpdate();
       set("ready");
       refreshState();
     } catch (e) {
+      updateGate.busy = false;
       setError(errText(e));
+      setInstallFailed(true);
       set("error");
     }
   }, [set, refreshState]);
@@ -91,17 +131,32 @@ export function useUpdater(autoCheck: boolean) {
     }
   }, [set, refreshState]);
 
-  const restart = useCallback(() => {
-    api.restartApp().catch((e) => { setError(errText(e)); set("error"); });
+  const [restarting, setRestarting] = useState(false);
+  const restart = useCallback(async () => {
+    setRestarting(true);
+    await updateGate.drain(15_000);
+    api.restartApp().catch((e) => { updateGate.busy = false; setRestarting(false); setError(errText(e)); set("error"); });
   }, [set]);
+
+  /** Po gotowej aktualizacji „Później”: praca w tle wraca, nowa wersja ruszy przy następnym uruchomieniu. */
+  const later = useCallback(() => {
+    updateGate.busy = false;
+    setReadyHidden(true);
+  }, []);
+  const [readyHidden, setReadyHidden] = useState(false);
 
   const dismiss = useCallback(() => {
     dismissed.current = info?.latest ?? null;
+    setAsking(false);
+    setInstallFailed(false);
     set("idle");
   }, [info, set]);
 
   const visible = phase !== "idle" && (phase !== "checking" || manualRef.current);
-  return { phase, info, error, state, progress, visible, check, install, rollback, restart, dismiss };
+  return {
+    phase, info, error, state, progress, visible, check, install, rollback, restart, dismiss,
+    stage, asking, ask: () => setAsking(true), cancelAsk: () => setAsking(false), installFailed, restarting, later, readyHidden,
+  };
 }
 
 export type Updater = ReturnType<typeof useUpdater>;

@@ -149,6 +149,7 @@ pub async fn check_update() -> Result<UpdateInfo, String> {
 pub async fn install_update(app: tauri::AppHandle) -> Result<String, String> {
     use tauri::Emitter;
     let appimage = appimage_path()?;
+    let _ = app.emit("update-stage", "prepare");
     let c = client()?;
     let r = fetch_release(&c).await?;
     if r.draft || r.prerelease || !is_newer(&r.tag_name, env!("CARGO_PKG_VERSION")) {
@@ -190,6 +191,7 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<String, String> {
         return Err("Podpis wydania jest niepoprawny – aktualizacja przerwana.".to_string());
     }
 
+    let _ = app.emit("update-stage", "download");
     let tmp = with_suffix(&appimage, ".new");
     let cleanup = || {
         let _ = fs::remove_file(&tmp);
@@ -241,12 +243,14 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<String, String> {
     }
     drop(file);
 
+    let _ = app.emit("update-stage", "checksum");
     let actual = format!("{:x}", hasher.finalize());
     if actual != expected {
         cleanup();
         return Err("Suma SHA-256 pobranego pliku nie zgadza się z sumą z wydania. Aktualizacja przerwana.".to_string());
     }
 
+    let _ = app.emit("update-stage", "install");
     fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
     let prev = with_suffix(&appimage, ".previous");
     fs::copy(&appimage, &prev).map_err(|e| format!("Nie udało się zachować poprzedniej wersji: {e}"))?;
