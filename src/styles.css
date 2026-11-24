@@ -498,3 +498,19 @@ img.emo.big { width: 26px; height: 26px; vertical-align: middle; margin: 0; }
 /* Podkreślenie błędnych słów (warstwa nad edytorem) */
 .spell-overlay { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
 .spell-mark { position: absolute; height: 3px; background: repeating-linear-gradient(135deg, #d33 0 2px, transparent 2px 4px); border-bottom: 1px solid #d33; }
+
+/* Boczna belka modułów (jak w BlueMail): Poczta i Kalendarz u góry, pogoda, ustawienia i konto na dole */
+.rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; background: var(--panel-2); border-right: 1px solid var(--line); overflow: visible; min-height: 0; }
+.rail-grow { flex: 1; }
+.rail-btn { width: 52px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font: inherit; font-size: 10px; cursor: pointer; }
+.rail-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.rail-btn:hover { background: var(--sel); color: var(--ink); }
+.rail-btn.active { background: var(--sel); color: var(--accent); }
+.rail-btn.wx { font-size: 11px; color: var(--ink); }
+.rail-btn.wx .wx-ico { font-size: 20px; }
+.rail-acc { padding-top: 6px; }
+.rail-acc .acc-avatar { height: auto; }
+.rail-acc .av-btn { width: 36px; height: 36px; }
+.rail-acc .acc-pop { left: calc(100% + 8px); right: auto; top: auto; bottom: 0; }
+@media (prefers-reduced-motion: no-preference) { .rail-acc .acc-pop { animation: none; } }
+.rail-acc .av-btn .av { width: 30px; height: 30px; font-size: 14px; }

@@ -1397,22 +1397,40 @@ export default function App() {
             else { clearSearch(); void loadList(folder, null, false); }
           }}
           placeholder={imapAccount ? "Szukaj w tym folderze…" : "Szukaj w poczcie…"} />
-      ) : undefined}>
-        {wx.pref && (
-          <button className="wx-chip" onClick={() => setWxOpen(true)}
-            title={wx.data ? `${wx.pref.name}: ${describeWx(wx.data.code, wx.data.isDay).text}` : wx.pref.name}
-            aria-label={"Pogoda: " + (wx.data ? `${wx.pref.name}, ${describeWx(wx.data.code, wx.data.isDay).text}, ${fmtTemp(wx.data.temp)}C` : wx.pref.name)}>
-            {wx.data ? <><WxIcon code={wx.data.code} isDay={wx.data.isDay} /><span>{fmtTemp(wx.data.temp)}C</span></> : <span>…</span>}
+      ) : undefined} />
+      <div className="panes" style={{ gridTemplateColumns: `60px ${left.width}px 6px ${mid.width}px 6px 1fr` }}>
+        <nav className="rail" aria-label="Moduły">
+          <button className="rail-btn active" aria-current="page" title="Poczta" aria-label="Poczta">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
+            <span>Poczta</span>
           </button>
-        )}
-        {email && (
-          <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
-            label={imapAccount ?? email} busy={signingIn}
-            onGmail={(a) => { changeView("gmail"); if (a !== email) void switchAccount(a); }}
-            onImap={(a) => changeView("imap:" + a)} />
-        )}
-      </Titlebar>
-      <div className="panes" style={{ gridTemplateColumns: `${left.width}px 6px ${mid.width}px 6px 1fr` }}>
+          <button className="rail-btn" title="Kalendarz (osobne okno)" aria-label="Kalendarz"
+            onClick={() => void api.openCalendarWindow().catch((e) => showToast(errText(e)))}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
+            <span>Kalendarz</span>
+          </button>
+          <span className="rail-grow" />
+          {wx.pref && (
+            <button className="rail-btn wx" onClick={() => setWxOpen(true)}
+              title={wx.data ? `${wx.pref.name}: ${describeWx(wx.data.code, wx.data.isDay).text}` : wx.pref.name}
+              aria-label={"Pogoda: " + (wx.data ? `${wx.pref.name}, ${describeWx(wx.data.code, wx.data.isDay).text}, ${fmtTemp(wx.data.temp)}C` : wx.pref.name)}>
+              {wx.data ? <WxIcon code={wx.data.code} isDay={wx.data.isDay} /> : <span>…</span>}
+              {wx.data && <span>{fmtTemp(wx.data.temp)}C</span>}
+            </button>
+          )}
+          <button className="rail-btn" title="Ustawienia" aria-label="Ustawienia" onClick={() => setSettingsOpen(true)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" /></svg>
+            <span>Ustawienia</span>
+          </button>
+          {email && (
+            <div className="rail-acc">
+              <AccountSwitcher gmail={accounts.length ? accounts : [{ email, active: true }]} imap={imapAccs} view={view}
+                label={imapAccount ?? email} busy={signingIn}
+                onGmail={(a) => { changeView("gmail"); if (a !== email) void switchAccount(a); }}
+                onImap={(a) => changeView("imap:" + a)} />
+            </div>
+          )}
+        </nav>
         <aside className="sidebar" aria-label="Foldery">
           <div className="brand">
             <svg viewBox="0 0 24 24" className="logo" aria-hidden="true">
@@ -1709,8 +1727,7 @@ export default function App() {
         )}
       </div>
 
-      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} onCalendar={() => void api.openCalendarWindow().catch((e) => showToast(errText(e)))}
-        onSettings={() => setSettingsOpen(true)} />
+      <StatusBar info={info} u={updater} outboxCount={email ? outbox.length + scheduled.length + snoozed.length : 0} onOutbox={() => setOutboxOpen(true)} />
 
       {toast && (
         <div className="toast" role="status" key={toast.key}>
